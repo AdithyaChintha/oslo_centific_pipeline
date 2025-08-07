@@ -9,3 +9,15 @@ transformers
 librosa
 numpy
 pyyaml
+
+
+#deepface
+deepface
+tensorflow>=2.5.0
+keras>=2.5.0
+tf-keras
+
+#insightface
+insightface>=0.7
+onnxruntime  # Required if using CPU
+

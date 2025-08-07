@@ -205,3 +205,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+# Ignore all .jpg files
+*.jpg
+
+# Optionally ignore only inside outputs/
+outputs/**/*.jpg
+
+# Ignore __pycache__ and compiled Python files
+__pycache__/
+*.pyc
