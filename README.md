@@ -5,7 +5,7 @@ Pre-annotation Video segmentation pipeline for Insta360 video
 
 # Ray pipeline
 
-video_segmentation_ray_pipeline/
+insta360-video-activity-segmentation/
 ├── config/
 │   └── azure_blob_config.yaml
 ├── ray_jobs/
