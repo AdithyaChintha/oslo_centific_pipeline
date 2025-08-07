@@ -1,29 +1,34 @@
-# insta360-video-activity-segmentation
-Pre-annotation Video segmentation pipeline for Insta360 video
+# 🎥 Video Age Detection Pipeline
+
+A modular pipeline for detecting **age** and **gender** of individuals in a video using [DeepFace](https://github.com/serengil/deepface). The script samples frames from the input video, analyzes each detected face, and outputs structured results in JSON format.
+
+---
+
+## ⚙️ Setup Instructions
 
 
 
-# Ray pipeline
+###
+Install required packages
 
-insta360-video-activity-segmentation/
-├── config/
-│   └── azure_blob_config.yaml
-├── ray_jobs/
-│   ├── upload_manager.py
-|   ├── insv_to_mp4.py
-│   ├── download_manager.py
-│   ├── video_splitter.py
-│   ├── scene_change.py
-│   ├── vad_audio.py
-│   ├── motion_energy.py
-│   ├── embeddings_driver.py
-│   ├── yolo_sort_tracker.py
-│   ├── fusion_gap_merge.py
-│   ├── quality_flagger.py
-│   ├── segment_classifier.py
-│   └── ray_driver.py
-├── utils/
-│   ├── blob_utils.py
-│   └── logger.py
-├── ray_pipeline.py
-└── requirements.txt
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+---
+
+## 🚀 How to Run
+
+Run DeepFace-based age and gender detection:
+
+```bash
+python src/deepfacedetect.py /path/to/video.mp4
+```
+
+This will:
+
+- Sample frames at intervals (e.g., every 30 frames)
+- Detect faces
+- Estimate age and gender
+- Save output to `outputs/<video_name>/predictions.json`
