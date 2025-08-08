@@ -22,8 +22,18 @@ insta360-video-activity-segmentation/
 │   ├── quality_flagger.py
 │   ├── segment_classifier.py
 │   └── ray_driver.py
+├── tests/
+│   ├── ray_job_test.py
 ├── utils/
 │   ├── blob_utils.py
 │   └── logger.py
 ├── ray_pipeline.py
 └── requirements.txt
+
+
+# Tests
+Tests can be run as individual jobs using the command below
+
+    ``` shell
+    /home/nvcoe_admin/miniconda3/envs/py311/bin/python /home/nvcoe_admin/code/oslo/insta360-video-activity-segmentation/tests/ray_job_test
+    ```
