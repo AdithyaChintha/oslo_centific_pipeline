@@ -16,10 +16,8 @@ yolo_detection_r/
 
 ## ⚙️ Setup
 1. Python 3.8+
-2. Install dependencies:
-```bash
-pip install ultralytics opencv-python
-```
+2. Install dependencies(See requirements.txt)
+
 
 ## 🚀 How to Run
 
