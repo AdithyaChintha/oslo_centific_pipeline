@@ -56,7 +56,3 @@ The resulting video will have bounding boxes and labels overlaid on detected fra
 {"cls": "person", "start": 0.167, "end": 38.205, "duration": 38.038, "max_conf": 0.9187, "count": 20}
 ```
 
-## 🛠 Development Notes
-- Image pre-processing (e.g., undistortion) can be injected via `detect_events_raw(..., preprocess=func)`.
-- Merging strategy (by class, by `track_id`) can be customized via `merge_events_to_spans(..., key_fn=...)`.
-- Utility functions in `utils/` are reusable for other projects.
