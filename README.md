@@ -5,7 +5,7 @@ Supports saving detection results as JSONL, merging them into “state-style” 
 
 ## 📂 Project Structure
 ```
-yolo_detection/
+yolo_detection_r/
 ├── detection_module.py          # Core detection / merging / JSON writing functions
 ├── run_detection_demo.py        # Test script (run detection + merge)
 ├── test_overlay_from_events.py  # Test script (overlay events.jsonl on the video)
