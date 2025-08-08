@@ -1,0 +1,49 @@
+=== 360° HOME ACTIVITY ANALYSIS REPORT ===
+
+Generated: 2025-08-08 12:11:50
+Analysis Version: 1.0 (Core Segmentation)
+
+=== VIDEO INFORMATION ===
+Video: VID_20250720_152154_00_011.mp4
+Full Path: input\VID_20250720_152154_00_011.mp4
+Duration: 39.6 seconds (0.7 minutes)
+Processing Time: 474.1 seconds
+Processing Speed: 0.1x real-time
+Total Segments Found: 0
+
+=== MOTION STATISTICS ===
+Total Frames Analyzed: 1186
+Average Motion Energy: 0.0151
+Peak Motion Energy: 1.0000
+Minimum Motion Energy: 0.0000
+Motion Variance: 0.001064
+Motion Standard Deviation: 0.0326
+
+Activity Level Breakdown:
+  High Activity: 0.1% of video (1 frames)
+  Medium Activity: 0.0% of video (0 frames)
+  Low Activity: 99.9% of video (1185 frames)
+
+=== ACTIVITY SEGMENTS ===
+No activity segments detected.
+
+Possible reasons:
+- Video contains mostly static scenes
+- Motion detection sensitivity too low
+- Activities too brief (< 30 seconds)
+- Video quality issues
+
+=== ANALYSIS CONFIGURATION ===
+High Motion Threshold: 0.4
+Medium Motion Threshold: 0.15
+Minimum Activity Duration: 3.0 seconds
+Background Subtraction History: 5000 frames
+Foreground Area Threshold: 100 pixels
+Confidence Threshold: 0.2
+
+=== RECOMMENDATIONS ===
+- No segments detected: Try 'high' sensitivity mode
+- Verify video contains human activities
+- Check video is not corrupted or mostly black frames
+
+=== END OF REPORT ===
