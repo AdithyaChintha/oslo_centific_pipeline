@@ -9,3 +9,5 @@ transformers
 librosa
 numpy
 pyyaml
+pillow
+onnxruntime-gpu
