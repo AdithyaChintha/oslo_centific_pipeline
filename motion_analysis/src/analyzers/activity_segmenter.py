@@ -67,21 +67,21 @@ class ActivitySegmenter:
             video_processor: Video processor instance (creates new if None)
         """
         logger.info("Initializing ActivitySegmenter")
-        print(f"[DEBUG] ActivitySegmenter.__init__() starting")
+        logger.debug(f"ActivitySegmenter.__init__() starting")
         
         # Initialize components
         self.motion_detector = motion_detector or MotionDetector()
         self.video_processor = video_processor or Video360Processor()
         
-        print(f"[DEBUG] Motion detector initialized: {type(self.motion_detector).__name__}")
-        print(f"[DEBUG] Video processor initialized: {type(self.video_processor).__name__}")
+        logger.debug(f"Motion detector initialized: {type(self.motion_detector).__name__}")
+        logger.debug(f"Video processor initialized: {type(self.video_processor).__name__}")
         
         # Initialize state
         self.current_video_info = None
         self.processing_start_time = None
         
         logger.info("ActivitySegmenter initialized successfully")
-        print(f"[DEBUG] ActivitySegmenter initialization completed")
+        logger.debug(f"ActivitySegmenter initialization completed")
     
     def analyze_video(self, video_path: str, save_annotated: bool = SAVE_ANNOTATED_VIDEO,
                      save_motion_data: bool = SAVE_MOTION_DATA,
@@ -100,108 +100,108 @@ class ActivitySegmenter:
         """
         logger.info(f"Starting video analysis: {video_path}")
         print(f"[DEBUG] ==" * 10)
-        print(f"[DEBUG] analyze_video() starting")
-        print(f"[DEBUG] Video path: {video_path}")
-        print(f"[DEBUG] Save annotated: {save_annotated}")
-        print(f"[DEBUG] Save motion data: {save_motion_data}")
-        print(f"[DEBUG] Output directory: {output_dir}")
+        logger.debug(f"analyze_video() starting")
+        logger.debug(f"Video path: {video_path}")
+        logger.debug(f"Save annotated: {save_annotated}")
+        logger.debug(f"Save motion data: {save_motion_data}")
+        logger.debug(f"Output directory: {output_dir}")
         print(f"[DEBUG] ==" * 10)
         
         # Start timing
         self.processing_start_time = time.time()
-        print(f"[DEBUG] Processing start time recorded: {self.processing_start_time}")
+        logger.debug(f"Processing start time recorded: {self.processing_start_time}")
         
         # Create output directory
         try:
             os.makedirs(output_dir, exist_ok=True)
-            print(f"[DEBUG] Output directory created/verified: {output_dir}")
+            logger.debug(f"Output directory created/verified: {output_dir}")
         except Exception as e:
-            print(f"[DEBUG] ERROR creating output directory: {e}")
+            logger.debug(f"ERROR creating output directory: {e}")
             raise
         
         # Get video information and validate
-        print(f"[DEBUG] Getting video information...")
+        logger.debug(f"Getting video information...")
         try:
             self.current_video_info = self.video_processor.get_video_info(video_path)
-            print(f"[DEBUG] Video info retrieved successfully:")
-            print(f"[DEBUG]   Duration: {self.current_video_info.get('duration_seconds', 'unknown')} seconds")
-            print(f"[DEBUG]   Resolution: {self.current_video_info.get('width', 'unknown')}x{self.current_video_info.get('height', 'unknown')}")
-            print(f"[DEBUG]   FPS: {self.current_video_info.get('fps', 'unknown')}")
-            print(f"[DEBUG]   Total frames: {self.current_video_info.get('total_frames', 'unknown')}")
-            print(f"[DEBUG]   File size: {self.current_video_info.get('file_size_mb', 'unknown')} MB")
-            print(f"[DEBUG]   360° likely: {self.current_video_info.get('is_360_likely', 'unknown')}")
+            logger.debug(f"Video info retrieved successfully:")
+            logger.debug(f"  Duration: {self.current_video_info.get('duration_seconds', 'unknown')} seconds")
+            logger.debug(f"  Resolution: {self.current_video_info.get('width', 'unknown')}x{self.current_video_info.get('height', 'unknown')}")
+            logger.debug(f"  FPS: {self.current_video_info.get('fps', 'unknown')}")
+            logger.debug(f"  Total frames: {self.current_video_info.get('total_frames', 'unknown')}")
+            logger.debug(f"  File size: {self.current_video_info.get('file_size_mb', 'unknown')} MB")
+            logger.debug(f"  360° likely: {self.current_video_info.get('is_360_likely', 'unknown')}")
         except Exception as e:
-            print(f"[DEBUG] ERROR getting video info: {e}")
+            logger.debug(f"ERROR getting video info: {e}")
             raise
         
         # Validate 360° video
-        print(f"[DEBUG] Validating 360° video format...")
+        logger.debug(f"Validating 360° video format...")
         try:
             validation = self.video_processor.validate_360_video(video_path)
-            print(f"[DEBUG] Validation results:")
-            print(f"[DEBUG]   Is valid: {validation.get('is_valid', 'unknown')}")
+            logger.debug(f"Validation results:")
+            logger.debug(f"  Is valid: {validation.get('is_valid', 'unknown')}")
             
             # Log validation results
             if validation.get("warnings"):
-                print(f"[DEBUG] Validation warnings found: {len(validation['warnings'])}")
+                logger.debug(f"Validation warnings found: {len(validation['warnings'])}")
                 for i, warning in enumerate(validation["warnings"]):
                     logger.warning(warning)
-                    print(f"[DEBUG]   Warning {i+1}: {warning}")
+                    logger.debug(f"  Warning {i+1}: {warning}")
             
             if validation.get("recommendations"):
-                print(f"[DEBUG] Validation recommendations: {len(validation['recommendations'])}")
+                logger.debug(f"Validation recommendations: {len(validation['recommendations'])}")
                 for i, rec in enumerate(validation["recommendations"]):
                     logger.info(f"RECOMMENDATION: {rec}")
-                    print(f"[DEBUG]   Recommendation {i+1}: {rec}")
+                    logger.debug(f"  Recommendation {i+1}: {rec}")
         except Exception as e:
-            print(f"[DEBUG] ERROR during validation: {e}")
+            logger.debug(f"ERROR during validation: {e}")
             # Continue processing even if validation fails
         
         # Estimate processing time
-        print(f"[DEBUG] Estimating processing time...")
+        logger.debug(f"Estimating processing time...")
         try:
             time_estimate = self.video_processor.estimate_processing_time(self.current_video_info)
             estimated_minutes = time_estimate.get('estimated_minutes', 'unknown')
             logger.info(f"Estimated processing time: {estimated_minutes} minutes")
-            print(f"[DEBUG] Estimated processing time: {estimated_minutes} minutes")
-            print(f"[DEBUG] Processing factor: {time_estimate.get('processing_factor', 'unknown')}")
+            logger.debug(f"Estimated processing time: {estimated_minutes} minutes")
+            logger.debug(f"Processing factor: {time_estimate.get('processing_factor', 'unknown')}")
             
             if isinstance(estimated_minutes, (int, float)) and estimated_minutes > 30:
-                print(f"[DEBUG] WARNING: Long processing time expected!")
+                logger.debug(f"WARNING: Long processing time expected!")
         except Exception as e:
-            print(f"[DEBUG] ERROR estimating processing time: {e}")
+            logger.debug(f"ERROR estimating processing time: {e}")
             # Continue processing
         
         # Reset motion detector for new video
-        print(f"[DEBUG] Resetting motion detector...")
+        logger.debug(f"Resetting motion detector...")
         try:
             self.motion_detector.reset()
-            print(f"[DEBUG] Motion detector reset completed")
+            logger.debug(f"Motion detector reset completed")
         except Exception as e:
-            print(f"[DEBUG] ERROR resetting motion detector: {e}")
+            logger.debug(f"ERROR resetting motion detector: {e}")
             raise
         
         # Process video frame by frame
-        print(f"[DEBUG] Starting frame-by-frame processing...")
+        logger.debug(f"Starting frame-by-frame processing...")
         try:
             motion_timeline, annotated_frames = self._process_video_frames(video_path, save_annotated)
-            print(f"[DEBUG] Frame processing completed successfully")
-            print(f"[DEBUG] Motion timeline length: {len(motion_timeline)}")
-            print(f"[DEBUG] Annotated frames count: {len(annotated_frames)}")
+            logger.debug(f"Frame processing completed successfully")
+            logger.debug(f"Motion timeline length: {len(motion_timeline)}")
+            logger.debug(f"Annotated frames count: {len(annotated_frames)}")
             
             if len(motion_timeline) == 0:
-                print(f"[DEBUG] WARNING: Empty motion timeline!")
+                logger.debug(f"WARNING: Empty motion timeline!")
                 
         except Exception as e:
-            print(f"[DEBUG] ERROR during frame processing: {e}")
+            logger.debug(f"ERROR during frame processing: {e}")
             raise
         
         # Perform activity segmentation
-        print(f"[DEBUG] Starting activity segmentation...")
+        logger.debug(f"Starting activity segmentation...")
         try:
             segments = self._segment_activities(motion_timeline)
-            print(f"[DEBUG] Activity segmentation completed")
-            print(f"[DEBUG] Generated {len(segments)} activity segments")
+            logger.debug(f"Activity segmentation completed")
+            logger.debug(f"Generated {len(segments)} activity segments")
             
             # Debug: Print segment summary
             for i, segment in enumerate(segments[:5]):  # Show first 5 segments
@@ -209,36 +209,36 @@ class ActivitySegmenter:
                       f"type: {segment.activity_type}, confidence: {segment.confidence:.3f}")
                 
         except Exception as e:
-            print(f"[DEBUG] ERROR during segmentation: {e}")
+            logger.debug(f"ERROR during segmentation: {e}")
             # Set empty segments to continue processing
             segments = []
-            print(f"[DEBUG] Set empty segments list due to error")
+            logger.debug(f"Set empty segments list due to error")
         
         # Calculate processing time
         processing_time = time.time() - self.processing_start_time
-        print(f"[DEBUG] Total processing time calculated: {processing_time:.2f} seconds")
+        logger.debug(f"Total processing time calculated: {processing_time:.2f} seconds")
         
         # Get motion statistics
-        print(f"[DEBUG] Getting motion statistics...")
+        logger.debug(f"Getting motion statistics...")
         try:
             motion_stats = self.motion_detector.get_motion_statistics()
-            print(f"[DEBUG] Motion statistics retrieved:")
-            print(f"[DEBUG]   Total frames: {motion_stats.get('total_frames', 'unknown')}")
-            print(f"[DEBUG]   Avg motion energy: {motion_stats.get('avg_motion_energy', 'unknown'):.4f}")
-            print(f"[DEBUG]   Max motion energy: {motion_stats.get('max_motion_energy', 'unknown'):.4f}")
-            print(f"[DEBUG]   High activity %: {motion_stats.get('high_activity_percentage', 'unknown'):.1f}%")
-            print(f"[DEBUG]   Medium activity %: {motion_stats.get('medium_activity_percentage', 'unknown'):.1f}%")
-            print(f"[DEBUG]   Low activity %: {motion_stats.get('low_activity_percentage', 'unknown'):.1f}%")
+            logger.debug(f"Motion statistics retrieved:")
+            logger.debug(f"  Total frames: {motion_stats.get('total_frames', 'unknown')}")
+            logger.debug(f"  Avg motion energy: {motion_stats.get('avg_motion_energy', 'unknown'):.4f}")
+            logger.debug(f"  Max motion energy: {motion_stats.get('max_motion_energy', 'unknown'):.4f}")
+            logger.debug(f"  High activity %: {motion_stats.get('high_activity_percentage', 'unknown'):.1f}%")
+            logger.debug(f"  Medium activity %: {motion_stats.get('medium_activity_percentage', 'unknown'):.1f}%")
+            logger.debug(f"  Low activity %: {motion_stats.get('low_activity_percentage', 'unknown'):.1f}%")
         except Exception as e:
-            print(f"[DEBUG] ERROR getting motion statistics: {e}")
+            logger.debug(f"ERROR getting motion statistics: {e}")
             motion_stats = {}  # Set empty dict to continue
         
         # Detect high energy regions
-        print(f"[DEBUG] Detecting high energy regions...")
+        logger.debug(f"Detecting high energy regions...")
         try:
             fps = self.current_video_info["fps"]
             high_energy_regions = self._detect_high_energy_regions(motion_timeline, fps)
-            print(f"[DEBUG] Detected {len(high_energy_regions)} high energy regions")
+            logger.debug(f"Detected {len(high_energy_regions)} high energy regions")
             
             # Debug: Show high energy regions
             for i, region in enumerate(high_energy_regions[:3]):  # Show first 3
@@ -246,11 +246,11 @@ class ActivitySegmenter:
                       f"({region.get('duration_sec', 'unknown')}s)")
                 
         except Exception as e:
-            print(f"[DEBUG] ERROR detecting high energy regions: {e}")
+            logger.debug(f"ERROR detecting high energy regions: {e}")
             high_energy_regions = []  # Set empty list to continue
         
         # Create segmentation results (FIXED VERSION)
-        print(f"[DEBUG] Creating SegmentationResults object...")
+        logger.debug(f"Creating SegmentationResults object...")
         try:
             results = SegmentationResults(
                 video_path=video_path,  # ✅ Use parameter directly (was: self.current_video_info["path"])
@@ -262,35 +262,35 @@ class ActivitySegmenter:
                 processing_time=processing_time,  # ✅ Now properly calculated
                 high_energy_regions=high_energy_regions  # ✅ Add this field
             )
-            print(f"[DEBUG] SegmentationResults object created successfully")
-            print(f"[DEBUG] Results summary:")
-            print(f"[DEBUG]   Video path: {results.video_path}")
-            print(f"[DEBUG]   Total duration: {results.duration:.1f} seconds")
-            print(f"[DEBUG]   Total segments: {results.segments}")
-            print(f"[DEBUG]   Processing time: {results.processing_time:.1f} seconds")
-            print(f"[DEBUG]   High energy regions: {len(results.high_energy_regions)}")
+            logger.debug(f"SegmentationResults object created successfully")
+            logger.debug(f"Results summary:")
+            logger.debug(f"  Video path: {results.video_path}")
+            logger.debug(f"  Total duration: {results.duration:.1f} seconds")
+            logger.debug(f"  Total segments: {results.segments}")
+            logger.debug(f"  Processing time: {results.processing_time:.1f} seconds")
+            logger.debug(f"  High energy regions: {len(results.high_energy_regions)}")
             
         except Exception as e:
-            print(f"[DEBUG] ERROR creating SegmentationResults: {e}")
+            logger.debug(f"ERROR creating SegmentationResults: {e}")
             raise
         
         # Save outputs
-        print(f"[DEBUG] Saving results...")
+        logger.debug(f"Saving results...")
         try:
             self._save_results(results, output_dir, save_annotated, save_motion_data, annotated_frames)
-            print(f"[DEBUG] Results saved successfully")
+            logger.debug(f"Results saved successfully")
         except Exception as e:
-            print(f"[DEBUG] ERROR saving results: {e}")
+            logger.debug(f"ERROR saving results: {e}")
             # Continue even if saving fails
         
         # Final summary
         logger.info(f"Video analysis completed in {processing_time:.1f} seconds")
         print(f"[DEBUG] ==" *10)
-        print(f"[DEBUG] VIDEO ANALYSIS COMPLETED!")
-        print(f"[DEBUG] Total processing time: {processing_time:.1f} seconds")
-        print(f"[DEBUG] Segments generated: {len(segments)}")
-        print(f"[DEBUG] Motion timeline length: {len(motion_timeline)}")
-        print(f"[DEBUG] Results saved to: {output_dir}")
+        logger.debug(f"VIDEO ANALYSIS COMPLETED!")
+        logger.debug(f"Total processing time: {processing_time:.1f} seconds")
+        logger.debug(f"Segments generated: {len(segments)}")
+        logger.debug(f"Motion timeline length: {len(motion_timeline)}")
+        logger.debug(f"Results saved to: {output_dir}")
         print(f"[DEBUG] ==" * 10)
         
         return results
@@ -307,25 +307,25 @@ class ActivitySegmenter:
             Tuple of (motion_timeline, annotated_frames)
         """
         logger.info("Processing video frames for motion detection")
-        print(f"[DEBUG] _process_video_frames() starting")
-        print(f"[DEBUG] Video path: {video_path}")
-        print(f"[DEBUG] Save annotated: {save_annotated}")
+        logger.debug(f"_process_video_frames() starting")
+        logger.debug(f"Video path: {video_path}")
+        logger.debug(f"Save annotated: {save_annotated}")
         
         motion_timeline = []
         annotated_frames = []
         
         # Set up progress tracking
         total_frames = self.current_video_info["total_frames"]
-        print(f"[DEBUG] Total frames to process: {total_frames}")
+        logger.debug(f"Total frames to process: {total_frames}")
         
         progress_logger = ProgressLogger(total_frames, logger, "Motion Detection")
-        print(f"[DEBUG] Progress logger initialized")
+        logger.debug(f"Progress logger initialized")
         
         # Process frames using generator
         frame_count = 0
         last_progress_report = 0
         
-        print(f"[DEBUG] Starting frame generator loop...")
+        logger.debug(f"Starting frame generator loop...")
         
         try:
             for frame, frame_index, timestamp in self.video_processor.frame_generator(video_path):
@@ -346,14 +346,14 @@ class ActivitySegmenter:
                     
                     # Debug motion metrics every 100 frames
                     if frame_count % 100 == 0:
-                        print(f"[DEBUG] Frame {frame_count} motion metrics:")
-                        print(f"[DEBUG]   Energy score: {motion_metrics.motion_energy_score:.4f}")
-                        print(f"[DEBUG]   Activity level: {motion_metrics.activity_level}")
-                        print(f"[DEBUG]   Motion regions: {motion_metrics.motion_regions_count}")
-                        print(f"[DEBUG]   Total motion pixels: {motion_metrics.total_motion_pixels}")
+                        logger.debug(f"Frame {frame_count} motion metrics:")
+                        logger.debug(f"  Energy score: {motion_metrics.motion_energy_score:.4f}")
+                        logger.debug(f"  Activity level: {motion_metrics.activity_level}")
+                        logger.debug(f"  Motion regions: {motion_metrics.motion_regions_count}")
+                        logger.debug(f"  Total motion pixels: {motion_metrics.total_motion_pixels}")
                     
                 except Exception as e:
-                    print(f"[DEBUG] ERROR processing frame {frame_count}: {e}")
+                    logger.debug(f"ERROR processing frame {frame_count}: {e}")
                     # Add zero motion for failed frame
                     motion_timeline.append(0.0)
                 
@@ -366,10 +366,10 @@ class ActivitySegmenter:
                         annotated_frames.append(annotated_frame)
                         
                         if frame_count % 100 == 0:
-                            print(f"[DEBUG] Annotated frame created for frame {frame_count}")
+                            logger.debug(f"Annotated frame created for frame {frame_count}")
                             
                     except Exception as e:
-                        print(f"[DEBUG] ERROR creating annotated frame {frame_count}: {e}")
+                        logger.debug(f"ERROR creating annotated frame {frame_count}: {e}")
                         # Add original frame if annotation fails
                         annotated_frames.append(frame)
                 
@@ -377,22 +377,22 @@ class ActivitySegmenter:
                 frame_count += 1
                 if frame_count % PROGRESS_UPDATE_INTERVAL == 0:
                     progress_logger.update(frame_count)
-                    print(f"[DEBUG] Progress update: {frame_count}/{total_frames} frames processed")
+                    logger.debug(f"Progress update: {frame_count}/{total_frames} frames processed")
                 
         except Exception as e:
-            print(f"[DEBUG] ERROR in frame generator loop: {e}")
-            print(f"[DEBUG] Processed {frame_count} frames before error")
+            logger.debug(f"ERROR in frame generator loop: {e}")
+            logger.debug(f"Processed {frame_count} frames before error")
         
         progress_logger.complete()
         
-        print(f"[DEBUG] Frame processing completed:")
-        print(f"[DEBUG]   Total frames processed: {frame_count}")
-        print(f"[DEBUG]   Motion timeline length: {len(motion_timeline)}")
-        print(f"[DEBUG]   Annotated frames created: {len(annotated_frames)}")
-        print(f"[DEBUG]   Expected frames: {total_frames}")
+        logger.debug(f"Frame processing completed:")
+        logger.debug(f"  Total frames processed: {frame_count}")
+        logger.debug(f"  Motion timeline length: {len(motion_timeline)}")
+        logger.debug(f"  Annotated frames created: {len(annotated_frames)}")
+        logger.debug(f"  Expected frames: {total_frames}")
         
         if frame_count != total_frames:
-            print(f"[DEBUG] WARNING: Frame count mismatch! Expected {total_frames}, got {frame_count}")
+            logger.debug(f"WARNING: Frame count mismatch! Expected {total_frames}, got {frame_count}")
         
         return motion_timeline, annotated_frames
     
@@ -410,53 +410,53 @@ class ActivitySegmenter:
             List of ActivitySegment objects
         """
         logger.info("Performing activity segmentation")
-        print(f"[DEBUG] _segment_activities() starting")
-        print(f"[DEBUG] Motion timeline length: {len(motion_timeline)}")
+        logger.debug(f"_segment_activities() starting")
+        logger.debug(f"Motion timeline length: {len(motion_timeline)}")
         
         if len(motion_timeline) < 30:  # Less than 1 second at 30fps
             logger.warning("Motion timeline too short for meaningful segmentation")
-            print(f"[DEBUG] WARNING: Motion timeline too short ({len(motion_timeline)} frames)")
+            logger.debug(f"WARNING: Motion timeline too short ({len(motion_timeline)} frames)")
             return []
         
         # Get video properties
         fps = self.current_video_info["fps"]
-        print(f"[DEBUG] Video FPS: {fps}")
+        logger.debug(f"Video FPS: {fps}")
         
         # Smooth the motion timeline
-        print(f"[DEBUG] Smoothing motion timeline...")
+        logger.debug(f"Smoothing motion timeline...")
         try:
             smoothed_timeline = self.motion_detector.smooth_motion_timeline()
-            print(f"[DEBUG] Motion timeline smoothed successfully")
-            print(f"[DEBUG] Smoothed timeline length: {len(smoothed_timeline)}")
+            logger.debug(f"Motion timeline smoothed successfully")
+            logger.debug(f"Smoothed timeline length: {len(smoothed_timeline)}")
             
             # Calculate smoothed timeline statistics
             if smoothed_timeline:
                 smoothed_array = np.array(smoothed_timeline)
-                print(f"[DEBUG] Smoothed timeline stats:")
-                print(f"[DEBUG]   Min: {np.min(smoothed_array):.4f}")
-                print(f"[DEBUG]   Max: {np.max(smoothed_array):.4f}")
-                print(f"[DEBUG]   Mean: {np.mean(smoothed_array):.4f}")
-                print(f"[DEBUG]   Std: {np.std(smoothed_array):.4f}")
+                logger.debug(f"Smoothed timeline stats:")
+                logger.debug(f"  Min: {np.min(smoothed_array):.4f}")
+                logger.debug(f"  Max: {np.max(smoothed_array):.4f}")
+                logger.debug(f"  Mean: {np.mean(smoothed_array):.4f}")
+                logger.debug(f"  Std: {np.std(smoothed_array):.4f}")
             
         except Exception as e:
-            print(f"[DEBUG] ERROR smoothing timeline: {e}")
+            logger.debug(f"ERROR smoothing timeline: {e}")
             # Use original timeline if smoothing fails
             smoothed_timeline = motion_timeline
-            print(f"[DEBUG] Using original timeline due to smoothing error")
+            logger.debug(f"Using original timeline due to smoothing error")
         
         # Basic threshold-based segmentation
-        print(f"[DEBUG] Starting threshold-based segmentation...")
+        logger.debug(f"Starting threshold-based segmentation...")
         try:
             segments = self._threshold_based_segmentation(smoothed_timeline, fps)
-            print(f"[DEBUG] Threshold-based segmentation completed")
-            print(f"[DEBUG] Generated {len(segments)} segments")
+            logger.debug(f"Threshold-based segmentation completed")
+            logger.debug(f"Generated {len(segments)} segments")
             
         except Exception as e:
-            print(f"[DEBUG] ERROR in threshold-based segmentation: {e}")
+            logger.debug(f"ERROR in threshold-based segmentation: {e}")
             segments = []
         
         # Filter and sort segments
-        print(f"[DEBUG] Filtering and sorting segments...")
+        logger.debug(f"Filtering and sorting segments...")
         try:
             if segments:
                 # Filter by minimum duration and confidence
@@ -464,14 +464,14 @@ class ActivitySegmenter:
                     seg for seg in segments 
                     if seg.duration >= ACTIVITY_MIN_DURATION and seg.confidence > 0.1
                 ]
-                print(f"[DEBUG] After filtering: {len(filtered_segments)} segments")
+                logger.debug(f"After filtering: {len(filtered_segments)} segments")
                 
                 # Sort by duration (longest first)
                 filtered_segments.sort(key=lambda x: x.duration, reverse=True)
                 
                 # Limit to top 10 segments to avoid clutter
                 final_segments = filtered_segments[:10]
-                print(f"[DEBUG] Final segments (top 10): {len(final_segments)}")
+                logger.debug(f"Final segments (top 10): {len(final_segments)}")
                 
                 # Debug: Show final segments
                 for i, segment in enumerate(final_segments):
@@ -481,13 +481,22 @@ class ActivitySegmenter:
                 
                 segments = final_segments
             else:
-                print(f"[DEBUG] No segments to filter")
+                logger.debug(f"No segments to filter")
                 
         except Exception as e:
-            print(f"[DEBUG] ERROR filtering segments: {e}")
+            logger.debug(f"ERROR filtering segments: {e}")
             # Keep original segments if filtering fails
         
-        print(f"[DEBUG] Activity segmentation completed with {len(segments)} final segments")
+        # Resolve overlapping segments
+        logger.debug(f"Resolving overlapping segments...")
+        try:
+            segments = self._resolve_overlapping_segments(segments)
+            logger.debug(f"Overlap resolution completed")
+        except Exception as e:
+            logger.debug(f"ERROR in overlap resolution: {e}")
+            # Continue with original segments if resolution fails
+
+        logger.debug(f"Activity segmentation completed with {len(segments)} final segments")
         return segments
     
     def _threshold_based_segmentation(self, motion_timeline: List[float], fps: float) -> List[ActivitySegment]:
@@ -501,10 +510,10 @@ class ActivitySegmenter:
         Returns:
             List of ActivitySegment objects
         """
-        print(f"[DEBUG] _threshold_based_segmentation() starting")
-        print(f"[DEBUG] Timeline length: {len(motion_timeline)}, FPS: {fps}")
-        print(f"[DEBUG] Thresholds - High: {HIGH_MOTION_THRESHOLD}, Medium: {MEDIUM_MOTION_THRESHOLD}")
-        print(f"[DEBUG] Minimum duration: {ACTIVITY_MIN_DURATION} seconds")
+        logger.debug(f"_threshold_based_segmentation() starting")
+        logger.debug(f"Timeline length: {len(motion_timeline)}, FPS: {fps}")
+        logger.debug(f"Thresholds - High: {HIGH_MOTION_THRESHOLD}, Medium: {MEDIUM_MOTION_THRESHOLD}")
+        logger.debug(f"Minimum duration: {ACTIVITY_MIN_DURATION} seconds")
         
         segments = []
         motion_array = np.array(motion_timeline)
@@ -514,30 +523,30 @@ class ActivitySegmenter:
         medium_activity_count = np.sum((motion_array > MEDIUM_MOTION_THRESHOLD) & (motion_array <= HIGH_MOTION_THRESHOLD))
         low_activity_count = len(motion_array) - high_activity_count - medium_activity_count
         
-        print(f"[DEBUG] Motion threshold analysis:")
-        print(f"[DEBUG]   High activity frames: {high_activity_count} ({high_activity_count/len(motion_array)*100:.1f}%)")
-        print(f"[DEBUG]   Medium activity frames: {medium_activity_count} ({medium_activity_count/len(motion_array)*100:.1f}%)")
-        print(f"[DEBUG]   Low activity frames: {low_activity_count} ({low_activity_count/len(motion_array)*100:.1f}%)")
+        logger.debug(f"Motion threshold analysis:")
+        logger.debug(f"  High activity frames: {high_activity_count} ({high_activity_count/len(motion_array)*100:.1f}%)")
+        logger.debug(f"  Medium activity frames: {medium_activity_count} ({medium_activity_count/len(motion_array)*100:.1f}%)")
+        logger.debug(f"  Low activity frames: {low_activity_count} ({low_activity_count/len(motion_array)*100:.1f}%)")
         
         # Find periods of sustained high activity
         high_activity_mask = motion_array > HIGH_MOTION_THRESHOLD
         medium_activity_mask = (motion_array > MEDIUM_MOTION_THRESHOLD) & (motion_array <= HIGH_MOTION_THRESHOLD)
         
-        print(f"[DEBUG] Processing high activity segments...")
+        logger.debug(f"Processing high activity segments...")
         high_segments = self._extract_segments_from_mask(
             high_activity_mask, motion_timeline, fps, "HIGH_ACTIVITY"
         )
         segments.extend(high_segments)
-        print(f"[DEBUG] Found {len(high_segments)} high activity segments")
+        logger.debug(f"Found {len(high_segments)} high activity segments")
         
-        print(f"[DEBUG] Processing medium activity segments...")
+        logger.debug(f"Processing medium activity segments...")
         medium_segments = self._extract_segments_from_mask(
             medium_activity_mask, motion_timeline, fps, "MEDIUM_ACTIVITY"
         )
         segments.extend(medium_segments)
-        print(f"[DEBUG] Found {len(medium_segments)} medium activity segments")
+        logger.debug(f"Found {len(medium_segments)} medium activity segments")
         
-        print(f"[DEBUG] Threshold-based segmentation completed with {len(segments)} total segments")
+        logger.debug(f"Threshold-based segmentation completed with {len(segments)} total segments")
         return segments
     
     def _extract_segments_from_mask(self, activity_mask: np.ndarray, motion_timeline: List[float],
@@ -554,9 +563,9 @@ class ActivitySegmenter:
         Returns:
             List of ActivitySegment objects
         """
-        print(f"[DEBUG] _extract_segments_from_mask() for {activity_type}")
-        print(f"[DEBUG] Activity mask shape: {activity_mask.shape}")
-        print(f"[DEBUG] True values in mask: {np.sum(activity_mask)}")
+        logger.debug(f"_extract_segments_from_mask() for {activity_type}")
+        logger.debug(f"Activity mask shape: {activity_mask.shape}")
+        logger.debug(f"True values in mask: {np.sum(activity_mask)}")
         
         segments = []
         
@@ -565,37 +574,44 @@ class ActivitySegmenter:
         starts = np.where(diff == 1)[0]
         ends = np.where(diff == -1)[0]
         
-        print(f"[DEBUG] Found {len(starts)} raw segments before gap merging")
+        logger.debug(f"Found {len(starts)} raw segments before gap merging")
         
         if len(starts) == 0:
-            print(f"[DEBUG] No segments found for {activity_type}")
+            logger.debug(f"No segments found for {activity_type}")
             return segments
         
-        # === NEW: Merge segments with small gaps ===
-        GAP_TOLERANCE_SECONDS = 2.0  # Merge segments if gap < 2 seconds
+        # Enhanced gap tolerance for short videos
+        video_duration = len(motion_timeline) / fps
+        if video_duration < 60:  # For videos under 1 minute
+            GAP_TOLERANCE_SECONDS = 5.0  # Much more tolerant
+        else:
+            GAP_TOLERANCE_SECONDS = 2.0
+            
+        logger.debug(f"Using gap tolerance: {GAP_TOLERANCE_SECONDS}s for {video_duration:.1f}s video")
+        
         merged_starts = []
         merged_ends = []
         
         current_start = starts[0]
         current_end = ends[0]
         
-        print(f"[DEBUG] Starting gap merging with tolerance: {GAP_TOLERANCE_SECONDS}s")
+        logger.debug(f"Starting gap merging with tolerance: {GAP_TOLERANCE_SECONDS}s")
         
         for i in range(1, len(starts)):
             gap_frames = starts[i] - current_end
             gap_seconds = gap_frames / fps
             
-            print(f"[DEBUG] Gap between segment {i-1} and {i}: {gap_seconds:.1f}s ({gap_frames} frames)")
+            logger.debug(f"Gap between segment {i-1} and {i}: {gap_seconds:.1f}s ({gap_frames} frames)")
             
             # If gap is small enough, merge segments
             if gap_seconds <= GAP_TOLERANCE_SECONDS:
                 current_end = ends[i]  # Extend current segment to include the gap
-                print(f"[DEBUG] ✅ Merged segments - gap {gap_seconds:.1f}s <= {GAP_TOLERANCE_SECONDS}s")
+                logger.debug(f"✅ Merged segments - gap {gap_seconds:.1f}s <= {GAP_TOLERANCE_SECONDS}s")
             else:
                 # Save current merged segment and start new one
                 merged_starts.append(current_start)
                 merged_ends.append(current_end)
-                print(f"[DEBUG] ❌ Gap too large - saved segment {current_start}-{current_end}")
+                logger.debug(f"❌ Gap too large - saved segment {current_start}-{current_end}")
                 
                 current_start = starts[i]
                 current_end = ends[i]
@@ -604,13 +620,13 @@ class ActivitySegmenter:
         merged_starts.append(current_start)
         merged_ends.append(current_end)
         
-        print(f"[DEBUG] After gap merging: {len(merged_starts)} segments")
+        logger.debug(f"After gap merging: {len(merged_starts)} segments")
         
         # === Process merged segments ===
         for i, (start_frame, end_frame) in enumerate(zip(merged_starts, merged_ends)):
             duration = (end_frame - start_frame) / fps
             
-            print(f"[DEBUG] Merged segment {i+1}: frames {start_frame}-{end_frame}, duration: {duration:.1f}s")
+            logger.debug(f"Merged segment {i+1}: frames {start_frame}-{end_frame}, duration: {duration:.1f}s")
             
             # Filter by minimum duration
             if duration >= ACTIVITY_MIN_DURATION:
@@ -652,10 +668,95 @@ class ActivitySegmenter:
                 print(f"[DEBUG] ✅ Added {activity_type} segment: {start_time:.1f}s-{end_time:.1f}s "
                     f"({duration:.1f}s), confidence: {confidence:.3f}")
             else:
-                print(f"[DEBUG] ❌ Rejected merged segment (too short): {duration:.1f}s < {ACTIVITY_MIN_DURATION}s")
+                logger.debug(f"❌ Rejected merged segment (too short): {duration:.1f}s < {ACTIVITY_MIN_DURATION}s")
         
-        print(f"[DEBUG] Extracted {len(segments)} valid segments for {activity_type}")
+        logger.debug(f"Extracted {len(segments)} valid segments for {activity_type}")
         return segments
+    
+    def _resolve_overlapping_segments(self, segments: List[ActivitySegment]) -> List[ActivitySegment]:
+        """
+        Resolve overlapping segments by merging or removing conflicts.
+        
+        Args:
+            segments: List of potentially overlapping segments
+            
+        Returns:
+            List of non-overlapping segments
+        """
+        if len(segments) <= 1:
+            return segments
+        
+        logger.debug(f"Resolving overlaps in {len(segments)} segments")
+        
+        # Sort segments by start time
+        sorted_segments = sorted(segments, key=lambda x: x.start_time)
+        
+        resolved_segments = []
+        current_segment = sorted_segments[0]
+        
+        for next_segment in sorted_segments[1:]:
+            # Check for overlap
+            if current_segment.end_time > next_segment.start_time:
+                overlap_duration = current_segment.end_time - next_segment.start_time
+                logger.debug(f"Overlap detected: {overlap_duration:.1f}s between segments")
+                logger.debug(f"  Current: {current_segment.start_time:.1f}s-{current_segment.end_time:.1f}s ({current_segment.activity_type})")
+                logger.debug(f"  Next: {next_segment.start_time:.1f}s-{next_segment.end_time:.1f}s ({next_segment.activity_type})")
+                
+                # Decide how to resolve overlap
+                if overlap_duration < 3.0:  # Small overlap - adjust boundaries
+                    # Move the boundary to the midpoint
+                    midpoint = (current_segment.end_time + next_segment.start_time) / 2
+                    
+                    logger.debug(f"  Small overlap - adjusting boundary to {midpoint:.1f}s")
+                    
+                    # Adjust current segment end time
+                    current_segment = ActivitySegment(
+                        start_time=current_segment.start_time,
+                        end_time=midpoint,
+                        start_frame=current_segment.start_frame,
+                        end_frame=int(midpoint * self.current_video_info["fps"]),
+                        duration=midpoint - current_segment.start_time,
+                        activity_type=current_segment.activity_type,
+                        avg_motion_energy=current_segment.avg_motion_energy,
+                        max_motion_energy=current_segment.max_motion_energy,
+                        confidence=current_segment.confidence,
+                        description=current_segment.description
+                    )
+                    
+                    # Adjust next segment start time
+                    next_segment = ActivitySegment(
+                        start_time=midpoint,
+                        end_time=next_segment.end_time,
+                        start_frame=int(midpoint * self.current_video_info["fps"]),
+                        end_frame=next_segment.end_frame,
+                        duration=next_segment.end_time - midpoint,
+                        activity_type=next_segment.activity_type,
+                        avg_motion_energy=next_segment.avg_motion_energy,
+                        max_motion_energy=next_segment.max_motion_energy,
+                        confidence=next_segment.confidence,
+                        description=next_segment.description
+                    )
+                    
+                else:  # Large overlap - keep higher confidence segment
+                    if current_segment.confidence >= next_segment.confidence:
+                        logger.debug(f"  Large overlap - keeping current (higher confidence: {current_segment.confidence:.3f})")
+                        # Keep current, skip next
+                        continue
+                    else:
+                        logger.debug(f"  Large overlap - keeping next (higher confidence: {next_segment.confidence:.3f})")
+                        # Replace current with next
+                        current_segment = next_segment
+                        continue
+            
+            # No overlap or resolved - add current and move to next
+            resolved_segments.append(current_segment)
+            current_segment = next_segment
+        
+        # Don't forget the last segment
+        resolved_segments.append(current_segment)
+        
+        logger.debug(f"Overlap resolution completed: {len(segments)} -> {len(resolved_segments)} segments")
+        return resolved_segments
     
     def _generate_segment_description(self, activity_type: str, duration: float, avg_motion: float) -> str:
         """
@@ -698,15 +799,15 @@ class ActivitySegmenter:
         Returns:
             List of dicts with start_time, end_time, duration_sec
         """
-        print(f"[DEBUG] _detect_high_energy_regions() starting")
-        print(f"[DEBUG] Threshold: {threshold}, Min length: {min_length_sec}s")
-        print(f"[DEBUG] Timeline length: {len(motion_timeline)}, FPS: {fps}")
+        logger.debug(f"_detect_high_energy_regions() starting")
+        logger.debug(f"Threshold: {threshold}, Min length: {min_length_sec}s")
+        logger.debug(f"Timeline length: {len(motion_timeline)}, FPS: {fps}")
         
         regions = []
         min_frames = int(min_length_sec * fps)
         start = None
         
-        print(f"[DEBUG] Minimum frames for region: {min_frames}")
+        logger.debug(f"Minimum frames for region: {min_frames}")
         
         for i, energy in enumerate(motion_timeline):
             if energy >= threshold:
@@ -721,7 +822,7 @@ class ActivitySegmenter:
                             "duration_sec": round((i - start) / fps, 2)
                         }
                         regions.append(region)
-                        print(f"[DEBUG] High energy region found: {region['start_time']}s-{region['end_time']}s ({region['duration_sec']}s)")
+                        logger.debug(f"High energy region found: {region['start_time']}s-{region['end_time']}s ({region['duration_sec']}s)")
                     start = None
 
         # Check if video ends with high energy region
@@ -732,9 +833,9 @@ class ActivitySegmenter:
                 "duration_sec": round((len(motion_timeline) - start) / fps, 2)
             }
             regions.append(region)
-            print(f"[DEBUG] High energy region at end: {region['start_time']}s-{region['end_time']}s ({region['duration_sec']}s)")
+            logger.debug(f"High energy region at end: {region['start_time']}s-{region['end_time']}s ({region['duration_sec']}s)")
 
-        print(f"[DEBUG] Detected {len(regions)} high energy regions total")
+        logger.debug(f"Detected {len(regions)} high energy regions total")
         return regions
     
     def _save_results(self, results: SegmentationResults, output_dir: str,
@@ -751,77 +852,77 @@ class ActivitySegmenter:
             annotated_frames: List of annotated frames
         """
         logger.info(f"Saving results to {output_dir}")
-        print(f"[DEBUG] _save_results() starting")
-        print(f"[DEBUG] Output directory: {output_dir}")
-        print(f"[DEBUG] Save annotated: {save_annotated}")
-        print(f"[DEBUG] Save motion data: {save_motion_data}")
-        print(f"[DEBUG] Annotated frames count: {len(annotated_frames)}")
+        logger.debug(f"_save_results() starting")
+        logger.debug(f"Output directory: {output_dir}")
+        logger.debug(f"Save annotated: {save_annotated}")
+        logger.debug(f"Save motion data: {save_motion_data}")
+        logger.debug(f"Annotated frames count: {len(annotated_frames)}")
         
         # Create base filename
         video_name = os.path.splitext(os.path.basename(results.video_path))[0]
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         base_name = f"{video_name}_{timestamp}"
         
-        print(f"[DEBUG] Base filename: {base_name}")
+        logger.debug(f"Base filename: {base_name}")
         
         # Save segmentation results as JSON
-        print(f"[DEBUG] Saving segmentation results to JSON...")
+        logger.debug(f"Saving segmentation results to JSON...")
         try:
             results_path = os.path.join(output_dir, f"{base_name}_segments.json")
             self._save_segments_json(results, results_path)
-            print(f"[DEBUG] ✅ Segments JSON saved: {results_path}")
+            logger.debug(f"✅ Segments JSON saved: {results_path}")
         except Exception as e:
-            print(f"[DEBUG] ❌ ERROR saving segments JSON: {e}")
+            logger.debug(f"❌ ERROR saving segments JSON: {e}")
         
         # Save motion timeline data
         if save_motion_data:
-            print(f"[DEBUG] Saving motion timeline data...")
+            logger.debug(f"Saving motion timeline data...")
             try:
                 motion_path = os.path.join(output_dir, f"{base_name}_motion_data.json")
                 self.motion_detector.export_motion_data(motion_path)
-                print(f"[DEBUG] ✅ Motion data saved: {motion_path}")
+                logger.debug(f"✅ Motion data saved: {motion_path}")
             except Exception as e:
-                print(f"[DEBUG] ❌ ERROR saving motion data: {e}")
+                logger.debug(f"❌ ERROR saving motion data: {e}")
         else:
-            print(f"[DEBUG] Skipping motion data save (save_motion_data=False)")
+            logger.debug(f"Skipping motion data save (save_motion_data=False)")
         
         # Save annotated video
         if save_annotated and annotated_frames:
-            print(f"[DEBUG] Saving annotated video...")
+            logger.debug(f"Saving annotated video...")
             try:
                 video_path = os.path.join(output_dir, f"{base_name}_annotated.mp4")
                 fps = self.current_video_info["fps"]
-                print(f"[DEBUG] Video path: {video_path}, FPS: {fps}")
+                logger.debug(f"Video path: {video_path}, FPS: {fps}")
                 
                 self.video_processor.save_video_with_overlay(
                     results.video_path, annotated_frames, video_path, fps
                 )
-                print(f"[DEBUG] ✅ Annotated video saved: {video_path}")
+                logger.debug(f"✅ Annotated video saved: {video_path}")
             except Exception as e:
-                print(f"[DEBUG] ❌ ERROR saving annotated video: {e}")
+                logger.debug(f"❌ ERROR saving annotated video: {e}")
         else:
-            print(f"[DEBUG] Skipping annotated video save (save_annotated={save_annotated}, frames={len(annotated_frames)})")
+            logger.debug(f"Skipping annotated video save (save_annotated={save_annotated}, frames={len(annotated_frames)})")
         
         # Save summary report
-        print(f"[DEBUG] Saving summary report...")
+        logger.debug(f"Saving summary report...")
         try:
             summary_path = os.path.join(output_dir, f"{base_name}_summary.txt")
             self._save_summary_report(results, summary_path)
-            print(f"[DEBUG] ✅ Summary report saved: {summary_path}")
+            logger.debug(f"✅ Summary report saved: {summary_path}")
         except Exception as e:
-            print(f"[DEBUG] ❌ ERROR saving summary report: {e}")
+            logger.debug(f"❌ ERROR saving summary report: {e}")
         
         logger.info("All results saved successfully")
-        print(f"[DEBUG] _save_results() completed")
+        logger.debug(f"_save_results() completed")
     
     def _save_segments_json(self, results: SegmentationResults, output_path: str):
         """Save segmentation results as JSON."""
-        print(f"[DEBUG] _save_segments_json() starting")
-        print(f"[DEBUG] Output path: {output_path}")
-        print(f"[DEBUG] Results summary:")
-        print(f"[DEBUG]   Segments count: {len(results.segments)}")
-        print(f"[DEBUG]   Total duration: {results.duration}")
-        print(f"[DEBUG]   Processing time: {results.processing_time}")
+        logger.debug(f"_save_segments_json() starting")
+        logger.debug(f"Output path: {output_path}")
+        logger.debug(f"Results summary:")
+        logger.debug(f"  Segments count: {len(results.segments_list)}")
+        logger.debug(f"  Total duration: {results.duration}")
+        logger.debug(f"  Processing time: {results.processing_time}")
         
         try:
             results_dict = {
@@ -843,7 +944,7 @@ class ActivitySegmenter:
                         "confidence": seg.confidence,
                         "description": seg.description
                     }
-                    for seg in results.segments
+                    for seg in results.segments_list
                 ],
                 "motion_statistics": results.motion_statistics,
                 "metadata": {
@@ -857,20 +958,20 @@ class ActivitySegmenter:
                 }
             }
             
-            print(f"[DEBUG] Writing JSON data...")
+            logger.debug(f"Writing JSON data...")
             with open(output_path, 'w') as f:
                 json.dump(results_dict, f, indent=2)
             
-            print(f"[DEBUG] ✅ Segments JSON file written successfully")
+            logger.debug(f"✅ Segments JSON file written successfully")
             
         except Exception as e:
-            print(f"[DEBUG] ❌ ERROR in _save_segments_json: {e}")
+            logger.debug(f"❌ ERROR in _save_segments_json: {e}")
             raise
     
     def _save_summary_report(self, results: SegmentationResults, output_path: str):
         """Save human-readable summary report."""
-        print(f"[DEBUG] _save_summary_report() starting")
-        print(f"[DEBUG] Output path: {output_path}")
+        logger.debug(f"_save_summary_report() starting")
+        logger.debug(f"Output path: {output_path}")
         
         try:
             with open(output_path, 'w') as f:
@@ -920,10 +1021,10 @@ class ActivitySegmenter:
                 f.write("=== ACTIVITY SEGMENTS ===\n")
                 if results.segments:
                     # Summary statistics
-                    total_segment_time = sum(seg.duration for seg in results.segments)
+                    total_segment_time = sum(seg.duration for seg in results.segments_list)
                     coverage_percentage = (total_segment_time / results.duration) * 100
                     
-                    f.write(f"Total Segments: {len(results.segments)}\n")
+                    f.write(f"Total Segments: {len(results.segments_list)}\n")
                     f.write(f"Total Segment Time: {total_segment_time:.1f} seconds ({total_segment_time/60:.1f} minutes)\n")
                     f.write(f"Video Coverage: {coverage_percentage:.1f}%\n\n")
                     
@@ -943,7 +1044,7 @@ class ActivitySegmenter:
                     
                     # Individual segments
                     f.write("Individual Segments (sorted by duration):\n")
-                    sorted_segments = sorted(results.segments, key=lambda x: x.duration, reverse=True)
+                    sorted_segments = sorted(results.segments_list, key=lambda x: x.duration, reverse=True)
                     
                     for i, segment in enumerate(sorted_segments, 1):
                         f.write(f"\nSegment {i}:\n")
@@ -983,16 +1084,16 @@ class ActivitySegmenter:
                 # Recommendations
                 f.write("=== RECOMMENDATIONS ===\n")
                 if results.segments:
-                    if len(results.segments) < 3:
+                    if len(results.segments_list) < 3:
                         f.write("- Few segments detected: Consider lowering motion sensitivity thresholds\n")
                     if coverage_percentage < 10:
                         f.write("- Low activity coverage: Video may be mostly static\n")
-                    if any(seg.confidence < 0.5 for seg in results.segments):
+                    if any(seg.confidence < 0.5 for seg in results.segments_list):
                         f.write("- Some low-confidence segments detected: Review video quality\n")
                     
                     # Find most active period
                     if results.segments:
-                        most_active = max(results.segments, key=lambda x: x.avg_motion_energy)
+                        most_active = max(results.segments_list, key=lambda x: x.avg_motion_energy)
                         f.write(f"- Most active period: {most_active.start_time:.1f}s-{most_active.end_time:.1f}s ({most_active.activity_type})\n")
                 else:
                     f.write("- No segments detected: Try 'high' sensitivity mode\n")
@@ -1001,9 +1102,9 @@ class ActivitySegmenter:
                 
                 f.write("\n=== END OF REPORT ===\n")
             
-            print(f"[DEBUG] ✅ Summary report written successfully")
-            print(f"[DEBUG] Report sections: Video Info, Motion Stats, Segments, Config, Recommendations")
+            logger.debug(f"✅ Summary report written successfully")
+            logger.debug(f"Report sections: Video Info, Motion Stats, Segments, Config, Recommendations")
             
         except Exception as e:
-            print(f"[DEBUG] ❌ ERROR in _save_summary_report: {e}")
+            logger.debug(f"❌ ERROR in _save_summary_report: {e}")
             raise

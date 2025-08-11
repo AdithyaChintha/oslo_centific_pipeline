@@ -25,6 +25,7 @@ class Video360Processor:
         self.supported_formats = ['.mp4', '.avi', '.mov', '.mkv', '.insv']
         logger.info("Video360Processor initialized")
     
+
     def get_video_info(self, video_path: str) -> Dict:
         """
         Get comprehensive video information.
@@ -154,7 +155,7 @@ class Video360Processor:
     
     def frame_generator(self, video_path: str, start_frame: int = 0, 
                        end_frame: Optional[int] = None, 
-                       resize_factor: float = 0.25) -> Generator[Tuple[np.ndarray, int, float], None, None]:
+                       resize_factor: float = 1) -> Generator[Tuple[np.ndarray, int, float], None, None]:
         """
         Generate frames from a video with frame indices and timestamps.
         Added resize_factor to handle high-resolution 360° videos.
@@ -183,7 +184,7 @@ class Video360Processor:
             if width > 4000 or height > 2000:
                 logger.info(f"High resolution video detected ({width}x{height})")
                 logger.info(f"Applying resize factor {resize_factor} to reduce memory usage")
-                print(f"[DEBUG] High-res video: {width}x{height} -> {int(width*resize_factor)}x{int(height*resize_factor)}")
+                logger.debug(f"High-res video: {width}x{height} -> {int(width*resize_factor)}x{int(height*resize_factor)}")
             
             # Set starting position
             if start_frame > 0:

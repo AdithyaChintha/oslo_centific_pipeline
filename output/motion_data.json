@@ -4,11 +4,11 @@
     "var_threshold": 25,
     "detect_shadows": true,
     "min_foreground_area": 50,
-    "confidence_threshold": 0.05
+    "confidence_threshold": 0.02
   },
   "processing_info": {
     "total_frames": 1186,
-    "processing_duration": 287.86116647720337
+    "processing_duration": 41.25790786743164
   },
   "motion_timeline": [
     1.0,
@@ -1205,11 +1205,11 @@
     "min_motion_energy": 0.0,
     "motion_variance": 0.0011313019297258513,
     "motion_std_dev": 0.033634832090049915,
-    "high_activity_frames": 65,
-    "medium_activity_frames": 268,
-    "low_activity_frames": 853,
-    "high_activity_percentage": 5.480607082630692,
-    "medium_activity_percentage": 22.596964586846543,
-    "low_activity_percentage": 71.92242833052276
+    "high_activity_frames": 249,
+    "medium_activity_frames": 244,
+    "low_activity_frames": 693,
+    "high_activity_percentage": 20.994940978077572,
+    "medium_activity_percentage": 20.57335581787521,
+    "low_activity_percentage": 58.43170320404722
   }
 }

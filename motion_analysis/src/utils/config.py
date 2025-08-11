@@ -29,11 +29,31 @@ EQUIRECTANGULAR_HEIGHT = 2880   # Typical 360° video height
 
 # Segmentation Parameters
 MOTION_SMOOTH_WINDOW = 15       # Frames to smooth motion data (1 second at 30fps)
-ACTIVITY_MIN_DURATION = 3.0    # Minimum activity duration (seconds)
-HIGH_MOTION_THRESHOLD = 0.05    # Threshold for high activity classification
-MEDIUM_MOTION_THRESHOLD = 0.01   # Threshold for medium activity classification
+# ACTIVITY_MIN_DURATION = 3.0    # Minimum activity duration (seconds)
+# HIGH_MOTION_THRESHOLD = 0.05    # Threshold for high activity classification
+# MEDIUM_MOTION_THRESHOLD = 0.01   # Threshold for medium activity classification
+# New settings (optimized for short home activities)
+ACTIVITY_MIN_DURATION = 1.0     # 1 second minimum
+HIGH_MOTION_THRESHOLD = 0.02    # More sensitive
+MEDIUM_MOTION_THRESHOLD = 0.005  # Much more sensitive  
+CONFIDENCE_THRESHOLD = 0.02     # Lower confidence requirement
 
 # Output Parameters
 SAVE_ANNOTATED_VIDEO = True     # Whether to save video with motion overlay
 SAVE_MOTION_DATA = True         # Whether to save motion timeline data
 DEBUG_MODE = True               # Enable debug logging and visualizations
+
+# GPU Configuration
+USE_GPU = True                      # Enable GPU acceleration
+GPU_MEMORY_FRACTION = 0.8          # Use 80% of GPU memory
+FORCE_CPU_FALLBACK = False         # Force CPU if GPU fails
+
+# Video Analysis Pipeline Configuration
+DEFAULT_PIPELINE_CONFIG = {
+    "output_directory": "output",
+    "sensitivity_level": "medium",
+    "save_annotated_video": True,
+    "save_motion_data": True,
+    "verbose_logging": True,
+    "log_directory": "logs"
+}
