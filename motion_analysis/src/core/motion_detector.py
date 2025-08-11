@@ -2,6 +2,9 @@
 Core motion detection using MOG2 background subtraction.
 Adapted from public safety frame_differential.py for 360° home activity analysis.
 """
+
+import sys
+import os
 import cv2
 import numpy as np
 import time
@@ -25,8 +28,13 @@ except ImportError:
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
 
-from utils.config import *
-from utils.logging_utils import get_logger
+try:
+    from ..utils.config import *
+    from ..utils.logging_utils import get_logger
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from utils.config import *
+    from utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
 

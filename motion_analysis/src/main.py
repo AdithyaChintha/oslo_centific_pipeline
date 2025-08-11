@@ -11,13 +11,20 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 # Add src directory to path for imports
-sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+sys.path.append(os.path.dirname(__file__))
 
-from core.motion_detector import MotionDetector
-from core.video_processor import Video360Processor
-from analyzers.activity_segmenter import ActivitySegmenter
-from utils.logging_utils import setup_logging, get_logger
-from utils.config import *
+try:
+    from .core.motion_detector import MotionDetector
+    from .core.video_processor import Video360Processor
+    from .analyzers.activity_segmenter import ActivitySegmenter
+    from .utils.logging_utils import setup_logging, get_logger
+    from .utils.config import *
+except ImportError:
+    from core.motion_detector import MotionDetector
+    from core.video_processor import Video360Processor
+    from analyzers.activity_segmenter import ActivitySegmenter
+    from utils.logging_utils import setup_logging, get_logger
+    from utils.config import *
 
 class MotionEnergyAnalysisPipeline:
     """
@@ -616,7 +623,7 @@ class MotionEnergyAnalysisPipeline:
         print("2. Run the pipeline")
         print("\nExample video characteristics:")
         print("   ✅ Format: .mp4, .insv")
-        print("   ✅ Type: 360° equirectangular")
+        print("   ✅ Type: 360° equirectangular or fish-eye")
         print("   ✅ Content: Home activities (cooking, cleaning)")
         print("   ✅ Duration: 30 seconds to 2+ hours")
         print("\nSample configuration:")

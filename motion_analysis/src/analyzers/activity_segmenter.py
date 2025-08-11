@@ -6,6 +6,7 @@ This file contains the main ActivitySegmenter class with basic threshold-based
 segmentation. For advanced methods (peak detection, change point analysis), 
 use Part 2: activity_segmenter_advanced.py
 """
+import sys
 import numpy as np
 import time
 import json
@@ -13,10 +14,19 @@ import os
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
 
-from core.motion_detector import MotionDetector, MotionMetrics, MotionRegion
-from core.video_processor import Video360Processor
-from utils.config import *
-from utils.logging_utils import get_logger, ProgressLogger
+try:
+    from ..core.motion_detector import MotionDetector, MotionMetrics, MotionRegion
+    from ..core.video_processor import Video360Processor
+    from ..utils.config import *
+    from ..utils.logging_utils import get_logger, ProgressLogger
+except ImportError:
+    import sys
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from core.motion_detector import MotionDetector, MotionMetrics, MotionRegion
+    from core.video_processor import Video360Processor
+    from utils.config import *
+    from utils.logging_utils import get_logger, ProgressLogger
 
 logger = get_logger(__name__)
 
@@ -137,7 +147,7 @@ class ActivitySegmenter:
         # Validate 360° video
         logger.debug(f"Validating 360° video format...")
         try:
-            validation = self.video_processor.validate_360_video(video_path)
+            validation = self.video_processor.validate_video_format(video_path)
             logger.debug(f"Validation results:")
             logger.debug(f"  Is valid: {validation.get('is_valid', 'unknown')}")
             

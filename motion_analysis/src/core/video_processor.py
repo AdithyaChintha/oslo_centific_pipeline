@@ -1,6 +1,8 @@
 """
 Video I/O processing utilities for 360° motion analysis.
 """
+import os
+import sys
 import cv2
 import os
 import subprocess
@@ -8,8 +10,13 @@ import tempfile
 from pathlib import Path
 from typing import Tuple, List,Dict, Optional, Generator
 
-from utils.config import *
-from utils.logging_utils import get_logger
+try:
+    from ..utils.config import *
+    from ..utils.logging_utils import get_logger
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from utils.config import *
+    from utils.logging_utils import get_logger
 
 import numpy as np
 
@@ -375,9 +382,9 @@ class Video360Processor:
         logger.info(f"Found {len(video_files)} video files in {directory}")
         return video_files
     
-    def validate_360_video(self, video_path: str) -> Dict:
+    def validate_video_format(self, video_path: str) -> Dict:
         """
-        Validate if a video appears to be a proper 360° video.
+        Validate if a video appears to be a supported format (360° equirectangular or fish-eye).
         
         Args:
             video_path: Path to the video file
@@ -390,32 +397,65 @@ class Video360Processor:
         validation = {
             "is_valid": True,
             "warnings": [],
-            "recommendations": []
+            "recommendations": [],
+            "detected_format": "unknown"
         }
         
-        # Check aspect ratio (360° videos should be ~2:1)
-        if not video_info["is_360_likely"]:
+        aspect_ratio = video_info["aspect_ratio"]
+        
+        # Detect video format based on aspect ratio
+        is_360_likely = abs(aspect_ratio - 2.0) < 0.1       # Equirectangular ~2:1
+        is_fisheye_likely = abs(aspect_ratio - 1.0) < 0.1   # Fish-eye ~1:1
+        is_standard_likely = abs(aspect_ratio - 1.77) < 0.1 # Standard 16:9
+        
+        if is_360_likely:
+            validation["detected_format"] = "equirectangular_360"
+            print(f"✅ Detected: 360° Equirectangular format ({aspect_ratio:.2f}:1)")
+        elif is_fisheye_likely:
+            validation["detected_format"] = "fisheye"
+            print(f"✅ Detected: Fish-eye format ({aspect_ratio:.2f}:1)")
+        elif is_standard_likely:
+            validation["detected_format"] = "standard"
             validation["warnings"].append(
-                f"Aspect ratio {video_info['aspect_ratio']:.2f} doesn't match typical 360° format (2:1)"
+                f"Standard video format detected ({aspect_ratio:.2f}:1). "
+                f"Motion detection will work but may not be optimized for this format."
+            )
+        else:
+            validation["detected_format"] = "unknown"
+            validation["warnings"].append(
+                f"Unusual aspect ratio {aspect_ratio:.2f}:1. "
+                f"Expected: 2:1 (360°), 1:1 (fish-eye), or 16:9 (standard)"
             )
         
-        # Check resolution
-        if video_info["width"] < 1920:
+        # Check resolution (adjusted for different formats)
+        min_resolution = {
+            "equirectangular_360": 1920,  # Higher res needed for 360°
+            "fisheye": 1080,              # Fish-eye can be lower res
+            "standard": 720,              # Standard videos
+            "unknown": 720
+        }
+        
+        min_res = min_resolution.get(validation["detected_format"], 720)
+        if video_info["width"] < min_res:
             validation["warnings"].append(
-                f"Low resolution ({video_info['width']}x{video_info['height']}) may affect motion detection quality"
+                f"Low resolution ({video_info['width']}x{video_info['height']}) "
+                f"for {validation['detected_format']} format. "
+                f"Recommended minimum: {min_res}p width"
             )
         
-        # Check duration
+        # Check duration (same for all formats)
         if video_info["duration_seconds"] < 30:
             validation["warnings"].append(
-                f"Very short video ({video_info['duration_seconds']:.1f}s) may not be sufficient for background learning"
+                f"Very short video ({video_info['duration_seconds']:.1f}s) "
+                f"may not be sufficient for background learning"
             )
         elif video_info["duration_seconds"] > 7200:  # 2 hours
             validation["recommendations"].append(
-                f"Long video ({video_info['duration_minutes']:.1f}m) - consider processing in chunks for better performance"
+                f"Long video ({video_info['duration_minutes']:.1f}m) - "
+                f"consider processing in chunks for better performance"
             )
         
-        # Check FPS
+        # Check FPS (same for all formats)
         if video_info["fps"] < 15:
             validation["warnings"].append(
                 f"Low FPS ({video_info['fps']:.1f}) may affect motion detection accuracy"
@@ -423,6 +463,16 @@ class Video360Processor:
         
         # Determine validation status
         validation["is_valid"] = len(validation["warnings"]) == 0
+        
+        # Add format-specific recommendations
+        if validation["detected_format"] == "fisheye":
+            validation["recommendations"].append(
+                "Fish-eye format detected - motion detection will work without distortion correction"
+            )
+        elif validation["detected_format"] == "equirectangular_360":
+            validation["recommendations"].append(
+                "360° format detected - processing full panoramic view"
+            )
         
         return validation
     

@@ -1,145 +1,192 @@
-# 360° Home Activity Motion Analysis Pipeline
+# insta360-video-activity-segmentation
 
-A production-ready Python-based motion analysis system for detecting and segmenting activities in 360° home recordings using MOG2 background subtraction and temporal analysis with GPU acceleration support.
+Ray-based distributed motion energy detection pipeline for 360° home activity videos with production-ready integration.
 
 ## 🎯 Overview
 
-This pipeline automatically processes long-form 360° home activity videos (cooking, cleaning, exercising) and segments them into meaningful activity periods. It uses computer vision techniques adapted from public safety surveillance systems for home activity analysis, now packaged in a production-ready class-based architecture.
+This pipeline automatically processes long-form 360° home activity videos (cooking, cleaning, exercising) and segments them into meaningful activity periods using distributed Ray processing for scalable performance.
 
 ### Key Features
 
-- **🎥 360° Video Support**: Processes equirectangular format videos from Insta360 and similar cameras
-- **🔍 Motion Energy Analysis**: Uses MOG2 background subtraction for robust motion detection
-- **⚡ Activity Segmentation**: Automatically identifies high/medium/low activity periods with overlap resolution
-- **📊 Comprehensive Analytics**: Detailed motion statistics and activity summaries
-- **🎨 Visual Output**: Generates annotated videos with motion overlay
-- **🚀 GPU Acceleration**: CUDA support with CuPy for faster processing
-- **🏗️ Production-Ready**: Class-based architecture with comprehensive logging
-- **🔧 Configurable**: Adjustable sensitivity and processing parameters
-- **⏰ Human-Readable Times**: Displays times as "1h 15m 23s" instead of "75.4 minutes"
+- **🚀 Ray Distributed Processing**: Scalable motion analysis using Ray clusters
+- **🎥 360° Video Support**: Processes equirectangular format videos from Insta360 cameras  
+- **🔍 Motion Energy Detection**: MOG2 background subtraction for robust motion detection
+- **⚡ Activity Segmentation**: Automatically identifies high/medium/low activity periods
+- **📊 Production Ready**: Clean integration APIs for existing pipelines
+- **🎨 Minimal Dependencies**: Focused on essential motion analysis functionality
+- **🖥️ GPU Acceleration**: CUDA support for faster processing
 
 ## 🚀 Quick Start
 
 ### 1. Installation
 
 ```bash
-# Clone or download the project
-git clone <repository-url>
-cd 360_motion_analyzer
+# Clone the repository
+git clone https://github.com/nvidia-coe/insta360-video-activity-segmentation.git
+cd insta360-video-activity-segmentation
+
+git checkout feature/motion-energy-analysis
 
 # Install dependencies
 pip install -r requirements.txt
-
-# Optional: Install GPU acceleration (for NVIDIA GPUs)
-pip install cupy-cuda12x
-
-# Verify ffmpeg installation (required for video processing)
-ffmpeg -version
 ```
 
 ### 2. Basic Usage
 
-**Edit the configuration in `main.py`:**
-
+#### Standalone Motion Analysis
 ```python
-# Custom configuration for this run
-custom_config = {
-    # === VIDEO INPUT CONFIGURATION ===
-    "video_path": r"input/your_360_video.mp4",  # 👈 Your video path
-    
-    # === OUTPUT CONFIGURATION ===
-    "output_directory": "output",               # Results folder
-    "save_annotated_video": False,              # Save video with overlay (saves space)
-    "save_motion_data": True,                   # Save detailed motion data
-    
-    # === PROCESSING OPTIONS ===
-    "sensitivity_level": "medium",              # low/medium/high
-    
-    # === DEBUG AND LOGGING ===
-    "verbose_logging": True,                    # Enable detailed debug output
-}
+import ray
+from ray_jobs.motion_energy import analyze_motion_energy_only
+
+# Initialize Ray
+ray.init()
+
+# Analyze motion energy
+future = analyze_motion_energy_only.remote(
+    video_path="input/your_video.mp4",
+    sensitivity_level="medium",
+    save_detailed_data=False
+)
+
+result = ray.get(future)
+
+if result["success"]:
+    print(f"Found {result['total_segments']} activity segments")
+    for seg in result['segments']:
+        print(f"{seg['start_time']:.1f}s-{seg['end_time']:.1f}s: {seg['activity_type']}")
+
+ray.shutdown()
 ```
 
-**Run the analysis:**
+#### Pipeline Integration
+```python
+# In your existing pipeline
+from ray_jobs.motion_energy import analyze_motion_energy_only
+
+def motion_analysis_stage(video_path: str):
+    motion_results = ray.get(analyze_motion_energy_only.remote(
+        video_path=video_path,
+        sensitivity_level="medium"
+    ))
+    return motion_results
+```
+
+### 3. Test the System
 
 ```bash
-python src/main.py
+# Test motion energy analysis
+python ray_jobs/motion_energy.py
+
+# Test Ray integration  
+python tests/test_motion_ray.py
+
+# Test full pipeline
+python my_pipeline.py
 ```
-
-### 3. Results
-
-The pipeline generates:
-- **📄 `segments.json`**: Detailed activity segments with timestamps
-- **🎥 `annotated.mp4`**: Video with motion detection overlay (optional)
-- **📊 `motion_data.json`**: Complete motion timeline data
-- **📝 `summary.txt`**: Human-readable analysis report
 
 ## 📁 Project Structure
 
 ```
-360_motion_analyzer/
+insta360-video-activity-segmentation/
 ├── README.md                           # This file
-├── requirements.txt                    # Python dependencies
-├── src/
-│   ├── main.py                        # Production-ready pipeline class (edit VIDEO_PATH here)
-│   ├── core/
-│   │   ├── motion_detector.py         # MOG2 motion detection with GPU acceleration
-│   │   └── video_processor.py         # Video I/O and 360° handling
-│   ├── utils/
-│   │   ├── config.py                  # Configuration constants
-│   │   └── logging_utils.py           # Comprehensive logging setup
-│   ├── analyzers/
-│   │   └── activity_segmenter.py      # Activity segmentation with overlap resolution
-│   └── __init__.py files
-├── output/                             # Generated results
-├── logs/                              # Detailed application logs
-└── tests/                             # Unit tests
+├── requirements.txt                    # Dependencies
+├── my_pipeline.py                      # Main pipeline with motion energy integration
+├── ray_jobs/
+│   ├── motion_energy.py               # Core motion energy analysis (Ray remote)
+│   ├── video_splitter.py             # Video chunking utilities
+│   ├── insv_to_mp4.py                # INSV format conversion
+│   └── __init__.py
+├── motion_analysis/                    # Motion analysis pipeline
+│   └── src/
+│       ├── main.py                    # Motion analysis pipeline class
+│       ├── core/
+│       │   ├── motion_detector.py     # MOG2 motion detection
+│       │   └── video_processor.py     # Video I/O and processing
+│       ├── analyzers/
+│       │   └── activity_segmenter.py  # Activity segmentation logic
+│       └── utils/
+│           ├── config.py              # Configuration constants
+│           └── logging_utils.py       # Logging utilities
+├── utils/
+│   └── logger.py                      # Ray pipeline logging
+├── tests/
+│   └── test_motion_ray.py            # Motion energy testing
+└── input/                             # Test video directory
 ```
 
-## 🏗️ Production Architecture
+## 🔧 Core Functions
 
-### Class-Based Design
-
-The new `MotionEnergyAnalysisPipeline` class provides:
+### Motion Energy Analysis
 
 ```python
-# Initialize pipeline with configuration
-pipeline = MotionEnergyAnalysisPipeline(config)
-
-# Run complete analysis
-pipeline.run_analysis()
-
-# Get structured results for further processing
-results = pipeline.get_results_summary()
+@ray.remote
+def analyze_motion_energy_only(
+    video_path: str,
+    sensitivity_level: str = "medium",  # "low", "medium", "high"
+    save_detailed_data: bool = False
+) -> Dict[str, Any]:
+    """
+    Analyzes motion energy in video without chunking or conversion.
+    Perfect for pipeline integration.
+    
+    Returns:
+        {
+            "success": bool,
+            "total_segments": int,
+            "video_duration_seconds": float,
+            "processing_time_seconds": float,
+            "motion_statistics": {...},
+            "segments": [
+                {
+                    "start_time": float,
+                    "end_time": float, 
+                    "duration": float,
+                    "activity_type": str,  # "HIGH_ACTIVITY", "MEDIUM_ACTIVITY", "LOW_ACTIVITY"
+                    "confidence": float,
+                    "avg_motion_energy": float
+                }
+            ]
+        }
+    """
 ```
 
-### Configuration Management
+## 📊 Understanding Results
 
-**Flexible configuration system:**
-- **Defaults**: Defined in `config.py`
-- **Runtime overrides**: Specified in `main.py`
-- **No argument parsing**: Simple dictionary-based configuration
+### Activity Segment Types
 
-```python
-# Override defaults for specific analysis
-custom_config = {
-    "video_path": "videos/cooking_session.mp4",
-    "sensitivity_level": "high",
-    "output_directory": "results/cooking"
-}
-```
+- **HIGH_ACTIVITY**: Intense movements (active cooking, vigorous cleaning, exercise)
+- **MEDIUM_ACTIVITY**: Moderate tasks (food prep, organizing, light cleaning)  
+- **LOW_ACTIVITY**: Minimal movement (resting, reading, passive activities)
 
-### Enhanced Logging
+### Motion Energy Scores
 
-**Unified logging system:**
-- **Console output**: Progress updates with emoji formatting
-- **File logging**: Detailed debug information for analysis
-- **Human-readable times**: All durations shown as "1h 15m 23s"
-- **GPU status**: Automatic detection and reporting
+- **0.000 - 0.005**: Low activity (sitting, standing, minimal movement)
+- **0.005 - 0.020**: Medium activity (cooking prep, light cleaning)
+- **0.020 - 1.000**: High activity (vigorous cooking, active cleaning)
 
-## 🔧 Configuration Options
+### Confidence Scores
 
-### Motion Detection Sensitivity
+- **0.0 - 0.5**: Low confidence (may be noise or brief movements)
+- **0.5 - 0.8**: Medium confidence (likely genuine activity)
+- **0.8 - 1.0**: High confidence (clear, sustained activity)
+
+## 🎥 Supported Video Formats
+
+- **Primary**: `.mp4` (H.264 encoded)
+- **360° Native**: `.insv` (Insta360 format, auto-converted)
+- **Additional**: `.avi`, `.mov`, `.mkv`
+
+### 360° Video Requirements
+
+- **Format**: Equirectangular projection preferred
+- **Aspect Ratio**: ~2:1 (e.g., 7680x3840, 5760x2880)
+- **Content**: Indoor home activities
+- **Duration**: 30 seconds to 2+ hours
+- **Resolution**: Automatically optimized for processing
+
+## ⚙️ Configuration
+
+### Sensitivity Levels
 
 **Low Sensitivity:**
 - Best for noisy environments
@@ -156,125 +203,44 @@ custom_config = {
 - Best for detailed activity analysis
 - May be noisy in some environments
 
-### Advanced Parameters (in `src/utils/config.py`):
+### Advanced Configuration
+
+Edit `motion_analysis/src/utils/config.py`:
 
 ```python
-# Motion Detection
-MIN_FOREGROUND_AREA = 200        # Minimum motion region size
-CONFIDENCE_THRESHOLD = 0.02      # Motion confidence threshold (lowered for home activities)
-BG_VAR_THRESHOLD = 25           # Background learning sensitivity
+# Motion Detection Thresholds
+HIGH_MOTION_THRESHOLD = 0.02        # High activity threshold
+MEDIUM_MOTION_THRESHOLD = 0.005     # Medium activity threshold
+ACTIVITY_MIN_DURATION = 1.0         # Minimum segment duration (seconds)
 
-# Activity Segmentation  
-ACTIVITY_MIN_DURATION = 1.0     # Minimum activity duration (reduced to 1 second)
-HIGH_MOTION_THRESHOLD = 0.02    # High activity threshold (more sensitive)
-MEDIUM_MOTION_THRESHOLD = 0.005 # Medium activity threshold (much more sensitive)
-
-# Video Processing
-MOTION_SMOOTH_WINDOW = 15       # Smoothing window (frames)
-PROGRESS_UPDATE_INTERVAL = 100  # Progress logging frequency
+# Processing Parameters
+BG_VAR_THRESHOLD = 25               # Background sensitivity
+MIN_FOREGROUND_AREA = 50            # Minimum motion area
 ```
 
-## 🎥 Supported Video Formats
+## 🚀 Performance & Scaling
 
-- **Primary**: `.mp4` (H.264 encoded)
-- **360° Native**: `.insv` (Insta360 format)
-- **Additional**: `.avi`, `.mov`, `.mkv`
+### Processing Speed
+- **CPU**: 1-2x real-time (1 hour video → 1-2 hours processing)
+- **GPU**: 2-4x real-time (1 hour video → 15-30 minutes processing)
+- **Ray Cluster**: Scales linearly with additional nodes
 
-### 360° Video Requirements
+### Memory Usage
+- **Typical**: 2-4 GB RAM for standard videos
+- **High-res**: Automatically downscaled for efficiency
+- **Ray workers**: ~1-2 GB per worker
 
-- **Format**: Equirectangular projection
-- **Aspect Ratio**: ~2:1 (e.g., 7680x3840, 5760x2880)
-- **Content**: Indoor home activities
-- **Duration**: 30 seconds to 2+ hours
-- **Resolution**: Automatically downscaled for memory efficiency
+### Ray Cluster Setup
 
-## 📊 Understanding Results
+```python
+# Single machine
+ray.init()
 
-### Activity Segment Types
+# Multi-machine cluster
+ray.init(address='ray://head-node-ip:10001')
 
-- **HIGH_ACTIVITY**: Intense movements (active cooking, vigorous cleaning)
-- **MEDIUM_ACTIVITY**: Moderate tasks (food prep, organizing)
-- **LOW_ACTIVITY**: Minimal movement (resting, reading)
-
-### Motion Energy Scores
-
-- **0.000 - 0.005**: Low activity (sitting, standing, minimal movement)
-- **0.005 - 0.020**: Medium activity (cooking prep, light cleaning)
-- **0.020 - 1.000**: High activity (vigorous cooking, active cleaning)
-
-### Confidence Scores
-
-- **0.0 - 0.5**: Low confidence (may be noise or brief movements)
-- **0.5 - 0.8**: Medium confidence (likely genuine activity)
-- **0.8 - 1.0**: High confidence (clear, sustained activity)
-
-### Human-Readable Time Display
-
-All times are displayed in intuitive formats:
-- **45 seconds** → "45s"
-- **90 seconds** → "1m 30s"
-- **3600 seconds** → "1h"
-- **4500 seconds** → "1h 15m"
-- **7323 seconds** → "2h 2m 3s"
-
-## 🔍 Example Output
-
-### Terminal Output
-```
-📊 ANALYSIS RESULTS SUMMARY
-========================================
-🎬 Video: cooking_session.mp4
-⏱️  Duration: 1h 15m 23s
-🎯 Segments Found: 3
-🚀 Processing Time: 2m 45s
-
-🎯 Top Activity Segments:
-   1. 5m 12s-8m 45s (3m 33s)
-      Type: HIGH_ACTIVITY
-      Motion: 0.087 | Confidence: 0.892
-      Description: High-intensity activity period - likely active cooking
-```
-
-### JSON Output
-```json
-{
-  "segments": [
-    {
-      "start_time": 312.5,
-      "end_time": 525.3,
-      "duration": 212.8,
-      "activity_type": "HIGH_ACTIVITY",
-      "avg_motion_energy": 0.087,
-      "confidence": 0.892,
-      "description": "High-intensity activity period (3m 33s) - likely active cooking"
-    }
-  ]
-}
-```
-
-## 🚀 GPU Acceleration
-
-### Automatic GPU Detection
-
-The pipeline automatically detects and uses GPU acceleration when available:
-
-```
-[GPU] CuPy available - GPU acceleration enabled
-🚀 GPU acceleration enabled!
-✅ OpenCV CUDA support with 1 device(s)
-```
-
-### GPU Requirements
-
-- **NVIDIA GPU** with CUDA support
-- **CuPy**: `pip install cupy-cuda12x`
-- **OpenCV with CUDA**: For advanced acceleration
-
-### CPU Fallback
-
-The system gracefully falls back to CPU processing if GPU is unavailable:
-```
-⚠️  Running in CPU mode
+# With resource constraints
+ray.init(num_cpus=8, num_gpus=1)
 ```
 
 ## 🛠️ Advanced Usage
@@ -282,288 +248,144 @@ The system gracefully falls back to CPU processing if GPU is unavailable:
 ### Batch Processing
 
 ```python
-config = {
-    "video_directory": "videos/",           # Process entire directory
-    "sensitivity_level": "high",
-    "save_annotated_video": False,         # Save space for batch
-    "output_directory": "batch_results"
-}
+import ray
+from ray_jobs.motion_energy import analyze_motion_energy_only
 
-pipeline = MotionEnergyAnalysisPipeline(config)
-pipeline.run_analysis()
+ray.init()
+
+video_files = ["video1.mp4", "video2.mp4", "video3.mp4"]
+
+# Process multiple videos in parallel
+futures = [
+    analyze_motion_energy_only.remote(video, "medium")
+    for video in video_files
+]
+
+results = ray.get(futures)
+
+for i, result in enumerate(results):
+    if result["success"]:
+        print(f"Video {i+1}: {result['total_segments']} segments")
+    else:
+        print(f"Video {i+1}: Failed - {result['error']}")
 ```
 
-### Programmatic Access
+### Integration with Existing Pipelines
 
 ```python
-# Get structured results for further processing
-pipeline = MotionEnergyAnalysisPipeline(config)
-pipeline.run_analysis()
-
-results = pipeline.get_results_summary()
-for segment in results['segments']:
-    print(f"Activity: {segment['time_range_formatted']} - {segment['activity_type']}")
+# my_pipeline.py integration example
+def enhanced_pipeline(input_video: str):
+    
+    # Stage 1: Video conversion (if needed)
+    if input_video.endswith('.insv'):
+        converted = ray.get(convert_insv_to_dual_mp4.remote(input_video))
+        video_path = converted["output_view_1"]
+    else:
+        video_path = input_video
+    
+    # Stage 2: Motion energy analysis
+    motion_results = ray.get(analyze_motion_energy_only.remote(
+        video_path=video_path,
+        sensitivity_level="medium"
+    ))
+    
+    # Stage 3: Use motion results for downstream processing
+    if motion_results["success"]:
+        segments = motion_results["segments"]
+        # Process segments for labeling, classification, etc.
+        return process_segments(segments)
+    
+    return None
 ```
 
-### Integration with Other Systems
+## 🧪 Testing
 
-```python
-from src.main import MotionEnergyAnalysisPipeline
+### Run Individual Tests
 
-# Easy integration into larger systems
-def analyze_home_video(video_path: str) -> dict:
-    config = {"video_path": video_path, "save_annotated_video": False}
-    pipeline = MotionEnergyAnalysisPipeline(config)
-    pipeline.run_analysis()
-    return pipeline.get_results_summary()
+```bash
+# Test motion energy analysis
+python ray_jobs/motion_energy.py
+
+# Test Ray integration
+python tests/test_motion_ray.py  
+
+# Test full pipeline
+python my_pipeline.py
+```
+
+### Custom Video Testing
+
+```bash
+# Test with custom video
+python ray_jobs/motion_energy.py /path/to/your/video.mp4
+python tests/test_motion_ray.py /path/to/your/video.mp4
 ```
 
 ## 🛠️ Troubleshooting
 
 ### Common Issues
 
-**"No video file found":**
-- Check that `video_path` in the configuration points to your actual video file
-- Ensure the file extension is supported
-
-**"No significant activities detected":**
-- Try increasing sensitivity: `"sensitivity_level": "high"`
-- Check if video contains actual human activities
-- Verify video isn't mostly static scenes
+**"No motion segments detected":**
+- Try increasing sensitivity: `sensitivity_level="high"`
+- Verify video contains actual human activities
+- Check video quality and lighting conditions
 
 **"Processing very slow":**
-- Normal for long videos (1-2x real-time on CPU, faster with GPU)
-- Consider setting `"save_annotated_video": False` to save processing time
-- GPU acceleration significantly improves performance
+- Normal for CPU-only processing (1-2x real-time)
+- Install GPU acceleration: `pip install cupy-cuda12x`
+- Consider using Ray cluster for parallel processing
 
-**"ffmpeg not found":**
-```bash
-# Install ffmpeg
-# Windows: Download from https://ffmpeg.org/download.html
-# Linux: sudo apt install ffmpeg
-# Mac: brew install ffmpeg
-```
+**Import errors:**
+- Ensure all `__init__.py` files exist in directories
+- Check Python path includes project root
+- Verify motion_analysis directory structure
 
 ### GPU Troubleshooting
 
-**CuPy installation issues:**
 ```bash
-# For CUDA 12.x
-pip install cupy-cuda12x
+# Check GPU availability
+python -c "import cupy; print('GPU available:', cupy.cuda.runtime.getDeviceCount())"
 
-# For CUDA 11.x
-pip install cupy-cuda11x
+# Force CPU mode if GPU issues
+export CUDA_VISIBLE_DEVICES=""
 ```
 
-**GPU memory issues:**
-- Reduce `GPU_MEMORY_FRACTION` in config.py
-- Set `FORCE_CPU_FALLBACK = True` to disable GPU
+## 📈 Example Results
 
-### Debug Mode
-
-Enable comprehensive logging:
-```python
-custom_config = {
-    "verbose_logging": True,    # Detailed console + file logging
-    "log_directory": "logs"     # Check logs/ directory for detailed analysis
-}
+### Sample Output for 39-second cooking video:
+```
+✅ SUCCESS: 3 segments found
+   Duration: 39.6s
+   Processing: 67.5s
+   
+   Activity Segments:
+   1. 0.0s-4.4s (HIGH_ACTIVITY) - Confidence: 0.841
+   2. 4.4s-17.5s (MEDIUM_ACTIVITY) - Confidence: 0.820  
+   3. 24.5s-39.6s (MEDIUM_ACTIVITY) - Confidence: 0.818
+   
+   Motion Statistics:
+   - High activity: 21.8% (259 frames)
+   - Medium activity: 25.8% (306 frames)  
+   - Low activity: 52.4% (621 frames)
 ```
 
-## 📈 Performance Expectations
-
-### Processing Speed
-- **CPU-only**: 1-2x real-time (1 hour video → 1-2 hours processing)
-- **GPU-accelerated**: 2-4x real-time (1 hour video → 15-30 minutes processing)
-- **Factors**: Video resolution, motion complexity, hardware specs
-
-### Memory Usage
-- **Typical**: 2-4 GB RAM for most videos
-- **High-res videos**: Automatically downscaled (7680x3840 → 1920x960)
-- **Adaptive**: MOG2 uses constant memory regardless of video length
-- **Storage**: ~50MB output data per hour of video
-
-### System Requirements
+## 🔮 System Requirements
 
 **Minimum:**
+- Python 3.8+
 - 8GB RAM
 - 4-core CPU
-- Python 3.8+
 
 **Recommended:**
-- 16GB+ RAM
+- Python 3.9+
+- 16GB+ RAM  
 - 8+ core CPU or NVIDIA GPU
-- SSD storage for faster I/O
+- SSD storage for video processing
 
-## 🔮 Key Improvements in This Version
-
-### ✅ Production-Ready Architecture
-- **Class-based design**: `MotionEnergyAnalysisPipeline` for clean organization
-- **Configuration management**: Flexible config system with defaults and overrides
-- **Error handling**: Comprehensive exception handling throughout
-- **Logging**: Unified console and file logging with debug information
-
-### ✅ Enhanced User Experience
-- **Human-readable times**: "1h 15m 23s" instead of "75.4 minutes"
-- **Overlap resolution**: Automatically resolves conflicting activity segments
-- **Clear progress tracking**: Real-time processing updates with time estimates
-- **GPU detection**: Automatic GPU/CPU detection and optimization
-
-### ✅ Improved Accuracy
-- **Optimized thresholds**: Tuned for home activities (more sensitive detection)
-- **Gap merging**: Intelligent merging of nearby activity segments
-- **Confidence scoring**: Enhanced confidence calculation for segment reliability
-- **Noise reduction**: Better morphological operations and filtering
-
-### ✅ Better Output
-- **Structured results**: Easy programmatic access to analysis results
-- **Comprehensive reports**: Detailed text summaries with recommendations
-- **Time navigation**: Video timestamps for easy segment location
-- **Memory efficient**: Optional annotated video generation
-
-## 🎛️ Configuration Examples
-
-### High-Sensitivity Analysis
-```python
-custom_config = {
-    "video_path": "videos/subtle_activities.mp4",
-    "sensitivity_level": "high",
-    "save_annotated_video": True,
-    "output_directory": "detailed_analysis"
-}
-```
-
-### Batch Processing
-```python
-custom_config = {
-    "video_directory": "videos/",
-    "sensitivity_level": "medium", 
-    "save_annotated_video": False,  # Save space and time
-    "output_directory": "batch_results"
-}
-```
-
-### Memory-Optimized Processing
-```python
-custom_config = {
-    "video_path": "large_video.mp4",
-    "save_annotated_video": False,
-    "save_motion_data": False,       # Minimal output
-    "verbose_logging": False         # Reduce log size
-}
-```
-
-## 📊 Sample Analysis Results
-
-### For a 39-second cooking video:
-```
-📊 ANALYSIS RESULTS SUMMARY
-========================================
-🎬 Video: cooking_demo.mp4
-⏱️  Duration: 39s
-🎯 Segments Found: 2
-🚀 Processing Time: 41s
-
-📈 Motion Statistics:
-   Average Motion Energy: 0.0121
-   Peak Motion Energy: 1.0000
-   High Activity: 21.0% of video
-   Medium Activity: 20.6% of video
-   Low Activity: 58.4% of video
-
-🎯 Top Activity Segments:
-   1. 3s-17s (14s)
-      Type: MEDIUM_ACTIVITY
-      Motion: 0.015 | Confidence: 0.812
-      Description: Moderate activity - likely food prep
-
-   2. 24s-37s (13s)
-      Type: MEDIUM_ACTIVITY  
-      Motion: 0.008 | Confidence: 0.814
-      Description: Moderate activity - likely organizing
-```
-
-## 🔬 Technical Details
-
-### Motion Detection Algorithm
-- **MOG2 Background Subtraction**: Adaptive background learning
-- **Morphological Operations**: Noise reduction and hole filling
-- **Connected Components**: Region-based motion analysis
-- **Temporal Smoothing**: 15-frame window for stability
-
-### Activity Segmentation
-- **Threshold-based**: High/medium/low activity classification
-- **Gap merging**: Combines nearby segments (5-second tolerance for short videos)
-- **Overlap resolution**: Resolves conflicts by confidence or boundary adjustment
-- **Quality filtering**: Minimum duration and confidence requirements
-
-### GPU Acceleration
-- **CuPy integration**: GPU-accelerated array operations
-- **CUDA background subtraction**: Hardware-accelerated motion detection
-- **Automatic fallback**: Seamless CPU fallback if GPU unavailable
-- **Memory management**: Efficient GPU memory usage
-
-## 🔍 Analysis Capabilities
-
-### Activity Detection
-- **Cooking activities**: Chopping, stirring, pot handling
-- **Cleaning activities**: Sweeping, wiping, organizing
-- **Exercise activities**: Stretching, walking, equipment use
-- **General movement**: Walking, reaching, object manipulation
-
-### Temporal Analysis
-- **Short activities**: 1-second minimum detection
-- **Long sessions**: Multi-hour video support
-- **Activity transitions**: Automatic boundary detection
-- **Rest periods**: Low-activity segment identification
-
-## 🚀 Performance Optimization
-
-### For Large Videos (>1 hour):
-```python
-custom_config = {
-    "save_annotated_video": False,    # Skip video generation
-    "sensitivity_level": "medium",    # Balanced performance
-}
-```
-
-### For High-Resolution Videos:
-- **Automatic downscaling**: 7680x3840 → 1920x960 for processing
-- **Memory efficiency**: 25% resize factor reduces memory usage by ~94%
-- **Quality preservation**: Motion detection accuracy maintained
-
-### For Batch Processing:
-```python
-# Process entire directories efficiently
-custom_config = {
-    "video_directory": "surveillance_footage/",
-    "save_motion_data": False,        # Skip detailed data for space
-    "verbose_logging": False          # Reduce log volume
-}
-```
-
-## 🔮 Future Enhancements
-
-### Planned Features
-- **🚀 Distributed Processing**: Multi-GPU support for large-scale analysis
-- **🎵 Audio Analysis**: Voice Activity Detection integration
-- **🧠 Semantic Classification**: Activity type recognition using deep learning
-- **☁️ Cloud Storage**: Azure Blob/AWS S3 integration
-- **📱 Real-time Processing**: Live camera feed analysis
-
-## 📞 Support
-
-### Getting Help
-1. **Check logs**: Review detailed logs in `logs/` directory
-2. **Enable debug mode**: Set `"verbose_logging": True`
-3. **Validate setup**: Pipeline automatically tests installation
-4. **Test with short video**: Try 30-60 second clips first
-
-### System Requirements Validation
-The pipeline automatically validates:
-- **Dependencies**: OpenCV, NumPy, SciPy, scikit-learn
-- **ffmpeg**: Video processing capability
-- **GPU**: CUDA and CuPy availability
-- **Configuration**: Output directories and file permissions
+**For Ray Clusters:**
+- Network connectivity between nodes
+- Shared storage or distributed file system
+- Consistent Python environments
 
 ## 📄 License
 
@@ -571,12 +393,11 @@ This project is developed for research and educational purposes. Please ensure c
 
 ---
 
-**🏠📹 Ready to analyze your 360° home activities with production-ready performance!**
+**🏠📹 Ready to analyze your 360° home activities with scalable Ray processing!**
 
-### Recent Updates (v2.0)
-- ✅ **Class-based architecture** for production use
-- ✅ **Human-readable time formatting** (1h 15m 23s)
-- ✅ **Overlap resolution** eliminates conflicting segments
-- ✅ **GPU acceleration** with automatic CPU fallback
-- ✅ **Enhanced logging** with detailed debug information
-- ✅ **Optimized thresholds** for better home activity detection
+### Recent Updates
+- ✅ **Ray Integration**: Distributed processing with Ray clusters
+- ✅ **Clean API**: Simple `analyze_motion_energy_only()` function
+- ✅ **Production Ready**: Minimal dependencies and clean integration
+- ✅ **GPU Acceleration**: CUDA support for faster processing
+- ✅ **Pipeline Integration**: Easy integration into existing workflows
