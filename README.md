@@ -37,3 +37,7 @@ Tests can be run as individual jobs using the command below
     ``` shell
     /home/nvcoe_admin/miniconda3/envs/py311/bin/python /home/nvcoe_admin/code/oslo/insta360-video-activity-segmentation/tests/ray_job_test
     ```
+
+model weights 
+https://huggingface.co/onnx-community/nsfw_image_detection-ONNX/tree/main/onnx?not-for-all-audiences=true
+ 
