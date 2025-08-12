@@ -1,11 +1,1 @@
 ray[default]
-azure-storage-blob
-opencv-python
-ffmpeg-python
-pydub
-scenedetect
-torch
-transformers
-librosa
-numpy
-pyyaml
