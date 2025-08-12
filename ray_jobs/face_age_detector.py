@@ -9,7 +9,64 @@ from datetime import timedelta
 # Set up logger first
 logger = logging.getLogger("face_age_detector")
 
+# GPU Configuration - Ensure CUDA can access GPU
+def configure_gpu():
+    """Configure GPU settings to ensure CUDA can access the GPU."""
+    # Clear any restrictive CUDA environment variables
+    if "CUDA_VISIBLE_DEVICES" in os.environ and os.environ["CUDA_VISIBLE_DEVICES"] == "":
+        logger.info("Clearing restrictive CUDA_VISIBLE_DEVICES setting")
+        os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+    
+    # Set CUDA to use the first available GPU
+    if "CUDA_VISIBLE_DEVICES" not in os.environ:
+        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+        logger.info("Set CUDA_VISIBLE_DEVICES=0 to use first GPU")
+    
+    # Set other GPU-related environment variables
+    os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
+    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Reduce TensorFlow logging
+    
+    # Additional GPU configuration for better performance
+    os.environ["TF_GPU_THREAD_MODE"] = "gpu_private"
+    os.environ["TF_GPU_THREAD_COUNT"] = "1"
+    
+    # Try to configure TensorFlow GPU memory growth
+    try:
+        import tensorflow as tf
+        gpus = tf.config.experimental.list_physical_devices('GPU')
+        if gpus:
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+            logger.info(f"Configured memory growth for {len(gpus)} GPU(s)")
+    except ImportError:
+        logger.info("TensorFlow not available during GPU configuration")
+    except Exception as e:
+        logger.warning(f"Could not configure TensorFlow GPU memory growth: {e}")
+    
+    logger.info(f"GPU Configuration: CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', 'Not set')}")
 
+# Configure GPU before any other imports
+configure_gpu()
+
+def verify_gpu_access():
+    """Verify that GPU is accessible and working."""
+    try:
+        import tensorflow as tf
+        gpus = tf.config.list_physical_devices('GPU')
+        if gpus:
+            logger.info(f"✅ GPU access verified: {len(gpus)} GPU(s) available")
+            for gpu in gpus:
+                logger.info(f"   - {gpu.name}")
+            return True
+        else:
+            logger.warning("⚠️ No GPUs detected by TensorFlow")
+            return False
+    except ImportError:
+        logger.warning("⚠️ TensorFlow not available, cannot verify GPU access")
+        return False
+    except Exception as e:
+        logger.error(f"❌ Error verifying GPU access: {e}")
+        return False
 
 # Don't import FaceAgeDetector at module level - import it inside the Ray functions
 # This prevents import errors when the module is imported on different machines
@@ -31,6 +88,14 @@ def process_video_for_face_detection(video_path: str, output_dir: str = "/tmp/fa
         Face analysis results for the entire video
     """
     try:
+        # Configure GPU in Ray worker process
+        configure_gpu()
+        
+        # Verify GPU access in worker process
+        gpu_available = verify_gpu_access()
+        if not gpu_available:
+            logger.warning("GPU not accessible in Ray worker, will use CPU")
+        
         # Import FaceAgeDetector inside the Ray function to ensure it works in worker environment
         
         # Try to find and import FaceAgeDetector
@@ -132,6 +197,14 @@ def process_video_chunks_for_face_detection(chunk_paths: list, config=None,
         Combined results from all chunks
     """
     try:
+        # Configure GPU in Ray worker process
+        configure_gpu()
+        
+        # Verify GPU access in worker process
+        gpu_available = verify_gpu_access()
+        if not gpu_available:
+            logger.warning("GPU not accessible in Ray worker, will use CPU")
+        
         # Import FaceAgeDetector inside the Ray function to ensure it works in worker environment
         
         # Try to find and import FaceAgeDetector
@@ -258,6 +331,14 @@ if __name__ == "__main__":
         try:
             # Test the Ray function directly
             print("🚀 Testing face detection on sample video...")
+            
+            # Verify GPU access before running
+            print("🔍 Checking GPU access...")
+            gpu_available = verify_gpu_access()
+            if gpu_available:
+                print("✅ GPU is accessible and ready for processing")
+            else:
+                print("⚠️ GPU access issues detected, will fall back to CPU")
             
             # Initialize Ray if not already initialized
             if not ray.is_initialized():

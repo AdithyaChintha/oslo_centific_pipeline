@@ -249,8 +249,8 @@ def pipeline_main_batch_age_detection(input_paths: list, output_base_dir: str = 
 
 if __name__ == "__main__":
     # Configuration for single video processing
-    INPUT_VIDEO = "/Users/harshit.rajgarhia/Desktop/Sample_Video/VID_20250720_152154_00_011.insv"  # or .mp4
-    OUTPUT_DIR = "/Users/harshit.rajgarhia/Visual-Studio-Projects/insta360-video-activity-segmentation/video-age-detection-pipeline/outputs"
+    INPUT_VIDEO = "/home/nvcoe_admin/code/oslo/insta360-video-activity-segmentation/VID_20250720_152154_00_011.insv"  # or .mp4
+    OUTPUT_DIR = "/home/nvcoe_admin/code/oslo/insta360-video-activity-segmentation/video-age-detection-pipeline/outputs"
     FRAME_INTERVAL = 30  # Sample every 30 frames
     SAVE_FRAMES = False  # Don't save individual frames
     CHUNK_DURATION_SEC = 20  # 1-minute chunks
