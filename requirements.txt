@@ -15,7 +15,4 @@ pyyaml
 deepface
 tf-keras
 
-#insightface
-insightface>=0.7
-onnxruntime  # Required if using CPU
 
