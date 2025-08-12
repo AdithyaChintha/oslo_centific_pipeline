@@ -30,6 +30,9 @@ insta360-video-activity-segmentation/
 ├── ray_pipeline.py
 └── requirements.txt
 
+# Merges and PRs
+
+Ensure you merge with a PR to develop
 
 # Tests
 Tests can be run as individual jobs using the command below
