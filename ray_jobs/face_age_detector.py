@@ -1,9 +1,6 @@
 import ray
-import cv2
 import json
-import numpy as np
 import os
-import time
 import logging
 import sys
 from pathlib import Path
@@ -12,58 +9,10 @@ from datetime import timedelta
 # Set up logger first
 logger = logging.getLogger("face_age_detector")
 
-# Try to import FaceAgeDetector with multiple strategies
-try:
-    # Strategy 1: Direct import if already in path
-    from deepfacedetect import FaceAgeDetector
-    logger.info("Successfully imported FaceAgeDetector (direct import)")
-except ImportError:
-    try:
-        # Strategy 2: Add relative path to sys.path
-        current_file_dir = Path(__file__).resolve().parent
-        project_root = current_file_dir.parent
-        video_src_path = project_root / "video-age-detection-pipeline" / "src"
-        
-        if video_src_path.exists():
-            sys.path.insert(0, str(video_src_path))
-            from deepfacedetect import FaceAgeDetector
-            logger.info(f"Successfully imported FaceAgeDetector from {video_src_path}")
-        else:
-            raise ImportError(f"Path not found: {video_src_path}")
-            
-    except ImportError:
-        try:
-            # Strategy 3: Try absolute path from current working directory
-            cwd = os.getcwd()
-            if "video-age-detection-pipeline" in cwd:
-                video_src_path = os.path.join(cwd, "src")
-                sys.path.insert(0, video_src_path)
-                from deepfacedetect import FaceAgeDetector
-                logger.info(f"Successfully imported FaceAgeDetector from {video_src_path}")
-            else:
-                raise ImportError("video-age-detection-pipeline not found in current working directory")
-                
-        except ImportError:
-            # Strategy 4: Try to find it in parent directories
-            current_dir = Path(__file__).resolve().parent
-            for i in range(5):  # Look up to 5 levels up
-                parent_dir = current_dir.parents[i]
-                video_src_path = parent_dir / "video-age-detection-pipeline" / "src"
-                if video_src_path.exists():
-                    sys.path.insert(0, str(video_src_path))
-                    try:
-                        from deepfacedetect import FaceAgeDetector
-                        logger.info(f"Successfully imported FaceAgeDetector from {video_src_path}")
-                        break
-                    except ImportError:
-                        continue
-            else:
-                # Final fallback: raise detailed error
-                logger.error("All import strategies failed")
-                logger.error(f"Current file: {__file__}")
-                logger.error(f"Current directory: {os.getcwd()}")
-                logger.error(f"Python path: {sys.path}")
-                raise ImportError("Could not import FaceAgeDetector. Please ensure deepfacedetect.py is accessible.")
+
+
+# Don't import FaceAgeDetector at module level - import it inside the Ray functions
+# This prevents import errors when the module is imported on different machines
 
 
 @ray.remote
@@ -83,8 +32,6 @@ def process_video_for_face_detection(video_path: str, output_dir: str = "/tmp/fa
     """
     try:
         # Import FaceAgeDetector inside the Ray function to ensure it works in worker environment
-        import sys
-        from pathlib import Path
         
         # Try to find and import FaceAgeDetector
         current_file_dir = Path(__file__).resolve().parent
@@ -186,8 +133,6 @@ def process_video_chunks_for_face_detection(chunk_paths: list, config=None,
     """
     try:
         # Import FaceAgeDetector inside the Ray function to ensure it works in worker environment
-        import sys
-        from pathlib import Path
         
         # Try to find and import FaceAgeDetector
         current_file_dir = Path(__file__).resolve().parent
@@ -298,73 +243,51 @@ def process_video_chunks_for_face_detection(chunk_paths: list, config=None,
         }
 
 
-@ray.remote
-def batch_process_videos_for_face_detection(video_paths: list, output_base_dir: str = "/tmp/face_analysis",
-                                          frame_interval: int = 30, save_frames: bool = False):
-    """
-    Process multiple videos in parallel for face detection.
-    
-    Args:
-        video_paths: List of paths to video files
-        output_base_dir: Base directory for output files
-        frame_interval: Frame sampling interval
-        save_frames: Whether to save frames with detections
-    
-    Returns:
-        Combined results from all videos
-    """
-    try:
-        # Create output base directory
-        os.makedirs(output_base_dir, exist_ok=True)
+
+if __name__ == "__main__":
+    """Test with sample video if provided."""
+    if len(sys.argv) > 1:
+        sample_video = sys.argv[1]
+        print(f"🎬 Testing with sample video: {sample_video}")
         
-        # Process videos in parallel
-        futures = []
-        for video_path in video_paths:
-            # Create unique output directory for each video
-            video_name = Path(video_path).stem
-            video_output_dir = Path(output_base_dir) / video_name
+        if not Path(sample_video).exists():
+            print(f"❌ Video file not found: {sample_video}")
+            print("Usage: python ray_jobs/face_age_detector.py [path_to_sample_video.mp4]")
+            sys.exit(1)
+        
+        try:
+            # Test the Ray function directly
+            print("🚀 Testing face detection on sample video...")
             
-            future = process_video_for_face_detection.remote(
-                video_path, str(video_output_dir), frame_interval, save_frames
-            )
-            futures.append(future)
-        
-        # Collect results
-        results = ray.get(futures)
-        
-        # Aggregate results
-        successful_results = [r for r in results if r["success"]]
-        failed_results = [r for r in results if not r["success"]]
-        
-        total_faces_detected = sum(r.get("total_faces_detected", 0) for r in successful_results)
-        total_processed_frames = sum(r.get("total_processed_frames", 0) for r in successful_results)
-        
-        # Save batch summary
-        batch_summary_file = Path(output_base_dir) / "batch_summary.json"
-        with open(batch_summary_file, "w", encoding="utf-8") as f:
-            json.dump({
-                "total_videos_processed": len(successful_results),
-                "total_videos_failed": len(failed_results),
-                "total_faces_detected": total_faces_detected,
-                "total_processed_frames": total_processed_frames,
-                "individual_results": results
-            }, f, ensure_ascii=False, indent=2)
-        
-        logger.info(f"Batch processing completed. {len(successful_results)} videos processed successfully")
-        logger.info(f"Total faces detected: {total_faces_detected}")
-        
-        return {
-            "total_videos_processed": len(successful_results),
-            "total_videos_failed": len(failed_results),
-            "total_faces_detected": total_faces_detected,
-            "total_processed_frames": total_processed_frames,
-            "success": True,
-            "batch_summary_file": str(batch_summary_file)
-        }
-        
-    except Exception as e:
-        logger.error(f"Error in batch_process_videos_for_face_detection: {e}")
-        return {
-            "error": str(e),
-            "success": False
-        }
+            # Initialize Ray if not already initialized
+            if not ray.is_initialized():
+                ray.init()
+            
+            # Test the process_video_for_face_detection function
+            result = ray.get(process_video_for_face_detection.remote(
+                sample_video, 
+                "/tmp/test_face_detection", 
+                frame_interval=30, 
+                save_frames=False
+            ))
+            
+            if result["success"]:
+                print("✅ Face detection test successful!")
+                print(f"   - Total faces detected: {result['total_faces_detected']}")
+                print(f"   - Total frames processed: {result['total_processed_frames']}")
+                print(f"   - Output directory: {result['output_dir']}")
+                print(f"   - Results saved to: {result['output_dir']}/face_analysis_results.json")
+            else:
+                print(f"❌ Face detection test failed: {result.get('error', 'Unknown error')}")
+                
+        except Exception as e:
+            print(f"❌ Error during face detection test: {e}")
+            
+        finally:
+            # Shutdown Ray
+            if ray.is_initialized():
+                ray.shutdown()
+    else:
+        print("💡 To test with a sample video, run:")
+        print("   python ray_jobs/face_age_detector.py path/to/sample_video.mp4")
+
