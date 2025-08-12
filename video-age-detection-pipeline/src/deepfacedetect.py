@@ -3,6 +3,7 @@ import json
 import cv2
 from datetime import timedelta
 from pathlib import Path
+from typing import Union, List, Dict, Any, Optional
 
 # make ../ importable
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -27,7 +28,7 @@ class FaceAgeDetector:
         self.processed_frames = 0
         self.frames_json = []
         
-    def ensure_dir(self, path: str | Path) -> Path:
+    def ensure_dir(self, path: Union[str, Path]) -> Path:
         """Create directory if it doesn't exist."""
         p = Path(path)
         p.mkdir(parents=True, exist_ok=True)
@@ -61,7 +62,7 @@ class FaceAgeDetector:
             frame: OpenCV frame (numpy array)
             
         Returns:
-            list[dict]: List of face analysis results with age, gender_label, and gender_scores
+            List[Dict]: List of face analysis results with age, gender_label, and gender_scores
         """
         result = DeepFace.analyze(
             frame,
@@ -85,7 +86,7 @@ class FaceAgeDetector:
             })
         return faces_out
     
-    def process_video(self, video_path: str | Path):
+    def process_video(self, video_path: Union[str, Path]):
         """
         Process a video file and extract face analysis from frames.
         
