@@ -9,3 +9,13 @@ transformers
 librosa
 numpy
 pyyaml
+
+# Audio Diarization and PII Detection
+ffmpeg-python
+pyannote-audio
+faster-whisper
+presidio-analyzer
+torch
+torchaudio
+soundfile
+librosa
