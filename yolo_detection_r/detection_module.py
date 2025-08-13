@@ -5,7 +5,7 @@
 from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
 import cv2
-from utils.Tstamp import fmt_hhmmss_ms
+from .utils.Tstamp import fmt_hhmmss_ms
 
 # -------------------------------
 # Frame generator
