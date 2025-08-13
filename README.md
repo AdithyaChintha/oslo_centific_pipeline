@@ -24,10 +24,13 @@ yolo_detection_r/
 ### 1. Run Detection
 Edit the parameters at the top of `run_detection_demo.py` (video path, model path, detection classes, etc.), then:
 ```bash
-python yolo_detection_r/run_detection_demo.py
+cd ~/code/oslo/insta360-video-activity-segmentation
+PY=~/miniconda3/bin/python
+$PY -m pip install ultralytics
+$PY ray_pipeline_yolo.py --input ~/videos/video.mp4
 ```
 This will generate:
-- `yolo_detection_r/outputs/events.jsonl`: raw frame-by-frame detection events (`t`, `frame`, `cls`, `conf`, `bbox`)
+- `/tmp/yolo_demovim introduce_yourself_part0.events.jsonl`: raw frame-by-frame detection events (`t`, `frame`, `cls`, `conf`, `bbox`)
 
 ### 2. Visualize Detection Results
 Edit the parameters at the top of `test_overlay_from_events.py` (original video path, events.jsonl path, output video path, etc.), then:
