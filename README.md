@@ -28,12 +28,11 @@ python yolo_detection_r/run_detection_demo.py
 ```
 This will generate:
 - `yolo_detection_r/outputs/events.jsonl`: raw frame-by-frame detection events (`t`, `frame`, `cls`, `conf`, `bbox`)
-- `yolo_detection_r/outputs/events_spans.jsonl`: merged “state-style” events with start/end/duration
 
 ### 2. Visualize Detection Results
 Edit the parameters at the top of `test_overlay_from_events.py` (original video path, events.jsonl path, output video path, etc.), then:
 ```bash
-python yolo_detection_r/test_overlay_from_events.py
+python ray_pipeline_yolo.py
 ```
 The resulting video will have bounding boxes and labels overlaid on detected frames.
 
@@ -49,8 +48,4 @@ The resulting video will have bounding boxes and labels overlaid on detected fra
 - `conf`: detection confidence  
 - `bbox`: bounding box `[x1, y1, x2, y2]`
 
-**Merged events file** (`events_spans.jsonl`) contains time spans:
-```json
-{"cls": "person", "start": 0.167, "end": 38.205, "duration": 38.038, "max_conf": 0.9187, "count": 20}
-```
 
