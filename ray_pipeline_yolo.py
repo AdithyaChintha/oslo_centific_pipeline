@@ -46,7 +46,7 @@ def pipeline_main(input_path: str, shard_seconds: int = 60) -> dict:
     iou=0.5,
     frame_stride=5,
     classes=None,
-    device="cpu",
+    device="cuda:0",
     gap_sec=3.0,
     )
 
