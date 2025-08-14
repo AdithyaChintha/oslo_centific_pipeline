@@ -54,6 +54,27 @@ class FaceAgeDetector:
             return label, scores
         return None, None
     
+    def classify_age(self, age):
+        """
+        Classify age into minor, adult, or senior categories.
+        
+        Args:
+            age: Age value (int or float)
+            
+        Returns:
+            str: Age classification ("minor", "adult", or "senior")
+        """
+        if age is None:
+            return "unknown"
+        
+        age = float(age)
+        if age < self.config.MINOR_AGE_THRESHOLD:
+            return "minor"
+        elif age >= self.config.SENIOR_AGE_THRESHOLD:
+            return "senior"
+        else:
+            return "adult"
+    
     def analyze_frame(self, frame):
         """
         Analyze a single frame for face detection, age, and gender.
@@ -62,7 +83,7 @@ class FaceAgeDetector:
             frame: OpenCV frame (numpy array)
             
         Returns:
-            List[Dict]: List of face analysis results with age, gender_label, and gender_scores
+            List[Dict]: List of face analysis results with age, age_classification, gender_label, and gender_scores
         """
         result = DeepFace.analyze(
             frame,
@@ -79,8 +100,13 @@ class FaceAgeDetector:
             age = r.get("age", None)
             gender_raw = r.get("gender", None)
             gender_label, gender_scores = self.normalize_gender(gender_raw)
+            
+            # Add age classification
+            age_classification = self.classify_age(age)
+            
             faces_out.append({
                 "age": age if (age is None or isinstance(age, (int, float))) else float(age),
+                "age_classification": age_classification,
                 "gender_label": gender_label,
                 "gender_scores": gender_scores
             })
@@ -202,10 +228,18 @@ class FaceAgeDetector:
     
     def get_processing_summary(self):
         """Get summary of current processing session."""
+        # Count age classifications
+        age_counts = {"minor": 0, "adult": 0, "senior": 0, "unknown": 0}
+        for frame in self.frames_json:
+            for face in frame.get("faces", []):
+                age_class = face.get("age_classification", "unknown")
+                age_counts[age_class] += 1
+        
         return {
             "processed_frames": self.processed_frames,
             "total_faces_detected": sum(len(frame.get("faces", [])) for frame in self.frames_json),
-            "frames_with_errors": sum(1 for frame in self.frames_json if frame.get("error"))
+            "frames_with_errors": sum(1 for frame in self.frames_json if frame.get("error")),
+            "age_classifications": age_counts
         }
 
 
@@ -226,6 +260,14 @@ def main():
         print(f"- Total faces detected: {summary['total_faces_detected']}")
         if summary['frames_with_errors'] > 0:
             print(f"- Frames with errors: {summary['frames_with_errors']}")
+        
+        # Display age classification statistics
+        age_stats = summary.get('age_classifications', {})
+        if age_stats:
+            print("\nAge Classification Summary:")
+            for age_class, count in age_stats.items():
+                if count > 0:
+                    print(f"  - {age_class.capitalize()}: {count}")
             
     except Exception as e:
         print(f"ERROR: {e}")
