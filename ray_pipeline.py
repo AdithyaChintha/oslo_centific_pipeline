@@ -34,8 +34,11 @@ def pipeline_main(input_mp4_path: str):
     # Stage B: Segment video into 1-minute chunks
     shard_paths = split_video_into_shards.remote(input_mp4_path)
 
+    # Define the path to the prompt configuration file
+    prompt_path = "config/cosmos_prompt.yaml"
+
     # Stage C: Parallel Analysis
-    scene_detection_tasks = [detect_scenes.remote(shard) for shard in ray.get(shard_paths)]
+    scene_detection_tasks = [detect_scenes.remote(shard, prompt_path) for shard in ray.get(shard_paths)]
     scenes = ray.get(scene_detection_tasks)
     # vad_tasks = detect_vad.remote(shard_paths)
     # motion_tasks = compute_motion_energy.remote(shard_paths)
