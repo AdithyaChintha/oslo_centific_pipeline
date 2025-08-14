@@ -31,12 +31,14 @@ insta360-video-activity-segmentation/
 │   │   └── setup.py
 │   └── cosmos-reason1/
 │       └── (nvidia/Cosmos-Reason1-7B model repository)
+├── yolo_detection_r/
+│   ├── ... (YOLO detection module)
 ├── ray_pipeline.py
 ├── requirements.txt
 └── README.md
 ```
 
-## Running the Pipeline
+## Running the Scene Analysis Pipeline
 
 The main pipeline can be executed by running the `ray_pipeline.py` script.
 
@@ -47,6 +49,23 @@ python ray_pipeline.py
 The input video path is currently hardcoded in the main execution block of the script. You can modify the `pipeline_main("path/to/your/video.mp4")` line to point to your video file.
 
 The prompt used for the scene detection model can be configured by changing the `prompt_path` variable within `ray_pipeline.py`.
+
+## YOLO Detection Module
+
+A long-video object detection tool based on [Ultralytics YOLOv8](https://docs.ultralytics.com/).
+Supports saving detection results as JSONL, merging them into “state-style” events, and visualizing bounding boxes on the original video.
+
+### How to Run YOLO Detection
+
+1.  **Run Detection:**
+    Edit the parameters at the top of `ray_pipeline_yolo.py` (video path, model path, detection classes, etc.), then:
+    ```bash
+    python ray_pipeline_yolo.py --input ~/videos/video.mp4
+    ```
+    This will generate raw frame-by-frame detection events.
+
+2.  **Visualize Detection Results:**
+    Edit the parameters at the top of `test_overlay_from_events.py` (original video path, events.jsonl path, output video path, etc.), then run the script. The resulting video will have bounding boxes and labels overlaid on detected frames.
 
 ## Tests
 

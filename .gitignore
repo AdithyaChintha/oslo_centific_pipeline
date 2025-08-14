@@ -205,3 +205,341 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# 360° Home Activity Motion Analysis Pipeline
+# .gitignore file
+
+# ============================================================================
+# INPUT FILES - Exclude all video files and input data
+# ============================================================================
+input/
+inputs/
+videos/
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.insv
+*.3gp
+*.webm
+*.flv
+
+# ============================================================================
+# PYTHON SPECIFIC
+# ============================================================================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# PEP 582
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# ============================================================================
+# LOGS - Exclude all log files and directories
+# ============================================================================
+logs/
+log/
+*.log
+*.log.*
+
+# ============================================================================
+# TEMPORARY FILES
+# ============================================================================
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+.tmp/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ============================================================================
+# OUTPUT FILES - KEEP ANALYSIS RESULTS BUT EXCLUDE LARGE FILES
+# ============================================================================
+
+# Keep JSON results and summary reports
+!output/**/*.json
+!output/**/*.txt
+
+# But exclude large video files in output
+output/**/*.mp4
+output/**/*.avi
+output/**/*.mov
+output/**/*.mkv
+output/**/*.insv
+
+# Exclude temporary processing files
+output/**/temp_*
+output/**/tmp_*
+output/**/*.tmp
+
+# ============================================================================
+# IDE AND EDITOR FILES
+# ============================================================================
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# ============================================================================
+# SYSTEM FILES
+# ============================================================================
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msm
+*.msp
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ============================================================================
+# DEVELOPMENT AND TESTING
+# ============================================================================
+
+# Testing files
+test_videos/
+sample_videos/
+debug_output/
+
+# Jupyter notebooks (optional - uncomment if you don't want to track)
+# *.ipynb
+
+# Configuration overrides (keep main config.py, exclude local overrides)
+config_local.py
+config_dev.py
+config_test.py
+local_config.py
+
+# ============================================================================
+# DOCUMENTATION BUILD FILES
+# ============================================================================
+
+# Sphinx documentation
+docs/_build/
+
+# ============================================================================
+# PACKAGE MANAGER
+# ============================================================================
+
+# npm (if using any JavaScript tools)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ============================================================================
+# CUSTOM PROJECT SPECIFIC
+# ============================================================================
+
+# Model files (if you add ML models later)
+*.pkl
+*.model
+*.weights
+*.h5
+
+# Large data files
+*.csv
+*.xlsx
+*.parquet
+
+# Backup files
+*.bak
+*.backup
+*_backup.*
+
+# Archive files
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# ============================================================================
+# KEEP THESE FILES (explicitly tracked even if in excluded directories)
+# ============================================================================
+
+# Keep important project files
+!README.md
+!requirements.txt
+!setup.py
+!LICENSE
+!.gitignore
+
+# Keep configuration templates
+!config_template.py
+!example_config.py
+
+# Keep documentation
+!docs/**/*.md
+!docs/**/*.rst
+
+# Keep test structure (but not test videos)
+!tests/*.py
+!tests/fixtures/*.json
+!tests/fixtures/*.txt

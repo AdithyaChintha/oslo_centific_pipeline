@@ -7,7 +7,7 @@ from ray_jobs.scene_detection import detect_scenes
 # from ray_jobs.upload_manager import upload_to_azure
 # from ray_jobs.scene_change import detect_scene_changes
 # from ray_jobs.vad_audio import detect_vad
-# from ray_jobs.motion_energy import compute_motion_energy
+from ray_jobs.motion_energy import compute_motion_energy
 # from ray_jobs.embeddings_driver import compute_embeddings
 # from ray_jobs.yolo_sort_tracker import run_tracking
 # from ray_jobs.fusion_gap_merge import fuse_and_merge
@@ -45,7 +45,7 @@ def pipeline_main(input_mp4_path: str):
     # # Stage C: Parallel Analysis
     # scene_tasks = detect_scene_changes.remote(shard_paths)
     # vad_tasks = detect_vad.remote(shard_paths)
-    # motion_tasks = compute_motion_energy.remote(shard_paths)
+    motion_tasks = compute_motion_energy.remote(shard_paths)
 
     # # Stage D: Feature extraction
     # embeddings = compute_embeddings.remote(scene_tasks, motion_tasks)

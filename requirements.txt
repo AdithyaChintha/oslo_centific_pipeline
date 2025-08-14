@@ -1,6 +1,6 @@
 ray[default]
 azure-storage-blob
-opencv-python
+opencv-python>=4.5.0
 ffmpeg-python
 pydub
 scenedetect
@@ -16,4 +16,5 @@ pydantic
 qwen-vl-utils
 rich
 vllm
+ultralytics>=8.0.0
 -e setup/cosmos-reason1/cosmos_reason1_utils
