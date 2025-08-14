@@ -11,6 +11,8 @@ transformers>=4.51.3
 librosa
 numpy
 pyyaml
+pillow
+onnxruntime-gpu
 accelerate
 pydantic
 qwen-vl-utils
@@ -22,4 +24,3 @@ faster-whisper
 presidio-analyzer
 torchaudio
 soundfile
--e setup/cosmos-reason1/cosmos_reason1_utils

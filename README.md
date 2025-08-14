@@ -99,7 +99,12 @@ Supports saving detection results as JSONL, merging them into “state-style” 
     ```bash
     python ray_pipeline_yolo.py --input ~/videos/video.mp4
     ```
-    This will generate raw frame-by-frame detection events.
+### feature/nsfw_detection
+
+model weights 
+https://huggingface.co/onnx-community/nsfw_image_detection-ONNX/tree/main/onnx?not-for-all-audiences=true
+ 
+This will generate raw frame-by-frame detection events.
 
 2.  **Visualize Detection Results:**
     Edit the parameters at the top of `test_overlay_from_events.py` (original video path, events.jsonl path, output video path, etc.), then run the script. The resulting video will have bounding boxes and labels overlaid on detected frames.
