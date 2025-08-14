@@ -28,6 +28,7 @@ insta360-video-activity-segmentation/
 ├── ray_pipeline.py
 └── requirements.txt
 
+
 # YOLO Detection Module
 
 A long-video object detection tool based on [Ultralytics YOLOv8](https://docs.ultralytics.com/).  
@@ -81,6 +82,8 @@ The resulting video will have bounding boxes and labels overlaid on detected fra
 - `conf`: detection confidence  
 - `bbox`: bounding box `[x1, y1, x2, y2]`
 
+# Merges and PRs
+Ensure you merge with a PR to develop
 
 # Tests
 Tests can be run as individual jobs using the command below
