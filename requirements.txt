@@ -17,4 +17,9 @@ qwen-vl-utils
 rich
 vllm
 ultralytics>=8.0.0
+pyannote-audio
+faster-whisper
+presidio-analyzer
+torchaudio
+soundfile
 -e setup/cosmos-reason1/cosmos_reason1_utils
