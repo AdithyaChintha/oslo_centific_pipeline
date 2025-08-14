@@ -11,6 +11,8 @@ transformers>=4.51.3
 librosa
 numpy
 pyyaml
+deepface
+tf-keras
 pillow
 onnxruntime-gpu
 accelerate
