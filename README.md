@@ -1,3 +1,32 @@
+# insta360-video-activity-segmentation
+Pre-annotation Video segmentation pipeline for Insta360 video
+
+# Ray pipeline
+
+insta360-video-activity-segmentation/
+├── config/
+│   └── azure_blob_config.yaml
+├── ray_jobs/
+│   ├── upload_manager.py
+|   ├── insv_to_mp4.py
+│   ├── download_manager.py
+│   ├── video_splitter.py
+│   ├── scene_change.py
+│   ├── vad_audio.py
+│   ├── motion_energy.py
+│   ├── embeddings_driver.py
+│   ├── yolo_sort_tracker.py
+│   ├── fusion_gap_merge.py
+│   ├── quality_flagger.py
+│   ├── segment_classifier.py
+│   └── ray_driver.py
+├── tests/
+│   ├── ray_job_test.py
+│   ├── blob_utils.py
+│   └── logger.py
+├── ray_pipeline.py
+└── requirements.txt
+
 # YOLO Detection Module
 
 A long-video object detection tool based on [Ultralytics YOLOv8](https://docs.ultralytics.com/).  
@@ -50,5 +79,4 @@ The resulting video will have bounding boxes and labels overlaid on detected fra
 - `cls`: detected class  
 - `conf`: detection confidence  
 - `bbox`: bounding box `[x1, y1, x2, y2]`
-
 
