@@ -2,6 +2,8 @@ import ray
 
 from ray_jobs.video_splitter import split_video_into_shards
 from ray_jobs.insv_to_mp4 import convert_insv_to_mp4
+from setup.cosmos.setup import setup_cosmos
+from ray_jobs.scene_detection import detect_scenes
 # from ray_jobs.upload_manager import upload_to_azure
 # from ray_jobs.scene_change import detect_scene_changes
 # from ray_jobs.vad_audio import detect_vad
@@ -18,6 +20,12 @@ logger = get_logger("pipeline")
 def pipeline_main(input_mp4_path: str):
     ray.init()
 
+    # Setup Cosmos DB
+    setup_cosmos()
+
+    # Define the path to the prompt configuration file
+    prompt_path = "/home/nvcoe_admin/code/oslo/insta360-video-activity-segmentation/setup/cosmos-reason1/prompts/video_critic.yaml"
+
     # Stage A: Upload file to Azure (if needed)
     logger.info("Uploading file to Azure...")
     # upload_to_azure(input_mp4_path)
@@ -28,6 +36,11 @@ def pipeline_main(input_mp4_path: str):
 
     # Stage B: Segment video into 1-minute chunks
     shard_paths = split_video_into_shards.remote(input_mp4_path)
+
+    # Stage C: Scene Detection
+    scene_detection_tasks = [detect_scenes.remote(shard, prompt_path) for shard in ray.get(shard_paths)]
+    scenes = ray.get(scene_detection_tasks)
+
 
     # # Stage C: Parallel Analysis
     # scene_tasks = detect_scene_changes.remote(shard_paths)

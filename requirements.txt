@@ -5,7 +5,15 @@ ffmpeg-python
 pydub
 scenedetect
 torch
-transformers
+torchcodec
+torchvision
+transformers>=4.51.3
 librosa
 numpy
 pyyaml
+accelerate
+pydantic
+qwen-vl-utils
+rich
+vllm
+-e setup/cosmos-reason1/cosmos_reason1_utils
