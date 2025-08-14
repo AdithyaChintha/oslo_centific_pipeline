@@ -1,14 +1,20 @@
 ray[default]
 azure-storage-blob
-opencv-python
+opencv-python>=4.5.0
 ffmpeg-python
 pydub
 scenedetect
 torch
-transformers
+torchcodec
+torchvision
+transformers>=4.51.3
 librosa
 numpy
 pyyaml
+accelerate
+pydantic
+qwen-vl-utils
+rich
+vllm
 ultralytics>=8.0.0
-opencv-python>=4.5.0
-ray[default]
+-e setup/cosmos-reason1/cosmos_reason1_utils
