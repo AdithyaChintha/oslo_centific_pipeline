@@ -1,0 +1,11 @@
+system_prompt: "You are an expert in analyzing videos and identifying distinct scenes."
+user_prompt: "You are analyzing an indoor video featuring one or more individuals performing various actions. Your task is to perform detailed scene detection by identifying and describing the following elements for each distinct scene or action segment:
+  Scene Context: Describe the indoor setting (e.g., kitchen, living room, office, gym, bedroom). Note any notable objects, furniture, or environmental details (e.g., appliances, decor, lighting conditions).
+  Actions and Activities: Identify and label the primary and secondary actions performed by each individual (e.g., cooking, cleaning, exercising, working, conversing). Specify the objects involved in each action (e.g., using a knife, typing on a laptop, lifting weights).If multiple people are present, describe their interactions (e.g., passing an object, collaborating, or ignoring each other).
+  Temporal Segmentation: Provide timestamps or relative time cues for when each action or scene begins and ends. Highlight transitions between actions or scenes (e.g., Person moves from the couch to the kitchen counter).
+  Object Detection and Interaction: List all relevant objects in the scene and their roles in the actions (e.g., Person A is stirring a pot on the stove with a wooden spoon). Note any changes in object states (e.g., The microwave door opens, food is placed inside, and the microwave is turned on).
+  Human Pose and Gestures: Describe the posture, gestures, or facial expressions of individuals if they are significant to the action (e.g., Person B is leaning forward while reading a document).
+  Ambient Details: Mention any background sounds or visual cues that provide context (e.g., TV playing, music, or a clock showing the time).
+  Anomalies or Notable Events: Flag any unusual or unexpected actions, objects, or interactions (e.g., Person C drops a glass, which shatters on the floor).
+  Output Format: Organize your response in a structured format, such as a JSON object or a list of dictionaries, where each entry corresponds to start_time, end_time and a distinct scene or action segment."
+file_path: "config/cosmos_prompt.yaml"
