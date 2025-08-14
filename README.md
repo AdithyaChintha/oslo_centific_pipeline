@@ -33,10 +33,25 @@ insta360-video-activity-segmentation/
 ├── config/
 │   ├── cosmos_prompt.yaml
 │   └── azure_blob_config.yaml
-├── ray_jobs/
+│   ├── upload_manager.py
+|   ├── insv_to_mp4.py
+│   ├── download_manager.py
+│   ├── video_splitter.py
 │   ├── scene_detection.py
 │   ├── audio_diarization_pii.py
-│   ├── ... (other ray jobs)
+│   ├── vad_audio.py
+│   ├── motion_energy.py
+│   ├── embeddings_driver.py
+│   ├── yolo_sort_tracker.py
+│   ├── fusion_gap_merge.py
+│   ├── quality_flagger.py
+│   ├── segment_classifier.py
+│   └── ray_driver.py
+├── tests/
+│   ├── ray_job_test.py
+├── utils/
+│   ├── blob_utils.py
+│   └── logger.py
 ├── setup/
 │   ├── cosmos/
 │   │   └── setup.py
