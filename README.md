@@ -81,3 +81,9 @@ The resulting video will have bounding boxes and labels overlaid on detected fra
 - `conf`: detection confidence  
 - `bbox`: bounding box `[x1, y1, x2, y2]`
 
+
+# Tests
+Tests can be run as individual jobs using the command below
+    ``` shell
+    /home/nvcoe_admin/miniconda3/envs/py311/bin/python /home/nvcoe_admin/code/oslo/insta360-video-activity-segmentation/tests/ray_job_test
+    ```
