@@ -1,0 +1,66 @@
+=== 360° HOME ACTIVITY ANALYSIS REPORT ===
+
+Generated: 2025-08-11 07:02:32
+Analysis Version: 1.0 (Core Segmentation)
+
+=== VIDEO INFORMATION ===
+Video: VID_20250720_152154_00_011.mp4
+Full Path: input/VID_20250720_152154_00_011.mp4
+Duration: 39.6 seconds (0.7 minutes)
+Processing Time: 41.5 seconds
+Processing Speed: 1.0x real-time
+Total Segments Found: 2
+
+=== MOTION STATISTICS ===
+Total Frames Analyzed: 1186
+Average Motion Energy: 0.0121
+Peak Motion Energy: 1.0000
+Minimum Motion Energy: 0.0000
+Motion Variance: 0.001131
+Motion Standard Deviation: 0.0336
+
+Activity Level Breakdown:
+  High Activity: 21.0% of video (249 frames)
+  Medium Activity: 20.6% of video (244 frames)
+  Low Activity: 58.4% of video (693 frames)
+
+=== ACTIVITY SEGMENTS ===
+Total Segments: 2
+Total Segment Time: 26.5 seconds (0.4 minutes)
+Video Coverage: 66.9%
+
+Segment Breakdown by Type:
+  MEDIUM_ACTIVITY: 2 segments, 26.5s total, 0.813 avg confidence
+
+Individual Segments (sorted by duration):
+
+Segment 1:
+  Time Range: 3.5s - 17.4s
+  Duration: 13.9 seconds
+  Activity Type: MEDIUM_ACTIVITY
+  Motion Energy: 0.0148 (avg), 0.1013 (max)
+  Confidence: 0.812
+  Description: Moderate activity period (13.9 seconds) - likely food prep, organizing, or light tasks | motion level 0.015
+  Video Time: 00:03 - 00:17
+
+Segment 2:
+  Time Range: 24.5s - 37.1s
+  Duration: 12.5 seconds
+  Activity Type: MEDIUM_ACTIVITY
+  Motion Energy: 0.0080 (avg), 0.0286 (max)
+  Confidence: 0.814
+  Description: Moderate activity period (12.5 seconds) - likely food prep, organizing, or light tasks | motion level 0.008
+  Video Time: 00:24 - 00:37
+=== ANALYSIS CONFIGURATION ===
+High Motion Threshold: 0.02
+Medium Motion Threshold: 0.005
+Minimum Activity Duration: 1.0 seconds
+Background Subtraction History: 200 frames
+Foreground Area Threshold: 50 pixels
+Confidence Threshold: 0.02
+
+=== RECOMMENDATIONS ===
+- Few segments detected: Consider lowering motion sensitivity thresholds
+- Most active period: 3.5s-17.4s (MEDIUM_ACTIVITY)
+
+=== END OF REPORT ===
