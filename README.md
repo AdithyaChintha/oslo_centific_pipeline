@@ -22,6 +22,7 @@ insta360-video-activity-segmentation/
 │   └── ray_driver.py
 ├── tests/
 │   ├── ray_job_test.py
+├── utils/
 │   ├── blob_utils.py
 │   └── logger.py
 ├── ray_pipeline.py
