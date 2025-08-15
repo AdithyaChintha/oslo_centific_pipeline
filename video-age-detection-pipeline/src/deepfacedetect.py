@@ -112,12 +112,13 @@ class FaceAgeDetector:
             })
         return faces_out
     
-    def process_video(self, video_path: Union[str, Path]):
+    def process_video(self, video_path: Union[str, Path], output_dir: Optional[Union[str, Path]] = None):
         """
         Process a video file and extract face analysis from frames.
         
         Args:
             video_path: Path to the input video file
+            output_dir: Optional output directory (overrides config default)
             
         Returns:
             dict: Summary of processing results
@@ -127,8 +128,17 @@ class FaceAgeDetector:
             raise FileNotFoundError(f"Video path not found: {video_path}")
 
         video_stem = video_path.stem
-        base_out = self.ensure_dir(Path(self.config.OUTPUT_DIR) / video_stem)
-        frames_out = self.ensure_dir(base_out / "frames")
+        # Use provided output_dir if specified, otherwise fall back to config default
+        if output_dir is not None:
+            base_out = self.ensure_dir(Path(output_dir))
+        else:
+            base_out = self.ensure_dir(Path(self.config.OUTPUT_DIR) / video_stem)
+        
+        # Only create frames directory if frames are being saved
+        frames_out = None
+        if self.config.SAVE_FRAMES:
+            frames_out = self.ensure_dir(base_out / "frames")
+        
         json_path = base_out / "predictions.json"
         jsonl_path = base_out / "predictions.jsonl"
 
@@ -147,7 +157,7 @@ class FaceAgeDetector:
             cap.release()
 
         # Save final results
-        self._save_results(video_path, json_path, base_out)
+        self._save_results(video_path, json_path, base_out, output_dir)
         
         return {
             "video_path": str(video_path),
@@ -177,21 +187,25 @@ class FaceAgeDetector:
     def _process_single_frame(self, frame, frame_num, fps, frames_out, jsonl_path):
         """Process a single frame and save results."""
         timestamp = str(timedelta(seconds=int(frame_num / fps)))
-        frame_filename = f"frame_{frame_num:06d}.jpg"
-        frame_path = frames_out / frame_filename
+        
+        # Only create frame path if frames are being saved
+        frame_path = None
+        if frames_out is not None:
+            frame_filename = f"frame_{frame_num:06d}.jpg"
+            frame_path = frames_out / frame_filename
 
         try:
             faces = self.analyze_frame(frame)
             num_faces = len(faces)
 
             should_save = self.config.SAVE_FRAMES and (num_faces > 0 if self.config.SAVE_ONLY_DETECTIONS else True)
-            if should_save:
+            if should_save and frame_path is not None:
                 cv2.imwrite(str(frame_path), frame)
 
             frame_record = {
                 "frame_num": frame_num,
                 "timestamp": timestamp,
-                "frame_path": str(frame_path) if should_save else "",
+                "frame_path": str(frame_path) if should_save and frame_path is not None else "",
                 "num_faces": num_faces,
                 "faces": faces,
                 "error": ""
@@ -199,13 +213,13 @@ class FaceAgeDetector:
 
         except Exception as e:
             # optional save on error
-            if self.config.SAVE_FRAMES and not self.config.SAVE_ONLY_DETECTIONS:
+            if self.config.SAVE_FRAMES and not self.config.SAVE_ONLY_DETECTIONS and frame_path is not None:
                 cv2.imwrite(str(frame_path), frame)
 
             frame_record = {
                 "frame_num": frame_num,
                 "timestamp": timestamp,
-                "frame_path": str(frame_path) if self.config.SAVE_FRAMES and not self.config.SAVE_ONLY_DETECTIONS else "",
+                "frame_path": str(frame_path) if self.config.SAVE_FRAMES and not self.config.SAVE_ONLY_DETECTIONS and frame_path is not None else "",
                 "num_faces": 0,
                 "faces": [],
                 "error": str(e)
@@ -216,15 +230,18 @@ class FaceAgeDetector:
 
         
     
-    def _save_results(self, video_path, json_path, base_out):
+    def _save_results(self, video_path, json_path, base_out, output_dir=None):
         """Save final results to JSON file."""
         if self.config.WRITE_JSON:
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump({
-                    "video_path": str(video_path),
-                    "frame_interval": self.config.FRAME_INTERVAL,
-                    "results": self.frames_json
-                }, f, ensure_ascii=False, indent=2)
+            # Only save predictions.json if using default config output directory
+            # If custom output_dir is provided, let the calling code handle output
+            if output_dir is None:
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump({
+                        "video_path": str(video_path),
+                        "frame_interval": self.config.FRAME_INTERVAL,
+                        "results": self.frames_json
+                    }, f, ensure_ascii=False, indent=2)
     
     def get_processing_summary(self):
         """Get summary of current processing session."""

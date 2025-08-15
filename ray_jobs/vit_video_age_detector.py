@@ -5,6 +5,7 @@ import logging
 import sys
 from pathlib import Path
 from datetime import timedelta
+from typing import Union, Optional
 
 # Logger
 logger = logging.getLogger("vit_video_age_detector")
@@ -28,6 +29,10 @@ def configure_gpu():
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
     os.environ["TF_GPU_THREAD_MODE"] = "gpu_private"
     os.environ["TF_GPU_THREAD_COUNT"] = "1"
+    
+    # PyTorch CUDA settings
+    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # Better error reporting
+    os.environ["TORCH_CUDNN_V8_API_ENABLED"] = "1"  # Enable latest cuDNN
 
 
 def verify_gpu_access():
@@ -35,11 +40,25 @@ def verify_gpu_access():
     try:
         import torch
         if torch.cuda.is_available():
-            logger.info("✅ PyTorch CUDA available")
+            logger.info(f"✅ PyTorch CUDA available - Device: {torch.cuda.get_device_name()}")
+            logger.info(f"   CUDA version: {torch.version.cuda}")
+            logger.info(f"   Device count: {torch.cuda.device_count()}")
         else:
             logger.warning("⚠️ PyTorch CUDA not available; using CPU")
     except Exception as e:
         logger.info(f"PyTorch not available for CUDA check: {e}")
+
+    try:
+        import onnxruntime as ort
+        available_providers = ort.get_available_providers()
+        gpu_providers = [p for p in available_providers if 'GPU' in p or 'CUDA' in p]
+        if gpu_providers:
+            logger.info(f"✅ ONNX Runtime GPU providers available: {gpu_providers}")
+        else:
+            logger.info("⚠️ ONNX Runtime GPU providers not available")
+        logger.info(f"   All providers: {available_providers}")
+    except Exception as e:
+        logger.info(f"ONNX Runtime not available for GPU verification: {e}")
 
     try:
         import tensorflow as tf
@@ -113,7 +132,7 @@ def process_video_for_vit_age_detection(video_path: str, output_dir: str = "/tmp
 
         # Process
         logger.info(f"Processing video with ViTVideoAgeDetector: {video_path}")
-        results = detector.process_video(video_path)
+        results = detector.process_video(video_path, output_dir)
 
         # Summary
         summary = detector.get_processing_summary()
@@ -147,7 +166,7 @@ def process_video_for_vit_age_detection(video_path: str, output_dir: str = "/tmp
 
 @ray.remote
 def process_video_chunks_for_vit_age_detection(chunk_paths: list, config=None,
-                                               frame_interval: int | None = None, save_frames: bool = False,
+                                               frame_interval: Optional[int] = None, save_frames: bool = False,
                                                chunk_duration_sec: int = 60):
     """
     Process multiple video chunks in parallel and combine results.
@@ -189,7 +208,7 @@ def process_video_chunks_for_vit_age_detection(chunk_paths: list, config=None,
             unique_output_dir = f"/tmp/vit_chunk_{chunk_name}_{i}"
             logger.info(f"Submitting chunk {i}: {chunk_path} -> {unique_output_dir}")
             future = process_video_for_vit_age_detection.remote(
-                chunk_path, unique_output_dir, frame_interval or 30, save_frames
+                chunk_path, unique_output_dir, frame_interval, save_frames
             )
             futures.append(future)
 
@@ -271,8 +290,8 @@ if __name__ == "__main__":
             result = ray.get(process_video_for_vit_age_detection.remote(
                 sample_video,
                 "/tmp/test_vit_face_age",
-                frame_interval=30,
-                save_frames=True,
+                frame_interval=None,  # Use config default instead of hardcoded 30
+                save_frames=None,  # Use config default instead of hardcoded True
             ))
 
             if result.get("success"):

@@ -2,7 +2,7 @@ import sys
 import json
 from datetime import timedelta
 from pathlib import Path
-from typing import Union, List, Dict, Any, Tuple
+from typing import Union, List, Dict, Any, Tuple, Optional
 
 # make project root (video-age-detection-pipeline) importable and preferred
 project_root = str(Path(__file__).resolve().parent.parent)
@@ -63,23 +63,46 @@ class ViTVideoAgeDetector:
         self.processed_frames = 0
         self.frames_json: List[Dict[str, Any]] = []
 
+        # Determine available providers for InsightFace
+        try:
+            import onnxruntime as ort
+            available_providers = ort.get_available_providers()
+            if 'CUDAExecutionProvider' in available_providers:
+                providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+                print(f"✅ Using GPU providers: {providers}")
+            else:
+                providers = ['CPUExecutionProvider']
+                print(f"⚠️ GPU not available, using CPU providers: {providers}")
+        except ImportError:
+            providers = ['CPUExecutionProvider']
+            print("⚠️ ONNX Runtime not available, using CPU providers")
+
         # Face detector
-        self.app = FaceAnalysis(name=model_name, providers=["CPUExecutionProvider"])  # CPU by default
+        self.app = FaceAnalysis(name=model_name, providers=providers)
         self.app.prepare(ctx_id=ctx_id, det_size=det_size)
 
-        # ViT age classifier
+        # ViT age classifier - move to GPU if available
         self.model = ViTForImageClassification.from_pretrained('nateraw/vit-age-classifier')
         self.processor = ViTFeatureExtractor.from_pretrained('nateraw/vit-age-classifier')
+        
+        # Move model to GPU if available
+        if torch.cuda.is_available():
+            self.device = torch.device('cuda')
+            self.model = self.model.to(self.device)
+            print(f"✅ ViT model moved to GPU: {torch.cuda.get_device_name()}")
+        else:
+            self.device = torch.device('cpu')
+            print("⚠️ GPU not available, using CPU for ViT model")
 
     def ensure_dir(self, path: Union[str, Path]) -> Path:
         p = Path(path)
         p.mkdir(parents=True, exist_ok=True)
         return p
 
-    def classify_age_band_to_numeric(self, label: str) -> float | None:
+    def classify_age_band_to_numeric(self, label: str) -> Optional[float]:
         return self.AGE_LABEL_TO_REP_AGE.get(label)
 
-    def classify_age_group(self, age_value: float | None) -> str:
+    def classify_age_group(self, age_value: Optional[float]) -> str:
         if age_value is None:
             return "unknown"
         age_value = float(age_value)
@@ -108,8 +131,11 @@ class ViTVideoAgeDetector:
         # Convert to PIL Image
         return Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
 
-    def _predict_age_for_crop(self, image: Image.Image) -> tuple[float | None, str | None, float | None]:
+    def _predict_age_for_crop(self, image: Image.Image) -> Tuple[Optional[float], Optional[str], Optional[float]]:
         inputs = self.processor(image, return_tensors='pt')
+        # Move inputs to the same device as the model
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        
         with torch.no_grad():
             outputs = self.model(**inputs)
             proba = outputs.logits.softmax(dim=1)
@@ -185,14 +211,23 @@ class ViTVideoAgeDetector:
 
         return annotated
 
-    def process_video(self, video_path: Union[str, Path]):
+    def process_video(self, video_path: Union[str, Path], output_dir: Optional[Union[str, Path]] = None):
         video_path = Path(video_path)
         if not video_path.exists():
             raise FileNotFoundError(f"Video path not found: {video_path}")
 
         video_stem = video_path.stem
-        base_out = self.ensure_dir(Path(self.config.OUTPUT_DIR) / video_stem)
-        frames_out = self.ensure_dir(base_out / "frames")
+        # Use provided output_dir if specified, otherwise fall back to config default
+        if output_dir is not None:
+            base_out = self.ensure_dir(Path(output_dir))
+        else:
+            base_out = self.ensure_dir(Path(self.config.OUTPUT_DIR) / video_stem)
+        
+        # Only create frames directory if frames are being saved
+        frames_out = None
+        if self.config.SAVE_FRAMES:
+            frames_out = self.ensure_dir(base_out / "frames")
+        
         json_path = base_out / "predictions.json"
 
         print(f"Processing video: {video_path}")
@@ -213,31 +248,35 @@ class ViTVideoAgeDetector:
 
                 if frame_num % self.config.FRAME_INTERVAL == 0:
                     timestamp = str(timedelta(seconds=int(frame_num / fps)))
-                    frame_filename = f"frame_{frame_num:06d}.jpg"
-                    frame_path = frames_out / frame_filename
+                    
+                    # Only create frame path if frames are being saved
+                    frame_path = None
+                    if frames_out is not None:
+                        frame_filename = f"frame_{frame_num:06d}.jpg"
+                        frame_path = frames_out / frame_filename
 
                     try:
                         faces = self.analyze_frame(frame)
                         num_faces = len(faces)
                         should_save = self.config.SAVE_FRAMES and (num_faces > 0 if self.config.SAVE_ONLY_DETECTIONS else True)
-                        if should_save:
+                        if should_save and frame_path is not None:
                             to_save = self._draw_overlays(frame, faces) if num_faces > 0 else frame
                             cv2.imwrite(str(frame_path), to_save)
                         frame_record = {
                             "frame_num": frame_num,
                             "timestamp": timestamp,
-                            "frame_path": str(frame_path) if should_save else "",
+                            "frame_path": str(frame_path) if should_save and frame_path is not None else "",
                             "num_faces": num_faces,
                             "faces": faces,
                             "error": "",
                         }
                     except Exception as e:
-                        if self.config.SAVE_FRAMES and not self.config.SAVE_ONLY_DETECTIONS:
+                        if self.config.SAVE_FRAMES and not self.config.SAVE_ONLY_DETECTIONS and frame_path is not None:
                             cv2.imwrite(str(frame_path), frame)
                         frame_record = {
                             "frame_num": frame_num,
                             "timestamp": timestamp,
-                            "frame_path": str(frame_path) if self.config.SAVE_FRAMES and not self.config.SAVE_ONLY_DETECTIONS else "",
+                            "frame_path": str(frame_path) if self.config.SAVE_FRAMES and not self.config.SAVE_ONLY_DETECTIONS and frame_path is not None else "",
                             "num_faces": 0,
                             "faces": [],
                             "error": str(e),
@@ -256,12 +295,15 @@ class ViTVideoAgeDetector:
 
         # Save results
         if self.config.WRITE_JSON:
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump({
-                    "video_path": str(video_path),
-                    "frame_interval": self.config.FRAME_INTERVAL,
-                    "results": self.frames_json,
-                }, f, ensure_ascii=False, indent=2)
+            # Only save predictions.json if using default config output directory
+            # If custom output_dir is provided, let the calling code handle output
+            if output_dir is None:
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump({
+                        "video_path": str(video_path),
+                        "frame_interval": self.config.FRAME_INTERVAL,
+                        "results": self.frames_json,
+                    }, f, ensure_ascii=False, indent=2)
 
         return {
             "video_path": str(video_path),
