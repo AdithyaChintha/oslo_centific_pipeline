@@ -236,15 +236,25 @@ def process_video_chunks_for_vit_age_detection(chunk_paths: list, config=None,
                         for frame_result in face_results:
                             if "timestamp" in frame_result:
                                 try:
+                                    # Parse the original timestamp from the chunk
                                     time_parts = frame_result["timestamp"].split(":")
                                     hours, minutes, seconds = map(int, time_parts)
+                                    # Calculate absolute time by adding chunk offset
                                     total_seconds = hours * 3600 + minutes * 60 + seconds + chunk_offset
                                     adjusted_time = str(timedelta(seconds=int(total_seconds)))
                                     frame_result["timestamp"] = adjusted_time
                                     frame_result["chunk_offset_seconds"] = chunk_offset
                                     frame_result["chunk_file"] = chunk_paths[i]
-                                except Exception:
-                                    pass
+                                    # Add absolute timestamp for proper sorting
+                                    frame_result["absolute_timestamp_seconds"] = total_seconds
+                                except Exception as e:
+                                    logger.warning(f"Error processing timestamp for frame {frame_result.get('frame_num', 'unknown')}: {e}")
+                                    # Fallback: use frame number for sorting
+                                    frame_result["absolute_timestamp_seconds"] = frame_result.get("frame_num", 0) + chunk_offset
+                            else:
+                                # If no timestamp, use frame number + chunk offset
+                                frame_result["absolute_timestamp_seconds"] = frame_result.get("frame_num", 0) + chunk_offset
+                            
                             all_face_results.append(frame_result)
                 else:
                     logger.warning(f"Results file missing for chunk {i}: {chunk_results_file}")
@@ -253,7 +263,12 @@ def process_video_chunks_for_vit_age_detection(chunk_paths: list, config=None,
                 total_processed_frames += result.get("total_processed_frames", 0)
                 total_processing_time += result.get("processing_time", 0)
 
-        all_face_results.sort(key=lambda x: x.get("frame_num", 0))
+        # Sort by absolute timestamp for proper chronological order
+        all_face_results.sort(key=lambda x: x.get("absolute_timestamp_seconds", 0))
+        
+        # Clean up temporary absolute timestamp field
+        for frame_result in all_face_results:
+            frame_result.pop("absolute_timestamp_seconds", None)
 
         return {
             "total_faces_detected": total_faces_detected,
