@@ -3,12 +3,12 @@ import os
 from utils.logger import get_logger
 
 # Import setup and all necessary Ray tasks
-# from setup.cosmos.setup import setup_cosmos            # 只跑 YOLO 可注释
+# from setup.cosmos.setup import setup_cosmos            # test
 from ray_jobs.video_splitter import split_video_into_shards
-# from ray_jobs.insv_to_mp4 import convert_insv_to_mp4   # 输入是 .mp4 可注释
-# from ray_jobs.scene_detection import detect_scenes      # 注释
+# from ray_jobs.insv_to_mp4 import convert_insv_to_mp4   # test
+# from ray_jobs.scene_detection import detect_scenes      # test
 from ray_jobs.yolo_detection import run_yolo_detection
-# from ray_jobs.audio_diarization_pii import audio_diarization_pii  # 注释
+# from ray_jobs.audio_diarization_pii import audio_diarization_pii  # test
 
 logger = get_logger("UnifiedPipeline")
 
@@ -29,18 +29,18 @@ def pipeline_main(input_video_path: str, output_dir: str):
     # --- STAGE B: VIDEO PREPARATION ---
     logger.info(f"Preparing video: {input_video_path}")
     
-    # 如果你要支持 .insv，再放开下面这段；只测 mp4 就保持注释即可
+    # test, mp4 only
     # if input_video_path.lower().endswith('.insv'):
     #     mp4_path_ref = convert_insv_to_mp4.remote(input_video_path)
     #     mp4_path = ray.get(mp4_path_ref)
     #     logger.info(f"Converted {input_video_path} to {mp4_path}")
     # else:
     #     mp4_path = input_video_path
-    mp4_path = input_video_path  # 只测 mp4
+    mp4_path = input_video_path  # mp4 only
 
-    # Split the video into shards（改成位置参数，避免关键字不匹配）
+    # Split the video into shards
     shards_dir = os.path.join(output_dir, "video_shards")
-    shard_paths_ref = split_video_into_shards.remote(mp4_path, shards_dir, 1)  # 1=1分钟（或60秒，视实现而定）
+    shard_paths_ref = split_video_into_shards.remote(mp4_path, shards_dir, 1)  # time 1 mins
     shard_paths = ray.get(shard_paths_ref)
     logger.info(f"Video split into {len(shard_paths)} shards in {shards_dir}")
 
@@ -67,7 +67,7 @@ def pipeline_main(input_video_path: str, output_dir: str):
 
 if __name__ == "__main__":
     # Define the input video and the main output directory
-    INPUT_VIDEO = "video_with_minors.mp4"  # 你的测试视频
+    INPUT_VIDEO = "video_with_minors.mp4"  # input video
     OUTPUT_DIR = "outputs/yolo_only_output"
     
     pipeline_main(INPUT_VIDEO, OUTPUT_DIR)
