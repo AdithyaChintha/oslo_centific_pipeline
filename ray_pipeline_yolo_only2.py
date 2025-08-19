@@ -53,7 +53,7 @@ def pipeline_main(input_video_path: str, output_dir: str):
         shard_output_dir = os.path.join(output_dir, f"shard_{i}")
         os.makedirs(shard_output_dir, exist_ok=True)
 
-        # 仅 YOLO
+        # YOLO ONLY
         yolo_output_dir = os.path.join(shard_output_dir, "yolo_output")
         yolo_task = run_yolo_detection.remote(shard_path, yolo_output_dir)
         yolo_detection_tasks.append(yolo_task)
