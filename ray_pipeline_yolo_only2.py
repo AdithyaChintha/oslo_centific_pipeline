@@ -59,8 +59,8 @@ def pipeline_main(input_video_path: str, output_dir: str):
         os.makedirs(shard_output_dir, exist_ok=True)
 
         # Launch Scene Detection Task
-        scene_task = detect_scenes.remote(shard_path, prompt_path)
-        scene_detection_tasks.append(scene_task)
+        #scene_task = detect_scenes.remote(shard_path, prompt_path)
+        #scene_detection_tasks.append(scene_task)
 
         # Launch YOLO Detection Task
         yolo_output_dir = os.path.join(shard_output_dir, "yolo_output")
@@ -68,9 +68,9 @@ def pipeline_main(input_video_path: str, output_dir: str):
         yolo_detection_tasks.append(yolo_task)
 
         # Launch Audio Diarization & PII Task
-        audio_output_dir = os.path.join(shard_output_dir, "audio_output")
-        audio_task = audio_diarization_pii.remote(shard_path, audio_output_dir)
-        audio_diarization_tasks.append(audio_task)
+        #audio_output_dir = os.path.join(shard_output_dir, "audio_output")
+        #audio_task = audio_diarization_pii.remote(shard_path, audio_output_dir)
+        #audio_diarization_tasks.append(audio_task)
 
     # --- STAGE D: GATHER RESULTS ---
     logger.info("Waiting for all analysis tasks to complete...")
