@@ -15,6 +15,7 @@ import warnings
 import numpy as np
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
 from pyannote.audio import Pipeline
 from faster_whisper import WhisperModel
 from presidio_analyzer import AnalyzerEngine
@@ -103,32 +104,68 @@ def load_models(device):
         logger.error(f"Failed to load models: {e}")
         raise
 
-def extract_audio_from_video(video_path):
-    """Extract audio from video using ffmpeg"""
+# def extract_audio_from_video(video_path):
+#     """Extract audio from video using ffmpeg"""
+#     try:
+#         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_audio:
+#             audio_path = temp_audio.name
+        
+#         # Use the old subprocess style
+#         result = subprocess.run([
+#             'ffmpeg', '-y', '-i', video_path,
+#             '-vn', '-acodec', 'pcm_s16le', '-ar', str(SAMPLE_RATE), '-ac', '1',
+#             audio_path
+#         ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        
+#         if result.returncode != 0:
+#             logger.error(f"FFmpeg failed: {result.stderr}")
+#             return None
+        
+#         if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+#             return audio_path
+#         else:
+#             logger.error(f"Audio extraction failed for {video_path}")
+#             return None
+            
+#     except Exception as e:
+#         logger.error(f"Audio extraction error: {e}")
+#         return None
+
+
+def extract_audio_from_video( video_path: str) -> Optional[str]:
+    """Extract audio from video, return None if no audio stream exists"""
     try:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_audio:
-            audio_path = temp_audio.name
+        # Check if video has audio streams first
+        probe_cmd = [
+            "ffprobe", "-v", "quiet", "-print_format", "json", 
+            "-show_streams", video_path
+        ]
+        result = subprocess.run(probe_cmd, capture_output=True, text=True)
         
-        # Use the old subprocess style
-        result = subprocess.run([
-            'ffmpeg', '-y', '-i', video_path,
-            '-vn', '-acodec', 'pcm_s16le', '-ar', str(SAMPLE_RATE), '-ac', '1',
-            audio_path
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode == 0:
+            import json
+            probe_data = json.loads(result.stdout)
+            audio_streams = [s for s in probe_data.get('streams', []) if s['codec_type'] == 'audio']
+            
+            if not audio_streams:
+                logger.warning(f"No audio streams found in {video_path}")
+                return None
         
-        if result.returncode != 0:
-            logger.error(f"FFmpeg failed: {result.stderr}")
-            return None
+        # If audio exists, extract it
+        temp_audio = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+        cmd = ["ffmpeg", "-i", video_path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", temp_audio.name, "-y"]
         
-        if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
-            return audio_path
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            return temp_audio.name
         else:
-            logger.error(f"Audio extraction failed for {video_path}")
+            logger.error(f"FFmpeg failed: {result.stderr}")
             return None
             
     except Exception as e:
-        logger.error(f"Audio extraction error: {e}")
+        logger.error(f"Audio extraction failed: {e}")
         return None
+
 
 def merge_consecutive_segments(raw_segments, speaker_order):
     """Merge consecutive segments from same speaker"""
@@ -348,11 +385,52 @@ class AudioDiarizationActor:
             logger.error(f"Transcription failed: {e}")
             return ""
 
+# Integration Testing changes begin
+
+# The pipeline code expects the results to be saved in specified output directory, so commenting the old section and using updated method
+# @ray.remote
+# def process_audio_diarization(shard_paths):
+#     """Factory function for Ray pipeline integration"""
+#     actor = AudioDiarizationActor.remote()
+#     return ray.get(actor.process_shards.remote(shard_paths))
+
+
 @ray.remote
-def process_audio_diarization(shard_paths):
+def process_audio_diarization(shard_paths, output_dir=None):
     """Factory function for Ray pipeline integration"""
     actor = AudioDiarizationActor.remote()
-    return ray.get(actor.process_shards.remote(shard_paths))
+    results = ray.get(actor.process_shards.remote(shard_paths))
+    
+    # Save results to output directory if provided
+    if output_dir and results:
+        os.makedirs(output_dir, exist_ok=True)
+        
+        for result in results:
+            shard_name = result["shard_name"]
+            base_name = os.path.splitext(shard_name)[0]
+            
+            # Save transcript
+            transcript_file = os.path.join(output_dir, f"{base_name}_transcript.txt")
+            with open(transcript_file, 'w', encoding='utf-8') as f:
+                f.write(result["transcript"])
+            
+            # Save diarization segments
+            diarization_file = os.path.join(output_dir, f"{base_name}_diarization.json")
+            with open(diarization_file, 'w', encoding='utf-8') as f:
+                json.dump(result["diarization"], f, indent=2)
+            
+            # Save PII detections
+            pii_file = os.path.join(output_dir, f"{base_name}_pii_detections.json")
+            with open(pii_file, 'w', encoding='utf-8') as f:
+                json.dump(result["pii_detections"], f, indent=2)
+            
+            # Save complete results
+            complete_file = os.path.join(output_dir, f"{base_name}_complete_results.json")
+            with open(complete_file, 'w', encoding='utf-8') as f:
+                json.dump(result, f, indent=2)
+    
+    return results
+# Integration Testing changes end
 
 if __name__ == "__main__":
     # Check if HF_TOKEN is set

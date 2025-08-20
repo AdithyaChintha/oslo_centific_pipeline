@@ -36,6 +36,32 @@ MANIFEST
 pip-log.txt
 pip-delete-this-directory.txt
 
+# Models
+yolov8n.pt
+
+# Testing ray_pipeline
+ray_test_scene_det2.py
+ray_testing_scene_detection_alone.py
+ray_pipeline_age_detect.py
+
+# Intermediate outputs
+test_outputs/
+
+# models
+models/
+
+# shard videos for now 
+outputs/simplified_unified_pipeline_output/video_shards/
+minimal_ray_scene_detection_result.json
+minimal_scene_detection_result.json
+
+# Old codes 
+ray_jobs/face_age_detector_old.py
+ray_jobs/nsfw_det_new.py
+ray_jobs/nsfw_det_old.py
+ray_jobs/scene_detection_old.py
+ray_jobs/scene_detection.py
+
 # Unit test / coverage reports
 htmlcov/
 .tox/

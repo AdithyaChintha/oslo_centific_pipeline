@@ -22,4 +22,4 @@ def setup_cosmos():
     
     # The example also mentions a local, editable install of cosmos-reason1-utils.
     # Assuming this is present in the specified path, we will install it as well.
-    subprocess.run(["pip", "install", "-e", "setup/cosmos-reason1/cosmos_reason1_utils"], check=True)
+    # subprocess.run(["pip", "install", "-e", "setup/cosmos-reason1/cosmos_reason1_utils"], check=True)

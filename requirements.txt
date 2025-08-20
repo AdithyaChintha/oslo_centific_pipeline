@@ -26,3 +26,4 @@ faster-whisper
 presidio-analyzer
 torchaudio
 soundfile
+nudenet

@@ -1,0 +1,125 @@
+{
+  "video_path": "outputs/simplified_unified_pipeline_output/video_shards/vaccum_floor_1GB_part1.mp4",
+  "frame_interval": 30,
+  "results": [
+    {
+      "frame_num": 0,
+      "timestamp": "0:00:00",
+      "frame_path": "",
+      "num_faces": 1,
+      "faces": [
+        {
+          "age": 34,
+          "gender_label": "Man",
+          "gender_scores": {
+            "Woman": 9.640860557556152,
+            "Man": 90.35913848876953
+          }
+        }
+      ],
+      "error": ""
+    },
+    {
+      "frame_num": 30,
+      "timestamp": "0:00:01",
+      "frame_path": "",
+      "num_faces": 1,
+      "faces": [
+        {
+          "age": 34,
+          "gender_label": "Man",
+          "gender_scores": {
+            "Woman": 9.402381896972656,
+            "Man": 90.59761810302734
+          }
+        }
+      ],
+      "error": ""
+    },
+    {
+      "frame_num": 60,
+      "timestamp": "0:00:02",
+      "frame_path": "",
+      "num_faces": 1,
+      "faces": [
+        {
+          "age": 34,
+          "gender_label": "Man",
+          "gender_scores": {
+            "Woman": 9.377631187438965,
+            "Man": 90.62236785888672
+          }
+        }
+      ],
+      "error": ""
+    },
+    {
+      "frame_num": 90,
+      "timestamp": "0:00:03",
+      "frame_path": "",
+      "num_faces": 1,
+      "faces": [
+        {
+          "age": 26,
+          "gender_label": "Man",
+          "gender_scores": {
+            "Woman": 0.5803808569908142,
+            "Man": 99.41961669921875
+          }
+        }
+      ],
+      "error": ""
+    },
+    {
+      "frame_num": 120,
+      "timestamp": "0:00:04",
+      "frame_path": "",
+      "num_faces": 1,
+      "faces": [
+        {
+          "age": 34,
+          "gender_label": "Man",
+          "gender_scores": {
+            "Woman": 8.932902336120605,
+            "Man": 91.06709289550781
+          }
+        }
+      ],
+      "error": ""
+    },
+    {
+      "frame_num": 150,
+      "timestamp": "0:00:05",
+      "frame_path": "",
+      "num_faces": 1,
+      "faces": [
+        {
+          "age": 35,
+          "gender_label": "Man",
+          "gender_scores": {
+            "Woman": 8.578103065490723,
+            "Man": 91.4218978881836
+          }
+        }
+      ],
+      "error": ""
+    },
+    {
+      "frame_num": 180,
+      "timestamp": "0:00:06",
+      "frame_path": "",
+      "num_faces": 1,
+      "faces": [
+        {
+          "age": 34,
+          "gender_label": "Man",
+          "gender_scores": {
+            "Woman": 7.827884674072266,
+            "Man": 92.172119140625
+          }
+        }
+      ],
+      "error": ""
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "total_nsfw_detections": 0,
+  "total_processing_time_seconds": 4.35,
+  "nsfw_timestamps": [],
+  "flagged_segments": [],
+  "chunks_processed": 1,
+  "chunks_failed": 0,
+  "failed_chunks": [],
+  "success": true
+}
