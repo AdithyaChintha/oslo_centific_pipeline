@@ -1,0 +1,20 @@
+{
+  "shard_path": "outputs/simplified_unified_pipeline_output/video_shards/vaccum_floor_1GB_part0.mp4",
+  "shard_name": "vaccum_floor_1GB_part0.mp4",
+  "audio_duration": 60.0106875,
+  "transcript": "",
+  "diarization": [],
+  "pii_detections": [],
+  "summary": {
+    "total_speakers": 0,
+    "total_segments": 0,
+    "segments_with_pii": 0,
+    "total_pii_detections": 0
+  },
+  "processing_stats": {
+    "total_processing_time": 3.122828,
+    "diarization_time": 1.629247,
+    "transcription_time": 0.0,
+    "device_used": "cpu"
+  }
+}

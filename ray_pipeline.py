@@ -7,9 +7,9 @@ from utils.logger import get_logger
 from setup.cosmos.setup import setup_cosmos
 from ray_jobs.video_splitter import split_video_into_shards
 from ray_jobs.insv_to_mp4 import convert_insv_to_mp4
-from ray_jobs.scene_detection import detect_scenes
-from ray_jobs.yolo_detection import run_yolo_detection
-from ray_jobs.audio_diarization_pii import audio_diarization_pii
+from ray_jobs.scene_det import detect_scenes
+from ray_jobs.run_yolodetect_task import  run_yolodetect_on_shard
+from ray_jobs.audio_diarization_pii import process_audio_diarization
 
 logger = get_logger("UnifiedPipeline")
 

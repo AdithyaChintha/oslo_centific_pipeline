@@ -1,0 +1,24 @@
+{
+  "video_file": "/home/nvcoe_admin/code/oslo/whole_pipeline_testing/kamwai_chan_input_videos/vaccum_floor_1GB.mp4",
+  "total_duration_seconds": 120,
+  "flagged_duration_seconds": 66.9,
+  "annotation_workload_reduction": "44.2%",
+  "total_flagged_segments": 1,
+  "flagged_timeline": [
+    {
+      "start_time": 0.0,
+      "end_time": 66.9,
+      "task_type": [
+        "face_detection",
+        "scene_detection",
+        "motion_energy"
+      ],
+      "confidence": 0.9,
+      "flag_type": "face_detected",
+      "priority": "medium",
+      "description": "Combined flags: face_detection, scene_detection, motion_energy",
+      "shard_index": 1
+    }
+  ],
+  "high_priority_segments": []
+}

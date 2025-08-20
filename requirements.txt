@@ -27,3 +27,4 @@ presidio-analyzer
 torchaudio
 soundfile
 insightface
+nudenet

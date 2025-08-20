@@ -1,0 +1,124 @@
+{
+  "total_faces_detected": 7,
+  "total_processed_frames": 7,
+  "flagged_segments": [
+    {
+      "start_time": 0.0,
+      "end_time": 6.0,
+      "task_type": "face_detection",
+      "confidence": 0.9,
+      "flag_type": "face_detected",
+      "priority": "low",
+      "description": "Face detection: 1 faces",
+      "metadata": {
+        "max_faces": 1,
+        "duration": 6.0,
+        "frame_count": 7,
+        "potential_minors": 0,
+        "gender_distribution": {},
+        "age_stats": {
+          "min_age": null,
+          "max_age": null,
+          "avg_age": null
+        },
+        "emotion_distribution": {},
+        "race_distribution": {},
+        "detailed_face_data": [
+          {
+            "timestamp": 0.0,
+            "face_analysis": {
+              "age": 34,
+              "gender_label": "Man",
+              "gender_scores": {
+                "Woman": 9.640860557556152,
+                "Man": 90.35913848876953
+              }
+            }
+          },
+          {
+            "timestamp": 1.0,
+            "face_analysis": {
+              "age": 34,
+              "gender_label": "Man",
+              "gender_scores": {
+                "Woman": 9.402381896972656,
+                "Man": 90.59761810302734
+              }
+            }
+          },
+          {
+            "timestamp": 2.0,
+            "face_analysis": {
+              "age": 34,
+              "gender_label": "Man",
+              "gender_scores": {
+                "Woman": 9.377631187438965,
+                "Man": 90.62236785888672
+              }
+            }
+          },
+          {
+            "timestamp": 3.0,
+            "face_analysis": {
+              "age": 26,
+              "gender_label": "Man",
+              "gender_scores": {
+                "Woman": 0.5803808569908142,
+                "Man": 99.41961669921875
+              }
+            }
+          },
+          {
+            "timestamp": 4.0,
+            "face_analysis": {
+              "age": 34,
+              "gender_label": "Man",
+              "gender_scores": {
+                "Woman": 8.932902336120605,
+                "Man": 91.06709289550781
+              }
+            }
+          },
+          {
+            "timestamp": 5.0,
+            "face_analysis": {
+              "age": 35,
+              "gender_label": "Man",
+              "gender_scores": {
+                "Woman": 8.578103065490723,
+                "Man": 91.4218978881836
+              }
+            }
+          },
+          {
+            "timestamp": 6.0,
+            "face_analysis": {
+              "age": 34,
+              "gender_label": "Man",
+              "gender_scores": {
+                "Woman": 7.827884674072266,
+                "Man": 92.172119140625
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "detailed_analysis_summary": {
+    "gender_distribution": {
+      "Man": 7
+    },
+    "age_distribution": {
+      "minors": 0,
+      "adults": 7,
+      "seniors": 0
+    },
+    "emotion_distribution": {},
+    "race_distribution": {},
+    "total_unique_faces": 7,
+    "frames_with_faces": 7
+  },
+  "chunks_processed": 1,
+  "success": true
+}

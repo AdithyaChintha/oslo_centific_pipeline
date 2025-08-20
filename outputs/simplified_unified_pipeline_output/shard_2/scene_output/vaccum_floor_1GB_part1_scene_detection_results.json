@@ -1,0 +1,29 @@
+{
+  "video_path": "outputs/simplified_unified_pipeline_output/video_shards/vaccum_floor_1GB_part1.mp4",
+  "scenes": [
+    {
+      "start_time": 0.0,
+      "end_time": 2.7,
+      "description": "The video shows a spacious dining area with a large table set with chairs. On the left side, there's a white shelving unit holding some decorative items. In the background, another section of the home can be seen through open doorways, revealing a cozy seating area with cushions and a coffee table. To the right, a hallway leads further into the house."
+    },
+    {
+      "start_time": 2.7,
+      "end_time": 5.3,
+      "description": "A person wearing dark clothing enters the frame from the left, walking toward the back of the room. They move past the dining table and head toward the open doorway leading to another part of the house."
+    },
+    {
+      "start_time": 5.3,
+      "end_time": 6.9,
+      "description": "Another person dressed in casual attire appears from the right side of the frame, walking towards the center near the dining table. They pause briefly before continuing their movement slightly away from the camera."
+    }
+  ],
+  "raw_response": "```json\n[\n  {\n    \"start_time\": 0.0,\n    \"end_time\": 2.7,\n    \"caption\": \"The video shows a spacious dining area with a large table set with chairs. On the left side, there's a white shelving unit holding some decorative items. In the background, another section of the home can be seen through open doorways, revealing a cozy seating area with cushions and a coffee table. To the right, a hallway leads further into the house.\"\n  },\n  {\n    \"start_time\": 2.7,\n    \"end_time\": 5.3,\n    \"caption\": \"A person wearing dark clothing enters the frame from the left, walking toward the back of the room. They move past the dining table and head toward the open doorway leading to another part of the house.\"\n  },\n  {\n    \"start_time\": 5.3,\n    \"end_time\": 6.9,\n    \"caption\": \"Another person dressed in casual attire appears from the right side of the frame, walking towards the center near the dining table. They pause briefly before continuing their movement slightly away from the camera.\"\n  }\n]\n```",
+  "total_scenes": 3,
+  "processing_info": {
+    "model": "nvidia/Cosmos-Reason1-7B",
+    "success": true,
+    "gpu_memory_utilization": 0.25,
+    "max_model_len": 6144,
+    "scenes_extracted": 3
+  }
+}

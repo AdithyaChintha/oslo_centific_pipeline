@@ -1,0 +1,18 @@
+{
+  "processing_summary": {
+    "total_shards": 2,
+    "successful_audio": 2,
+    "successful_yolo": 2,
+    "successful_scene": 1,
+    "successful_nsfw": 2,
+    "successful_motion": 2,
+    "successful_face": 2,
+    "overall_success_rate": "91.7%"
+  },
+  "annotation_summary": {
+    "total_flagged_segments": 1,
+    "flagged_duration_seconds": 66.9,
+    "annotation_workload_reduction": "44.2%",
+    "high_priority_segments": 0
+  }
+}

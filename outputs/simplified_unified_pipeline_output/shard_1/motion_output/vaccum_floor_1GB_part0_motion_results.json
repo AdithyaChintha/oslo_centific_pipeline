@@ -1,0 +1,29 @@
+{
+  "success": true,
+  "video_path": "combined_shards",
+  "video_duration_seconds": 60.026633333333336,
+  "processing_time_seconds": 149.08099818229675,
+  "total_segments": 2,
+  "motion_statistics": {
+    "total_motion_energy": 0,
+    "avg_motion_energy": 0
+  },
+  "segments": [
+    {
+      "start_time": 2.9696333333333333,
+      "end_time": 7.440766666666667,
+      "duration": 4.471133333333333,
+      "activity_type": "MEDIUM_ACTIVITY",
+      "confidence": 0.4398526430458791,
+      "avg_motion_energy": 0.1246452493999728
+    },
+    {
+      "start_time": 23.823800000000002,
+      "end_time": 39.839800000000004,
+      "duration": 16.016000000000002,
+      "activity_type": "MEDIUM_ACTIVITY",
+      "confidence": 0.8538858809208716,
+      "avg_motion_energy": 0.0068341505592252
+    }
+  ]
+}
