@@ -210,7 +210,7 @@ def process_video_for_face_detection_sync(video_path: str, output_dir: str = "/t
             detector.config.SAVE_FRAMES = save_frames
         
         # Process the video
-        results = detector.process_video(video_path)
+        results = detector.process_video(video_path, output_dir)
         
         # Get processing summary
         summary = detector.get_processing_summary()
@@ -641,7 +641,7 @@ if __name__ == "__main__":
             result = ray.get(process_video_for_face_detection.remote(
                 sample_video, 
                 "/tmp/test_face_detection", 
-                frame_interval=30, 
+                frame_interval=None,  # Use config default instead of hardcoded 30
                 save_frames=False
             ))
             

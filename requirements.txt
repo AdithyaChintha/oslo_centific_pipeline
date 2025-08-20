@@ -26,4 +26,5 @@ faster-whisper
 presidio-analyzer
 torchaudio
 soundfile
+insightface
 nudenet

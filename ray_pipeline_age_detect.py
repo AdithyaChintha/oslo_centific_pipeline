@@ -251,8 +251,34 @@ if __name__ == "__main__":
     # Configuration for single video processing
     INPUT_VIDEO = "/home/nvcoe_admin/code/oslo/insta360-video-activity-segmentation/VID_20250720_152154_00_011.insv"  # or .mp4
     OUTPUT_DIR = "/home/nvcoe_admin/code/oslo/insta360-video-activity-segmentation/video-age-detection-pipeline/outputs"
-    FRAME_INTERVAL = 30  # Sample every 30 frames
-    SAVE_FRAMES = False  # Don't save individual frames
+    
+    # Import config values instead of hardcoding
+    try:
+        from video_age_detection_pipeline.utils.config import FRAME_INTERVAL, SAVE_FRAMES
+        print(f"✅ Using config values: FRAME_INTERVAL={FRAME_INTERVAL}, SAVE_FRAMES={SAVE_FRAMES}")
+    except ImportError:
+        try:
+            # Try alternative import path
+            import sys
+            sys.path.insert(0, 'video-age-detection-pipeline')
+            from utils.config import FRAME_INTERVAL, SAVE_FRAMES
+            print(f"✅ Using config values: FRAME_INTERVAL={FRAME_INTERVAL}, SAVE_FRAMES={SAVE_FRAMES}")
+        except ImportError:
+            try:
+                # Try relative import from current directory
+                import sys
+                import os
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                config_path = os.path.join(current_dir, 'video-age-detection-pipeline', 'utils')
+                sys.path.insert(0, config_path)
+                from config import FRAME_INTERVAL, SAVE_FRAMES
+                print(f"✅ Using config values: FRAME_INTERVAL={FRAME_INTERVAL}, SAVE_FRAMES={SAVE_FRAMES}")
+            except ImportError:
+                # Fallback values if config import fails
+                FRAME_INTERVAL = 30
+                SAVE_FRAMES = False
+                print(f"⚠️ Config import failed, using fallback: FRAME_INTERVAL={FRAME_INTERVAL}, SAVE_FRAMES={SAVE_FRAMES}")
+    
     CHUNK_DURATION_SEC = 20  # 1-minute chunks
     
     # Run single video pipeline
