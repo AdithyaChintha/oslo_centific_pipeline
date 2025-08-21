@@ -243,8 +243,16 @@ def pipeline_main(input_video_path: str, output_dir: str):
     # Convert .insv to .mp4 if necessary
     if input_video_path.lower().endswith('.insv'):
         mp4_path_ref = convert_insv_to_dual_mp4.remote(input_video_path)
-        mp4_path = ray.get(mp4_path_ref)
-        logger.info(f"Converted {input_video_path} to {mp4_path}")
+        conversion_result = ray.get(mp4_path_ref)
+        
+        if conversion_result.get('success', False):
+            # Use the first view for processing
+            mp4_path = conversion_result['output_view_1']
+            logger.info(f"Converted {input_video_path} to {mp4_path}")
+        else:
+            error_msg = conversion_result.get('error', 'Unknown conversion error')
+            logger.error(f"Failed to convert {input_video_path}: {error_msg}")
+            raise Exception(f"INSV conversion failed: {error_msg}")
     else:
         mp4_path = input_video_path
 
@@ -585,23 +593,26 @@ def pipeline_main(input_video_path: str, output_dir: str):
         logger.error(f"Failed to generate Label Studio JSON: {e}")
     
     # --- STAGE G: SYNC TO LABEL STUDIO STORAGE ---
-    labelstudio_host = "http://annotations-stg.oneforma2.com"
-    project_id = "5392"
-    azure_storage_id = "YOUR_AZURE_STORAGE_ID"  # <-- Replace this or parameterize it
-    sync_url = f"{labelstudio_host}/projects/{project_id}/api/storages/azure/{azure_storage_id}/sync"
-    headers = {
-        "Authorization": "Token YOUR_LABELSTUDIO_TOKEN"
-    }
-    response = requests.post(sync_url, headers=headers)
+    # NOTE: Commented out due to network connectivity issues with staging server
+    # labelstudio_host = "http://annotations-stg.oneforma2.com"
+    # project_id = "5392"
+    # azure_storage_id = "YOUR_AZURE_STORAGE_ID"  # <-- Replace this or parameterize it
+    # sync_url = f"{labelstudio_host}/projects/{project_id}/api/storages/azure/{azure_storage_id}/sync"
+    # headers = {
+    #     "Authorization": "Token YOUR_LABELSTUDIO_TOKEN"
+    # }
+    # response = requests.post(sync_url, headers=headers)
 
-    try:
-        response = requests.post(sync_url)
-        if response.status_code == 200:
-            logger.info(f"✅ Label Studio Azure sync completed for storage ID {azure_storage_id}")
-        else:
-            logger.warning(f"⚠️ Sync failed. Status: {response.status_code}, Response: {response.text}")
-    except Exception as e:
-        logger.error(f"❌ Error syncing to Label Studio Azure storage: {e}")
+    # try:
+    #     response = requests.post(sync_url)
+    #     if response.status_code == 200:
+    #         logger.info(f"✅ Label Studio Azure sync completed for storage ID {azure_storage_id}")
+    #     else:
+    #         logger.warning(f"⚠️ Sync failed. Status: {response.status_code}, Response: {response.text}")
+    # except Exception as e:
+    #     logger.error(f"❌ Error syncing to Label Studio Azure storage: {e}")
+    
+    logger.info("🚀 Pipeline completed successfully! (Label Studio sync skipped)")
     
     return results_summary
 
