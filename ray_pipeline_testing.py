@@ -17,9 +17,11 @@ from ray_jobs.run_yolodetect_task import run_yolodetect_on_shard
 from ray_jobs.audio_diarization_pii import process_audio_diarization
 
 # Import new ray jobs
-from ray_jobs.nsfw_det_new import process_video_chunks_for_nsfw
+from ray_jobs.nsfw_det import process_video_chunks_for_nsfw
 from ray_jobs.motion_energy import compute_motion_energy
 from ray_jobs.face_age_detector import process_video_chunks_for_face_detection
+from ray_jobs.generate_label_studio_json import generate_label_studio_json
+
 
 logger = get_logger("SimplifiedUnifiedPipeline")
 
@@ -241,8 +243,16 @@ def pipeline_main(input_video_path: str, output_dir: str):
     # Convert .insv to .mp4 if necessary
     if input_video_path.lower().endswith('.insv'):
         mp4_path_ref = convert_insv_to_dual_mp4.remote(input_video_path)
-        mp4_path = ray.get(mp4_path_ref)
-        logger.info(f"Converted {input_video_path} to {mp4_path}")
+        conversion_result = ray.get(mp4_path_ref)
+        
+        if conversion_result.get('success', False):
+            # Use the first view for processing
+            mp4_path = conversion_result['output_view_1']
+            logger.info(f"Converted {input_video_path} to {mp4_path}")
+        else:
+            error_msg = conversion_result.get('error', 'Unknown conversion error')
+            logger.error(f"Failed to convert {input_video_path}: {error_msg}")
+            raise Exception(f"INSV conversion failed: {error_msg}")
     else:
         mp4_path = input_video_path
 
@@ -564,6 +574,8 @@ def pipeline_main(input_video_path: str, output_dir: str):
         }
     }
     
+    
+    
     # Save summary to file
     summary_file = os.path.join(output_dir, "pipeline_summary.json")
     with open(summary_file, 'w') as f:
@@ -571,6 +583,36 @@ def pipeline_main(input_video_path: str, output_dir: str):
     
     logger.info(f"Pipeline summary saved to {summary_file}")
     logger.info("🚀 Simplified unified pipeline complete!")
+    
+    # --- STAGE F: GENERATE LABEL STUDIO JSON ---
+    azure_video_url = "https://oslotestvideo.blob.core.windows.net/instavideo/azure_directory_path/DCIM/Camera01/VID_20250808_213114_00_042.insv?sp=r&st=2025-08-21T06:50:33Z&se=2026-02-28T16:05:33Z&spr=https&sv=2024-11-04&sr=b&sig=azJo5m4IOvPIE8UCp7nx0Fpdf3N2nAERMmB6y0fDjAk%3D"
+    try:
+        labelstudio_path = ray.get(generate_label_studio_json.remote(output_dir, azure_video_url))
+        logger.info(f"📝 Label Studio task JSON saved to: {labelstudio_path}")
+    except Exception as e:
+        logger.error(f"Failed to generate Label Studio JSON: {e}")
+    
+    # --- STAGE G: SYNC TO LABEL STUDIO STORAGE ---
+    # NOTE: Commented out due to network connectivity issues with staging server
+    # labelstudio_host = "http://annotations-stg.oneforma2.com"
+    # project_id = "5392"
+    # azure_storage_id = "YOUR_AZURE_STORAGE_ID"  # <-- Replace this or parameterize it
+    # sync_url = f"{labelstudio_host}/projects/{project_id}/api/storages/azure/{azure_storage_id}/sync"
+    # headers = {
+    #     "Authorization": "Token YOUR_LABELSTUDIO_TOKEN"
+    # }
+    # response = requests.post(sync_url, headers=headers)
+
+    # try:
+    #     response = requests.post(sync_url)
+    #     if response.status_code == 200:
+    #         logger.info(f"✅ Label Studio Azure sync completed for storage ID {azure_storage_id}")
+    #     else:
+    #         logger.warning(f"⚠️ Sync failed. Status: {response.status_code}, Response: {response.text}")
+    # except Exception as e:
+    #     logger.error(f"❌ Error syncing to Label Studio Azure storage: {e}")
+    
+    logger.info("🚀 Pipeline completed successfully! (Label Studio sync skipped)")
     
     return results_summary
 
