@@ -14,11 +14,21 @@ Modular YOLO detection pipeline:
 # run_detection_demo.py
 from __future__ import annotations
 import os, json
-from typing import Any, Dict, List, Optional
+import logging
+import warnings
+from typing import Any, Dict, List, Optional, Tuple
+from collections import defaultdict
 
 
 from .detection_module import detect_events_raw, merge_events_to_spans
 from .utils.write_jsonl import write_jsonl
+
+# Reduce noisy output from dependencies
+os.environ.setdefault("WANDB_DISABLED", "true")
+logging.getLogger().setLevel(logging.WARNING)
+logging.getLogger("ultralytics").setLevel(logging.WARNING)
+logging.getLogger("ray").setLevel(logging.WARNING)
+warnings.filterwarnings("ignore")
 
 
 # ==== EDIT THESE ====
@@ -38,7 +48,7 @@ def yolodetect(
     video: str,
     events_out: Optional[str] = None,
     spans_out: Optional[str] = None,
-    model: str = "yolov8n.pt",
+    model: str = "yolo11m.pt",
     conf: float = 0.5,
     iou: float = 0.5,
     frame_stride: int = 5,
@@ -46,6 +56,7 @@ def yolodetect(
     device: Optional[str] = None,
     gap_sec: float = 3.0,
     base_offset: float = 0.0,
+    enable_tracking: bool = True,
 ) -> Dict[str, Any]:
     """
     Run the original demo as a function (extracted from main()).
@@ -60,7 +71,7 @@ def yolodetect(
     spans_out  = spans_out  or os.path.join("/tmp/yolo_demo", f"{stem}.spans.jsonl")
 
     # 1) raw detection
-    events: List[Dict[str, Any]] = detect_events_raw(
+    events, tracker_used = detect_events_raw(
         video_path=video,
         model_name=model,
         conf=conf,
@@ -68,6 +79,7 @@ def yolodetect(
         frame_stride=frame_stride,
         classes=classes,
         device=device,
+        enable_tracking=enable_tracking,
     )
 
     # 1.1) optional global offset for shards
@@ -89,6 +101,8 @@ def yolodetect(
         "classes": classes,
         "device": device,
         "base_offset": base_offset,
+    "enable_tracking": enable_tracking,
+    "tracker": tracker_used,
     }
     write_jsonl(events_out, events, meta=meta)
 

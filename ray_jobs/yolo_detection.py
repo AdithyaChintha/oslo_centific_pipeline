@@ -17,7 +17,7 @@ def run_yolo_detection(
     classes: Optional[List[int]] = None,
     device: Optional[str] = None,
     enable_tracking: bool = True,           # NEW
-    tracker_backend: str = "botsort",        # NEW
+    tracker_backend: str = "botsort",        # NEW test
     tracker_cfg: Optional[str] = None,       # NEW
 ) -> str:
     """
@@ -54,7 +54,7 @@ def run_yolo_detection(
         "enable_tracking": enable_tracking,
         "tracker_backend": tracker_backend,
         "tracker_cfg": tracker_cfg,
-        "tracker": tracker_used,
+        "tracker": tracker_used, #test
     }
     write_jsonl(events_out_path, events, meta=meta)
     

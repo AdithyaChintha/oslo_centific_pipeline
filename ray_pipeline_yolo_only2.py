@@ -40,7 +40,7 @@ def pipeline_main(input_video_path: str, output_dir: str):
 
     # Split the video into shards
     shards_dir = os.path.join(output_dir, "video_shards")
-    shard_paths_ref = split_video_into_shards.remote(mp4_path, shards_dir, 1)  # time 1 mins
+    shard_paths_ref = split_video_into_shards.remote(mp4_path, shards_dir, 60)  # time 60 secs
     shard_paths = ray.get(shard_paths_ref)
     logger.info(f"Video split into {len(shard_paths)} shards in {shards_dir}")
 
