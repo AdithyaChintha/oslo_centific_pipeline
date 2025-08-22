@@ -1,52 +1,291 @@
 # detection_module.py
 
-#import os, json, time
-from typing import Callable, Dict, Iterator, List, Optional, Tuple
-import logging
-
-import cv2
+from contextlib import contextmanager
+import os, sys, builtins, signal, logging
 import numpy as np
-import os
-import sys
-import builtins
-from contextlib import redirect_stdout, redirect_stderr, contextmanager
+import cv2
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 from ultralytics import YOLO
-from typing import Any, Dict, List, Optional
-
 from .utils.Tstamp import fmt_hhmmss_ms
+from .utils.frames import frame_generator
 
-# -------------------------------
-# Frame generator
-# -------------------------------
 
-def frame_generator(video_path: str, frame_stride: int = 1,
-                    preprocess: Optional[Callable[[any], any]] = None
-                    ) -> Iterator[Tuple[any, int, float]]:
+def _to_numpy(x):
     """
-    Yield frames from a video with a stride. Returns (frame, frame_idx, fps).
-    - preprocess: optional callable to transform the frame (e.g., undistort).
+    Convert tensor-like or list objects to numpy arrays.
     """
+    try:
+        return x.cpu().numpy()
+    except Exception:
+        return np.array(x) if x is not None else np.array([])
+
+
+@contextmanager
+def suppress_output():
+    """
+    Context manager that suppresses stdout, stderr, and print statements.
+    Useful for silencing Ultralytics verbose outputs.
+    """
+    devnull = open(os.devnull, 'w')
+    old_stdout, old_stderr = sys.stdout, sys.stderr
+    old_stdout_dup, old_stderr_dup = sys.__stdout__, sys.__stderr__
+    old_print = builtins.print
+    try:
+        sys.stdout = devnull
+        sys.stderr = devnull
+        sys.__stdout__ = devnull
+        sys.__stderr__ = devnull
+        builtins.print = lambda *a, **k: None
+        yield
+    finally:
+        builtins.print = old_print
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
+        sys.__stdout__ = old_stdout_dup
+        sys.__stderr__ = old_stderr_dup
+        devnull.close()
+
+
+def _emit_events_from_result(
+    r,
+    model_names: Dict[int, str],
+    idx: int,
+    fps: float,
+    classes: Optional[List[int]] = None,
+    track_ids: Optional[List[Optional[int]]] = None
+) -> List[Dict[str, Any]]:
+    """
+    Convert YOLO result into event dictionaries.
+
+    Parameters:
+        r : YOLO result object
+        model_names : mapping of class id to class name
+        idx : frame index
+        fps : frames per second
+        classes : filter for specific class ids
+        track_ids : optional list of track IDs
+
+    Returns:
+        List of event dictionaries with bbox, confidence, class, timestamp, etc.
+    """
+    events: List[Dict[str, Any]] = []
+
+    boxes = getattr(getattr(r, "boxes", None), "xyxy", None)
+    confs = getattr(getattr(r, "boxes", None), "conf", None)
+    clss  = getattr(getattr(r, "boxes", None), "cls", None)
+
+    boxes = _to_numpy(boxes) if boxes is not None else np.array([])
+    confs = _to_numpy(confs) if confs is not None else np.array([])
+    clss  = _to_numpy(clss)  if clss  is not None else np.array([])
+
+    t  = idx / fps if fps and fps > 0 else 0.0
+    ts = fmt_hhmmss_ms(t)
+
+    for i in range(len(boxes)):
+        x1, y1, x2, y2 = [round(float(v), 2) for v in boxes[i]]
+        conf_v = float(confs[i]) if i < len(confs) else None
+        cls_v  = int(clss[i])   if i < len(clss)  else None
+        if classes is not None and cls_v is not None and cls_v not in classes:
+            continue
+
+        cls_name = model_names.get(cls_v, str(cls_v)) if model_names is not None else str(cls_v)
+        ev = {
+            "t": round(t, 3),
+            "ts": ts,
+            "frame": int(idx),
+            "cls": cls_name,
+            "conf": round(float(conf_v), 4) if conf_v is not None else None,
+            "bbox": [x1, y1, x2, y2],
+        }
+        if track_ids is not None and i < len(track_ids) and track_ids[i] is not None:
+            ev["track_id"] = int(track_ids[i])
+        events.append(ev)
+
+    return events
+
+
+def _predict_on_frame(model, frame, conf: float, iou: float, device: Optional[str]):
+    """
+    Run YOLO prediction on a single frame with error handling.
+    Returns the first result or None.
+    """
+    try:
+        with suppress_output():
+            results = model.predict(source=frame, conf=conf, iou=iou, device=device, verbose=False, show=False)
+    except Exception:
+        with suppress_output():
+            results = model(frame)
+    return results[0] if len(results) else None
+
+
+def _parse_ultralytics_track(track_results, model, video_path: str, classes: Optional[List[int]]) -> List[Dict[str, Any]]:
+    """
+    Parse results from Ultralytics track() into events.
+    """
+    parsed: List[Dict[str, Any]] = []
     cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise ValueError(f"Could not open video {video_path}")
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-
-    idx = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        if idx % frame_stride == 0:
-            out_frame = preprocess(frame) if preprocess is not None else frame
-            yield out_frame, idx, fps
-        idx += 1
-
     cap.release()
 
+    for frame_counter, r in enumerate(track_results):
+        names_map = getattr(r, "names", None) or getattr(model, "names", {})
+        frame_idx = int(getattr(r, "orig_frame", frame_counter))
 
-# -------------------------------
-# 1) Detection (point events)
-# -------------------------------
+        boxes = getattr(getattr(r, "boxes", None), "xyxy", None)
+        boxes_np = _to_numpy(boxes) if boxes is not None else np.array([])
+        n_boxes = len(boxes_np)
+
+        tids = getattr(getattr(r, "boxes", None), "id", None)
+        tids_np = _to_numpy(tids) if tids is not None else None
+        track_ids = [int(tids_np[i]) if (tids_np is not None and i < len(tids_np)) else None
+                     for i in range(n_boxes)]
+
+        parsed.extend(_emit_events_from_result(r, names_map, frame_idx, fps, classes=classes, track_ids=track_ids))
+    return parsed
+
+
+def _run_detect_only(
+    model,
+    video_path: str,
+    frame_stride: int,
+    preprocess: Optional[Callable[[Any], Any]],
+    conf: float,
+    iou: float,
+    device: Optional[str],
+    classes: Optional[List[int]],
+) -> List[Dict[str, Any]]:
+    """
+    Perform detection only (no tracking) on a video.
+    """
+    print(f"[detect_events_raw] mode=detect-only video={video_path} frame_stride={frame_stride}")
+    out_events: List[Dict[str, Any]] = []
+    for frame, idx, fps in frame_generator(video_path, frame_stride=frame_stride, preprocess=preprocess):
+        r = _predict_on_frame(model, frame, conf, iou, device)
+        if r is None:
+            continue
+        names_map = getattr(r, "names", None) or getattr(model, "names", {})
+        out_events.extend(_emit_events_from_result(r, names_map, idx, fps, classes=classes))
+    print(f"[detect_events_raw] detect-only complete, events={len(out_events)}")
+    return out_events
+
+
+def _try_ultralytics_track(
+    model,
+    video_path: str,
+    cfg: str,
+    conf: float,
+    iou: float,
+    device: Optional[str],
+    timeout_sec: int,
+    classes: Optional[List[int]],
+) -> Tuple[Optional[List[Dict[str, Any]]], str]:
+    """
+    Try running Ultralytics track() with a tracker config.
+    Returns (events, used_tracker) on success, or (None, reason) on failure.
+    """
+    if not hasattr(model, "track"):
+        return None, "no-track-attr"
+
+    print(f"[detect_events_raw] attempting ultralytics.track cfg={cfg} timeout={timeout_sec}s")
+
+    def _alarm_handler(signum, frame):
+        raise TimeoutError("ultralytics.model.track timed out")
+
+    prev_handler = signal.getsignal(signal.SIGALRM)
+    try:
+        signal.signal(signal.SIGALRM, _alarm_handler)
+        signal.alarm(int(timeout_sec))
+        with suppress_output():
+            track_results = model.track(source=video_path, tracker=cfg, device=device, conf=conf, iou=iou, verbose=False, show=False)
+        signal.alarm(0)
+        parsed = _parse_ultralytics_track(track_results, model, video_path, classes)
+        used = f"ultralytics:{cfg}"
+        print(f"[detect_events_raw] ultralytics.track succeeded, events={len(parsed)} tracker={used}")
+        return parsed, used
+    except TimeoutError:
+        logging.warning("ultralytics.model.track timed out after %s seconds — falling back", timeout_sec)
+        print(f"[detect_events_raw] ultralytics.track timed out after {timeout_sec}s, falling back to local IoU tracker")
+        return None, "timeout"
+    except Exception:
+        logging.exception("ultralytics.model.track failed, falling back to local tracker")
+        print("[detect_events_raw] ultralytics.track failed, falling back to local IoU tracker")
+        return None, "exception"
+    finally:
+        try:
+            signal.signal(signal.SIGALRM, prev_handler)
+        except Exception:
+            pass
+        signal.alarm(0)
+
+
+def _run_fallback_tracker(
+    model,
+    video_path: str,
+    frame_stride: int,
+    preprocess: Optional[Callable[[Any], Any]],
+    conf: float,
+    iou: float,
+    device: Optional[str],
+    classes: Optional[List[int]],
+    iou_thresh: float,
+    max_age: int,
+) -> List[Dict[str, Any]]:
+    """
+    Run per-frame detection combined with a simple IoU-based tracker.
+    Used when Ultralytics track() is unavailable or fails.
+    """
+    from .trackers.simple_iou import IoUTracker
+    tracker = IoUTracker(iou_thresh=iou_thresh, max_age=max_age)
+
+    out_events: List[Dict[str, Any]] = []
+    print(f"[detect_events_raw] entering local IoU tracker fallback video={video_path} frame_stride={frame_stride}")
+
+    for frame, idx, fps in frame_generator(video_path, frame_stride=frame_stride, preprocess=preprocess):
+        r = _predict_on_frame(model, frame, conf, iou, device)
+        if r is None:
+            continue
+
+        boxes = getattr(getattr(r, "boxes", None), "xyxy", None)
+        confs = getattr(getattr(r, "boxes", None), "conf", None)
+        clss  = getattr(getattr(r, "boxes", None), "cls", None)
+
+        boxes = _to_numpy(boxes) if boxes is not None else np.array([])
+        confs = _to_numpy(confs) if confs is not None else np.array([])
+        clss  = _to_numpy(clss)  if clss  is not None else np.array([])
+
+        dets_for_tracker = []
+        for i in range(len(boxes)):
+            x1, y1, x2, y2 = map(float, boxes[i])
+            conf_v = float(confs[i]) if i < len(confs) else 0.0
+            cls_v  = int(clss[i])    if i < len(clss)  else None
+            if classes is not None and cls_v is not None and cls_v not in classes:
+                continue
+            dets_for_tracker.append([x1, y1, x2, y2, conf_v, cls_v])
+
+        track_ids = tracker.update(dets_for_tracker, idx)
+
+        names_map = getattr(r, "names", None) or getattr(model, "names", {})
+
+        class _PseudoBoxes:
+            def __init__(self, arr):
+                self.xyxy = np.array([d[:4] for d in arr], dtype=float)
+                self.conf = np.array([d[4]    for d in arr], dtype=float)
+                self.cls  = np.array([d[5]    for d in arr], dtype=float)
+
+        class _PseudoR:
+            def __init__(self, boxes, names):
+                self.boxes = boxes
+                self.names = names
+
+        pseudo_r = _PseudoR(_PseudoBoxes(dets_for_tracker), names_map)
+        out_events.extend(_emit_events_from_result(
+            pseudo_r, names_map, idx, fps, classes=None,
+            track_ids=[tid for tid in track_ids]
+        ))
+
+    print(f"[detect_events_raw] local IoU fallback complete, events={len(out_events)}")
+    return out_events
+
 
 def detect_events_raw(
     video_path: str,
@@ -57,188 +296,74 @@ def detect_events_raw(
     classes: Optional[List[int]] = None,
     device: Optional[str] = None,
     preprocess: Optional[Callable[[any], any]] = None,
-    return_frames: bool = False,
-    # TRACKING OPTIONS
+    return_frames: bool = False,  
     enable_tracking: bool = False,
-    tracker_backend: str = "botsort",   # 'botsort' means prefer ultralytics track(tracker='botsort.yaml')
-    tracker_cfg: Optional[str] = None,  # if using ultralytics.track, pass this (e.g. 'botsort.yaml')
+    tracker_backend: str = "botsort",
+    tracker_cfg: Optional[str] = None,
     track_iou_thresh: float = 0.3,
     track_max_age: int = 30,
- ) -> Tuple[List[Dict], str]:
+    track_timeout_sec: int = 120,
+) -> Tuple[List[Dict], str]:
     """
-    Run detection on a video and return a list of event dicts.
-    If enable_tracking True, attempt ultralytics.model.track (with tracker_cfg) first;
-    if not available, fall back to a local IoU tracker.
-    """
-    events: List[Dict[str, Any]] = []
-    used_tracker: str = "none"
+    Main entry point for detection and tracking on a video.
 
-    # Load model
+    Modes:
+        - detect-only
+        - Ultralytics track() (preferred if available)
+        - fallback IoU tracker
+
+    Returns:
+        (events, tracker_used)
+    """
     try:
         model = YOLO(model_name)
     except Exception as e:
         raise RuntimeError(f"Failed to load YOLO model '{model_name}': {e}")
 
-    # Helper: convert possible torch tensors or lists to numpy arrays
-    def _to_numpy(x):
-        try:
-            return x.cpu().numpy()
-        except Exception:
-            return np.array(x) if x is not None else np.array([])
+    if not enable_tracking:
+        events = _run_detect_only(
+            model=model,
+            video_path=video_path,
+            frame_stride=frame_stride,
+            preprocess=preprocess,
+            conf=conf,
+            iou=iou,
+            device=device,
+            classes=classes,
+        )
+        return events, "none"
 
-    @contextmanager
-    def _suppress_output():
-        """Suppress stdout/stderr and builtins.print more aggressively."""
-        devnull = open(os.devnull, 'w')
-        old_stdout, old_stderr = sys.stdout, sys.stderr
-        old_stdout_dup, old_stderr_dup = sys.__stdout__, sys.__stderr__
-        old_print = builtins.print
-        try:
-            sys.stdout = devnull
-            sys.stderr = devnull
-            sys.__stdout__ = devnull
-            sys.__stderr__ = devnull
-            builtins.print = lambda *a, **k: None
-            yield
-        finally:
-            builtins.print = old_print
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
-            sys.__stdout__ = old_stdout_dup
-            sys.__stderr__ = old_stderr_dup
-            devnull.close()
-
-    # Subfunction 1: parse ultralytics.track results into events
-    def _parse_ultralytics_track(track_results) -> List[Dict[str, Any]]:
-        parsed: List[Dict[str, Any]] = []
-        # determine fps from video for timestamp computation
-        cap = cv2.VideoCapture(video_path)
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        cap.release()
-
-        for frame_counter, r in enumerate(track_results):
-            boxes = getattr(getattr(r, "boxes", None), "xyxy", None)
-            confs = getattr(getattr(r, "boxes", None), "conf", None)
-            clss = getattr(getattr(r, "boxes", None), "cls", None)
-            tids = getattr(getattr(r, "boxes", None), "id", None)
-
-            boxes = _to_numpy(boxes) if boxes is not None else np.array([])
-            confs = _to_numpy(confs) if confs is not None else np.array([])
-            clss = _to_numpy(clss) if clss is not None else np.array([])
-            tids = _to_numpy(tids) if tids is not None else None
-
-            # prefer names from the result, else model
-            names_map = getattr(r, "names", None) or getattr(model, "names", {})
-
-            frame_idx = int(getattr(r, "orig_frame", frame_counter))
-            t = frame_idx / fps if fps and fps > 0 else 0.0
-            ts = fmt_hhmmss_ms(t)
-
-            for i in range(len(boxes)):
-                x1, y1, x2, y2 = [round(float(v), 2) for v in boxes[i]]
-                conf_v = float(confs[i]) if i < len(confs) else None
-                cls_v = int(clss[i]) if i < len(clss) else None
-                track_id = int(tids[i]) if (tids is not None and i < len(tids)) else None
-                if classes is not None and cls_v is not None and cls_v not in classes:
-                    continue
-                cls_name = names_map.get(cls_v, str(cls_v)) if names_map is not None else str(cls_v)
-                ev = {
-                    "t": round(t, 3),
-                    "ts": ts,
-                    "frame": int(frame_idx),
-                    "cls": cls_name,
-                    "conf": round(float(conf_v), 4) if conf_v is not None else None,
-                    "bbox": [x1, y1, x2, y2],
-                }
-                if track_id is not None:
-                    ev["track_id"] = int(track_id)
-                parsed.append(ev)
-        return parsed
-
-    # If user wants to use ultralytics built-in track API and it's available, try it first.
-    if enable_tracking and hasattr(model, "track"):
-        try:
-            cfg = tracker_cfg if tracker_cfg is not None else f"{tracker_backend}.yaml"
-            # suppress noisy ultralytics stdout/stderr/print
-            with _suppress_output():
-                track_results = model.track(source=video_path, tracker=cfg, device=device, conf=conf, iou=iou, verbose=False, show=False)
-            used_tracker = f"ultralytics:{cfg}"
-            return _parse_ultralytics_track(track_results), used_tracker
-        except Exception:
-            # if track fails, fall through to fallback
-            pass
-
-    # Subfunction 2: fallback per-frame detection + local IoU tracker
-    def _run_fallback_tracker() -> List[Dict[str, Any]]:
-        from .trackers.simple_iou import IoUTracker
-
-        tracker = IoUTracker(iou_thresh=track_iou_thresh, max_age=track_max_age)
-        out_events: List[Dict[str, Any]] = []
-
-        for frame, idx, fps in frame_generator(video_path, frame_stride=frame_stride, preprocess=preprocess):
-            # run prediction on single frame
-            try:
-                with _suppress_output():
-                    results = model.predict(source=frame, conf=conf, iou=iou, device=device, verbose=False, show=False)
-            except Exception:
-                # fallback without verbose args
-                with _suppress_output():
-                    results = model(frame)
-
-            if len(results) == 0:
-                continue
-            r = results[0]
-
-            boxes = getattr(getattr(r, "boxes", None), "xyxy", None)
-            confs = getattr(getattr(r, "boxes", None), "conf", None)
-            clss = getattr(getattr(r, "boxes", None), "cls", None)
-
-            boxes = _to_numpy(boxes) if boxes is not None else np.array([])
-            confs = _to_numpy(confs) if confs is not None else np.array([])
-            clss = _to_numpy(clss) if clss is not None else np.array([])
-
-            dets_for_tracker = []
-            for i in range(len(boxes)):
-                x1, y1, x2, y2 = map(float, boxes[i])
-                conf_v = float(confs[i]) if i < len(confs) else 0.0
-                cls_v = int(clss[i]) if i < len(clss) else None
-                if classes is not None and cls_v is not None and cls_v not in classes:
-                    continue
-                dets_for_tracker.append([x1, y1, x2, y2, conf_v, cls_v])
-
-            track_ids = tracker.update(dets_for_tracker, idx)
-
-            for det_i, det in enumerate(dets_for_tracker):
-                # compute timestamp and readable fields
-                t = idx / fps if fps and fps > 0 else 0.0
-                ts = fmt_hhmmss_ms(t)
-                names_map = getattr(r, "names", None) or getattr(model, "names", {})
-                cls_id = det[5]
-                cls_name = names_map.get(cls_id, str(cls_id)) if names_map is not None else str(cls_id)
-                ev = {
-                    "t": round(t, 3),
-                    "ts": ts,
-                    "frame": int(idx),
-                    "cls": cls_name,
-                    "conf": round(float(det[4]), 4),
-                    "bbox": [round(float(det[0]), 2), round(float(det[1]), 2), round(float(det[2]), 2), round(float(det[3]), 2)],
-                }
-                tid = track_ids[det_i] if det_i < len(track_ids) else None
-                if tid is not None:
-                    ev["track_id"] = int(tid)
-                out_events.append(ev)
-
-        return out_events
-
-    # Run fallback detection/tracking
-    logging.warning("Ultralytics track unavailable or failed — falling back to local IoU tracker")
+    cfg = tracker_cfg if tracker_cfg is not None else f"{tracker_backend}.yaml"
     used_tracker = "local_iou"
-    return _run_fallback_tracker(), used_tracker
+    events_track, reason = _try_ultralytics_track(
+        model=model,
+        video_path=video_path,
+        cfg=cfg,
+        conf=conf,
+        iou=iou,
+        device=device,
+        timeout_sec=track_timeout_sec,
+        classes=classes,
+    )
+    if events_track is not None:
+        return events_track, reason
 
+    logging.warning("Ultralytics track unavailable or failed — falling back to local IoU tracker")
+    print("[detect_events_raw] falling back to local IoU tracker")
+    events_fallback = _run_fallback_tracker(
+        model=model,
+        video_path=video_path,
+        frame_stride=frame_stride,
+        preprocess=preprocess,
+        conf=conf,
+        iou=iou,
+        device=device,
+        classes=classes,
+        iou_thresh=track_iou_thresh,
+        max_age=track_max_age,
+    )
+    return events_fallback, used_tracker
 
-# -------------------------------
-# 2) Merge point events -> state spans
-# -------------------------------
 
 def merge_events_to_spans(
     events: List[Dict],
@@ -248,16 +373,13 @@ def merge_events_to_spans(
     """
     Merge point events into temporal spans (enter/exit).
 
-    Parameters
-    ----------
-    events : list of event dicts, each with at least {"t", "cls", "conf"}.
-    gap_sec : maximum gap between consecutive points to keep in the same span.
-    key_fn : a function mapping an event to a grouping key. Default groups by class only.
-             E.g., for future tracking: key_fn = lambda e: (e["cls"], e["track_id"])
+    Parameters:
+        events : list of event dicts, each with at least {"t", "cls", "conf"}.
+        gap_sec : maximum gap between consecutive points to merge.
+        key_fn : grouping function for events (default: group by class only).
 
-    Returns
-    -------
-    spans : list of dicts with {key..., cls, start, end, duration, max_conf, count}
+    Returns:
+        List of span dictionaries with class, start, end, duration, max_conf, and count.
     """
     if not events:
         return []
@@ -305,6 +427,3 @@ def merge_events_to_spans(
         s["end_ts"] = fmt_hhmmss_ms(s["end"])
 
     return spans
-
-
-
