@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Iterator, List, Optional, Tuple
+from typing import Callable, Dict, Iterator, List, Optional, Tuple, Any
 import os
 import json
 from copy import deepcopy
@@ -122,6 +122,51 @@ def write_jsonl(path: str, rows: List[dict], meta: Optional[dict] = None, names_
                 out = r
             f.write(json.dumps(out, ensure_ascii=False) + "\n")
     return path
+
+
+def save_people_count_bins_json(
+    counts: Dict,
+    video_path: str,
+    output_dir: str,
+    suffix: str = "_people_count_bins.json"
+) -> str:
+    """
+    Save the result of people_count_bins_from_events() to a JSON file.
+
+    Args:
+        counts (dict): The dictionary returned by people_count_bins_from_events().
+        video_path (str): Path to the source video (used to derive output filename).
+        output_dir (str): Directory where the JSON will be written.
+        suffix (str): File suffix to append (default: "_people_count_bins.json").
+
+    Returns:
+        str: Full path of the saved JSON file.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    stem = os.path.splitext(os.path.basename(video_path))[0]
+    out_path = os.path.join(output_dir, f"{stem}{suffix}")
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(counts, f, ensure_ascii=False, indent=2)
+    return out_path
+
+
+
+def save_people_presence_json(
+    presence: Dict[str, Any],
+    video_path: str,
+    output_dir: str,
+    suffix: str = "_people_presence.json"
+) -> str:
+    """
+    Save the output of people_presence_spans_from_events() to a JSON file.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    stem = os.path.splitext(os.path.basename(video_path))[0]
+    out_path = os.path.join(output_dir, f"{stem}{suffix}")
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(presence, f, ensure_ascii=False, indent=2)
+    return out_path
+
 
 
 

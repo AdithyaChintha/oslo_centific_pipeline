@@ -8,6 +8,8 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 from ultralytics import YOLO
 from .utils.Tstamp import fmt_hhmmss_ms
 from .utils.frames import frame_generator
+from typing import Iterable, Set, NamedTuple, Union
+from collections import defaultdict
 
 
 def _to_numpy(x):
@@ -293,7 +295,7 @@ def detect_events_raw(
     conf: float = 0.5,
     iou: float = 0.5,
     frame_stride: int = 5,
-    classes: Optional[List[int]] = None,
+    classes: Optional[List[int]] = [0],
     device: Optional[str] = None,
     preprocess: Optional[Callable[[any], any]] = None,
     return_frames: bool = False,  
@@ -427,3 +429,253 @@ def merge_events_to_spans(
         s["end_ts"] = fmt_hhmmss_ms(s["end"])
 
     return spans
+
+# ============ People Count: fixed-interval binning (no line/ROI) ============
+
+def people_count_bins_from_events(
+    events: List[Dict[str, Any]],
+    bin_size_sec: float = 5.0,
+    person_classes: Optional[Union[Set[Union[str, int]], List[Union[str, int]]]] = {"person"},
+) -> Dict[str, Any]:
+    """
+    Aggregate per-frame people counts into fixed time bins.
+
+    Workflow:
+      1) For each frame: deduplicate by track_id → get the number of people
+         simultaneously present (occupancy).
+      2) Partition the timeline into fixed bins of length `bin_size_sec`
+         (e.g., 5.0 means [0,5), [5,10), ...). For each bin, compute:
+           - avg_persons: average occupancy across frames in this bin.
+           - max_persons: maximum occupancy observed in this bin.
+      3) Return a list of bins (`timeline_bins`) plus overall summary metrics.
+
+    Args:
+      events (List[Dict]): Event dicts produced by `detect_events_raw`,
+        each containing at least {frame, t, ts, cls, track_id}.
+      bin_size_sec (float): Size of each time bin in seconds.
+      person_classes (set or list, optional): Which classes to count.
+        Defaults to {"person"}. Can also pass {0} depending on whether
+        your `cls` field stores names or integer IDs.
+
+    Returns:
+      Dict with keys:
+        "summary": {
+            "bins": number of bins,
+            "bin_size_sec": size of each bin (seconds),
+            "avg_of_avg": average of all per-bin averages,
+            "max_of_max": maximum of all per-bin maxima,
+            "unique_people": total distinct track_ids across the whole video
+        },
+        "timeline_bins": [
+           {
+             "bin_index": 0,
+             "start": 0.0,
+             "end": 5.0,
+             "start_ts": "...",
+             "end_ts": "...",
+             "frames": 42,
+             "avg_persons": 2.6,
+             "max_persons": 3
+           },
+           ...
+        ]
+    """
+    if not events:
+        return {"summary": {"bins": 0, "avg_of_avg": 0.0, "max_of_max": 0, "unique_people": 0},
+                "timeline_bins": []}
+
+    # Default to only counting "person" class
+    if person_classes is None:
+        person_classes = {"person"}
+    person_classes = set(person_classes)
+
+    # Filter events: keep only desired classes with valid frame and track_id
+    ev_person = []
+    for e in events:
+        cls_v = e.get("cls")
+        # Accept if cls matches either by name or by integer id
+        if (cls_v in person_classes) or (isinstance(cls_v, int) and cls_v in person_classes):
+            if e.get("track_id") is not None and e.get("frame") is not None:
+                ev_person.append(e)
+
+    if not ev_person:
+        return {"summary": {"bins": 0, "avg_of_avg": 0.0, "max_of_max": 0, "unique_people": 0},
+                "timeline_bins": []}
+
+    from collections import defaultdict
+    import numpy as np
+
+    # 1) Build per-frame occupancy
+    frame_to_ids = defaultdict(set)
+    frame_meta = {}  # store (t, ts) for each frame
+    for e in ev_person:
+        f = int(e["frame"])
+        frame_to_ids[f].add(int(e["track_id"]))
+        if f not in frame_meta:
+            frame_meta[f] = {"t": float(e.get("t", 0.0)), "ts": e.get("ts")}
+
+    frames_sorted = sorted(frame_to_ids.keys())
+    if not frames_sorted:
+        return {"summary": {"bins": 0, "avg_of_avg": 0.0, "max_of_max": 0, "unique_people": 0},
+                "timeline_bins": []}
+
+    # 2) Aggregate by time bin
+    # Use the frame timestamp `t` to determine bin membership
+    bins = defaultdict(list)   # bin_index -> list of per-frame person counts
+    bin_time = {}              # bin_index -> {"start", "end", "start_ts", "end_ts"}
+    for f in frames_sorted:
+        meta = frame_meta[f]
+        t = float(meta["t"])
+        persons = len(frame_to_ids[f])
+        b = int(t // bin_size_sec)  # non-overlapping bins: [0,5), [5,10), ...
+        bins[b].append(persons)
+        # Track bin metadata (numeric boundaries + approx ts using first/last frame)
+        if b not in bin_time:
+            bin_time[b] = {"start": b * bin_size_sec,
+                           "end": (b + 1) * bin_size_sec,
+                           "start_ts": None, "end_ts": None}
+        if bin_time[b]["start_ts"] is None:
+            bin_time[b]["start_ts"] = meta["ts"]
+        bin_time[b]["end_ts"] = meta["ts"]
+
+    # 3) Construct timeline_bins
+    timeline_bins = []
+    for b in sorted(bins.keys()):
+        arr = np.array(bins[b], dtype=float)
+        avg_persons = float(arr.mean()) if len(arr) else 0.0
+        max_persons = int(arr.max()) if len(arr) else 0
+        info = bin_time[b]
+        timeline_bins.append({
+            "bin_index": b,
+            "start": round(info["start"], 3),
+            "end": round(info["end"], 3),
+            "start_ts": info["start_ts"],
+            "end_ts": info["end_ts"],
+            "frames": int(len(arr)),
+            "avg_persons": round(avg_persons, 3),
+            "max_persons": max_persons,
+        })
+
+    # Compute summary metrics
+    unique_people = len({int(e["track_id"]) for e in ev_person})
+    avg_of_avg = float(np.mean([b["avg_persons"] for b in timeline_bins])) if timeline_bins else 0.0
+    max_of_max = int(max([b["max_persons"] for b in timeline_bins])) if timeline_bins else 0
+
+    return {
+        "summary": {
+            "bins": int(len(timeline_bins)),
+            "bin_size_sec": float(bin_size_sec),
+            "avg_of_avg": round(avg_of_avg, 3),   # average of all per-bin averages
+            "max_of_max": max_of_max,             # maximum across all per-bin maxima
+            "unique_people": int(unique_people),  # distinct individuals in the whole video
+        },
+        "timeline_bins": timeline_bins
+    }
+
+
+def people_presence_spans_from_events(
+    events: List[Dict[str, Any]],
+    person_classes: Optional[List[Any]] = {"person"},
+    gap_sec: float = 1.0,
+) -> Dict[str, Any]:
+    """
+    Build per-person (track_id) presence spans from detection/tracking events.
+
+    Algorithm:
+      - Filter to target classes (default: {"person"}).
+      - Group by track_id and sort frames by time t.
+      - Merge consecutive frames into a span while the gap between adjacent
+        frames <= gap_sec; otherwise start a new span.
+
+    Args:
+      events: List of event dicts containing at least {t, ts, frame, cls, track_id}.
+      person_classes: Which classes to consider as "people". Defaults to {"person"}.
+                      Can also pass {0} if cls is integer-coded.
+      gap_sec: Max allowed gap (seconds) between consecutive frames to keep within
+               the same presence span.
+
+    Returns:
+      {
+        "summary": {
+           "total_tracks": <num of distinct track_id>,
+           "total_spans": <num of spans across all tracks>,
+        },
+        "tracks": [
+           {
+             "track_id": 7,
+             "spans": [
+                {"start": 0.12, "end": 4.96, "start_ts": "00:00:00.120", "end_ts": "00:00:04.960", "frames": 112},
+                {"start": 8.00, "end": 10.04, "start_ts": "00:00:08.000", "end_ts": "00:00:10.040", "frames": 61}
+             ]
+           },
+           ...
+        ]
+      }
+    """
+    if not events:
+        return {"summary": {"total_tracks": 0, "total_spans": 0}, "tracks": []}
+
+    if person_classes is None:
+        person_classes = {"person"}
+    person_classes = set(person_classes)
+
+    # 1) filter valid person events with track_id and time
+    by_tid = defaultdict(list)
+    for e in events:
+        cls_v = e.get("cls")
+        if not ((cls_v in person_classes) or (isinstance(cls_v, int) and cls_v in person_classes)):
+            continue
+        tid = e.get("track_id")
+        t = e.get("t")
+        if tid is None or t is None:
+            continue
+        try:
+            tid_i = int(tid)
+            t_f = float(t)
+        except Exception:
+            continue
+        by_tid[tid_i].append({
+            "t": t_f,
+            "ts": e.get("ts"),
+            "frame": int(e.get("frame", 0))
+        })
+
+    tracks_out = []
+    total_spans = 0
+
+    # 2) build spans per track
+    for tid, rows in by_tid.items():
+        rows.sort(key=lambda r: r["t"])
+        spans = []
+        cur = None  # {"start":.., "end":.., "start_ts":.., "end_ts":.., "frames":..}
+
+        for r in rows:
+            t = r["t"]
+            ts = r["ts"]
+            if cur is None:
+                cur = {"start": t, "end": t, "start_ts": ts, "end_ts": ts, "frames": 1}
+                continue
+
+            if (t - cur["end"]) <= gap_sec:
+                # same span
+                cur["end"] = t
+                cur["end_ts"] = ts
+                cur["frames"] += 1
+            else:
+                # close previous, start new
+                spans.append(cur)
+                cur = {"start": t, "end": t, "start_ts": ts, "end_ts": ts, "frames": 1}
+
+        if cur is not None:
+            spans.append(cur)
+
+        tracks_out.append({"track_id": tid, "spans": spans})
+        total_spans += len(spans)
+
+    return {
+        "summary": {
+            "total_tracks": len(tracks_out),
+            "total_spans": total_spans,
+        },
+        "tracks": tracks_out
+    }
