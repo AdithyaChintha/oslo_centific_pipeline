@@ -17,11 +17,11 @@ from ray_jobs.run_yolodetect_task import run_yolodetect_on_shard
 from ray_jobs.audio_diarization_pii import process_audio_diarization
 
 # Import new ray jobs
-from ray_jobs.nsfw_det import process_video_chunks_for_nsfw
+from ray_jobs.nsfw_det_final import process_video_chunks_for_nsfw
 from ray_jobs.motion_energy import compute_motion_energy
 from ray_jobs.face_age_detector import process_video_chunks_for_face_detection
 from ray_jobs.labelstudio_tasks import build_labelstudio_json_for_shard_task, import_to_labelstudio_task
-
+from ray_jobs.clap_detector import detect_claps_in_media
 
 logger = get_logger("SimplifiedUnifiedPipeline")
 
@@ -132,6 +132,23 @@ def extract_flagged_segments(task_result, task_type, shard_index, shard_offset_s
                     "shard_index": shard_index + 1
                 })
                 
+        elif task_type == "clap":
+            # Clap detection returns timestamps
+            clap_timestamps = task_result.get('clap_timestamps', [])
+            for clap in clap_timestamps:
+                # Create a small segment around each clap (±2 seconds)
+                clap_time = clap.get('timestamp_seconds', 0)
+                segments.append({
+                    "start_time": max(0, shard_offset_sec + clap_time - 2),
+                    "end_time": shard_offset_sec + clap_time + 2,
+                    "task_type": "clap_detection",
+                    "confidence": 0.9,  # High confidence for clap detection
+                    "flag_type": "clap_detected",
+                    "priority": "medium",
+                    "description": f"Clap detected at {clap['timestamp_formatted']}",
+                    "shard_index": shard_index + 1
+                })
+                
     except Exception as e:
         logger.warning(f"Error extracting segments from {task_type}: {e}")
     
@@ -194,8 +211,6 @@ def pipeline_main(input_video_path: str, output_dir: str):
     logger.info("Starting simplified pipeline setup...")
     setup_cosmos()
     
-    # Download NSFW model if needed
-    nsfw_model_path = '/tmp/nsfw_model.onnx'
     
     logger.info("Setup complete.")
 
@@ -234,6 +249,7 @@ def pipeline_main(input_video_path: str, output_dir: str):
     motion_results = []
     face_results = []
     label_studio_json_refs = [] # To hold refs for Label Studio JSON generation tasks
+    clap_results = []
     
     # All flagged segments across all shards
     all_flagged_segments = []
@@ -334,6 +350,7 @@ def pipeline_main(input_video_path: str, output_dir: str):
             scene_results.append(None)
         
         clear_gpu_memory()
+        
 
         # Task 4: NSFW Detection - FIXED PARAMETERS
         logger.info(f"  - Running NSFW detection for shard {i+1}...")
@@ -344,7 +361,6 @@ def pipeline_main(input_video_path: str, output_dir: str):
             # Fix: Use correct parameters that match nsfw_det.py function signature
             nsfw_task = process_video_chunks_for_nsfw.remote(
                 chunk_paths=[shard_path],
-                model_path=nsfw_model_path,  # Use the downloaded model path
                 confidence_threshold=0.5,
                 chunk_duration_sec=60
             )
@@ -458,9 +474,50 @@ def pipeline_main(input_video_path: str, output_dir: str):
         logger.info(f"  - Generating Label Studio JSON for shard {i+1}...")
         json_ref = build_labelstudio_json_for_shard_task.remote(shard_output_dir, shard_path)
         label_studio_json_refs.append(json_ref)
+        
 
         logger.info(f"✅ Completed processing for shard {i+1}/{len(shard_paths)}")
+        
+        # Task 7: Clap Detection
+        logger.info(f"  - Running clap detection for shard {i+1}...")
+        try:
+            clap_output_dir = os.path.join(shard_output_dir, "clap_output")
+            os.makedirs(clap_output_dir, exist_ok=True)
+            
+            clap_task = detect_claps_in_media.remote(
+                media_path=shard_path,
+                output_dir=clap_output_dir,
+                threshold_bias=6000,
+                lowcut=200,
+                highcut=3200
+            )
+            clap_result = ray.get(clap_task)
+            clap_results.append(clap_result)
+            
+            # Extract flagged segments
+            if clap_result and clap_result.get("success"):
+                segments = extract_flagged_segments(clap_result, "clap", i, shard_offset_sec)
+                all_flagged_segments.extend(segments)
+                
+                # Save clap detection results
+                video_name = os.path.splitext(os.path.basename(shard_path))[0]
+                clap_file = os.path.join(clap_output_dir, f"{video_name}_clap_results.json")
+                with open(clap_file, 'w') as f:
+                    json.dump(clap_result, f, indent=2)
+                
+                clap_count = clap_result.get('clap_count', 0)
+                logger.info(f"  - ✅ Clap detection completed for shard {i+1}")
+                logger.info(f"    Found {clap_count} claps")
+            else:
+                error_msg = clap_result.get('error', 'Unknown error') if clap_result else 'No result returned'
+                logger.warning(f"  - ⚠️ Clap detection failed for shard {i+1}: {error_msg}")
+                
+        except Exception as e:
+            logger.error(f"  - ❌ Clap detection failed for shard {i+1}: {e}")
+            clap_results.append(None)
 
+        clear_gpu_memory()
+        
     # --- STAGE D: CREATE MASTER TIMELINE ---
     logger.info("Creating master flagged timeline for annotation workload reduction...")
     
@@ -507,6 +564,7 @@ def pipeline_main(input_video_path: str, output_dir: str):
     successful_nsfw = sum(1 for result in nsfw_results if result is not None and result.get("success"))
     successful_motion = sum(1 for result in motion_results if result is not None and result.get("success") )
     successful_face = sum(1 for result in face_results if result is not None and result.get("success") )
+    successful_clap = sum(1 for result in clap_results if result is not None and result.get("success"))
     total_shards = len(shard_paths)
     
     # Log detailed results
@@ -517,9 +575,11 @@ def pipeline_main(input_video_path: str, output_dir: str):
     logger.info(f"  - NSFW Detection: {successful_nsfw}/{total_shards} successful")
     logger.info(f"  - Motion Energy Analysis: {successful_motion}/{total_shards} successful")
     logger.info(f"  - Face Age Detection: {successful_face}/{total_shards} successful")
+    logger.info(f"  - Clap Detection: {successful_clap}/{total_shards} successful")
     
-    total_tasks = total_shards * 6  # 6 tasks per shard
-    successful_tasks = successful_audio + successful_yolo + successful_scene + successful_nsfw + successful_motion + successful_face
+    total_tasks = total_shards * 7  # 7 tasks per shard
+    successful_tasks = successful_audio + successful_yolo + successful_scene + successful_nsfw + successful_motion + successful_face + successful_clap
+
     
     # Create summary
     results_summary = {
@@ -531,6 +591,7 @@ def pipeline_main(input_video_path: str, output_dir: str):
             'successful_nsfw': successful_nsfw,
             'successful_motion': successful_motion,
             'successful_face': successful_face,
+            'successful_clap': successful_clap,
             'overall_success_rate': f"{(successful_tasks / total_tasks * 100):.1f}%"
         },
         'annotation_summary': {
@@ -598,7 +659,7 @@ if __name__ == "__main__":
         
         print(f"\n🎉 Simplified Pipeline completed!")
         print(f"📊 Processing Summary:")
-        for task in ['audio', 'yolo', 'scene', 'nsfw', 'motion', 'face']:
+        for task in ['audio', 'yolo', 'scene', 'nsfw', 'motion', 'face','clap']:
             count = results['processing_summary'][f'successful_{task}']
             total = results['processing_summary']['total_shards']
             print(f"   {task.title()}: {count}/{total} successful")
