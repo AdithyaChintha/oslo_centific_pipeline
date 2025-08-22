@@ -168,11 +168,11 @@ def main():
     # ==================================================================
     # Input video path in Azure Blob Storage
     # Format: "container-name/full/path/to/video.mp4"
-    input_path = "instavideo/krishna-test/test1/test_activity/pre-annotation-output/VID_20250720_152154_00_011/VID_20250720_152154_00_011_view1.mp4"
+    input_path = "instavideo/krishna-test/test1/Making Bed/VID_20250720_152154_00_011.insv"
     
     # The PARENT directory for your output in Azure Blob Storage
     # Format: "container-name/path/for/all/outputs/"
-    output_parent_dir = "instavideo/krishna-test/test1/Making Bed/output"
+    output_parent_dir = "instavideo/krishna-test/test1/test_activity/pre-annotation-output"
     # ==================================================================
 
 

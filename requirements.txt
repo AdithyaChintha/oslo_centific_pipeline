@@ -28,3 +28,4 @@ torchaudio
 soundfile
 insightface
 nudenet
+label_studio_sdk

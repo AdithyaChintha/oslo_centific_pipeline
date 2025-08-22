@@ -20,48 +20,10 @@ from ray_jobs.audio_diarization_pii import process_audio_diarization
 from ray_jobs.nsfw_det import process_video_chunks_for_nsfw
 from ray_jobs.motion_energy import compute_motion_energy
 from ray_jobs.face_age_detector import process_video_chunks_for_face_detection
-from ray_jobs.generate_label_studio_json import generate_label_studio_json
+from ray_jobs.labelstudio_tasks import build_labelstudio_json_for_shard_task, import_to_labelstudio_task
 
 
 logger = get_logger("SimplifiedUnifiedPipeline")
-
-# def download_nsfw_model(model_dir: str = "models/nsfw"):
-#     """Download NSFW detection model and labels if not present"""
-#     os.makedirs(model_dir, exist_ok=True)
-    
-#     model_path = os.path.join(model_dir, "nsfw_model.onnx")
-#     labels_path = os.path.join(model_dir, "labels.json")
-    
-#     # Check if files already exist
-#     if os.path.exists(model_path) and os.path.exists(labels_path):
-#         logger.info(f"NSFW model already exists at {model_path}")
-#         return model_path, labels_path
-    
-    # try:
-    #     # Download model
-    #     if not os.path.exists(model_path):
-    #         logger.info("Downloading NSFW detection model...")
-    #         model_url = "https://github.com/notAI-tech/NudeNet/releases/download/v0/detector_v2_default_checkpoint.onnx"
-    #         response = requests.get(model_url, stream=True)
-    #         response.raise_for_status()
-            
-    #         with open(model_path, 'wb') as f:
-    #             for chunk in response.iter_content(chunk_size=8192):
-    #                 f.write(chunk)
-    #         logger.info(f"Model downloaded to {model_path}")
-        
-    #     # Create labels file if not exists
-    #     if not os.path.exists(labels_path):
-    #         labels = {"0": "safe", "1": "nsfw"}
-    #         with open(labels_path, 'w') as f:
-    #             json.dump(labels, f)
-    #         logger.info(f"Labels file created at {labels_path}")
-        
-    #     return model_path, labels_path
-        
-    # except Exception as e:
-    #     logger.error(f"Failed to download NSFW model: {e}")
-    #     return None, None
 
 def clear_gpu_memory():
     """Clear GPU memory between tasks"""
@@ -242,9 +204,16 @@ def pipeline_main(input_video_path: str, output_dir: str):
     
     # Convert .insv to .mp4 if necessary
     if input_video_path.lower().endswith('.insv'):
-        mp4_path_ref = convert_insv_to_dual_mp4.remote(input_video_path)
-        mp4_path = ray.get(mp4_path_ref)
-        logger.info(f"Converted {input_video_path} to {mp4_path}")
+        mp4_result_ref = convert_insv_to_dual_mp4.remote(input_video_path)
+        mp4_result = ray.get(mp4_result_ref)
+        logger.info(f"Converted {input_video_path} to {mp4_result}")
+        
+        # Extract the path to one of the views (using view_1 as default)
+        if mp4_result.get('success', False):
+            mp4_path = mp4_result['output_view_1']  # Use the first view for processing
+            logger.info(f"Using view 1 path for processing: {mp4_path}")
+        else:
+            raise RuntimeError(f"Failed to convert INSV file: {mp4_result.get('error', 'Unknown error')}")
     else:
         mp4_path = input_video_path
 
@@ -264,6 +233,7 @@ def pipeline_main(input_video_path: str, output_dir: str):
     nsfw_results = []
     motion_results = []
     face_results = []
+    label_studio_json_refs = [] # To hold refs for Label Studio JSON generation tasks
     
     # All flagged segments across all shards
     all_flagged_segments = []
@@ -484,6 +454,11 @@ def pipeline_main(input_video_path: str, output_dir: str):
         
         clear_gpu_memory()
         
+        # After all models have run for the shard, generate its Label Studio JSON
+        logger.info(f"  - Generating Label Studio JSON for shard {i+1}...")
+        json_ref = build_labelstudio_json_for_shard_task.remote(shard_output_dir, shard_path)
+        label_studio_json_refs.append(json_ref)
+
         logger.info(f"✅ Completed processing for shard {i+1}/{len(shard_paths)}")
 
     # --- STAGE D: CREATE MASTER TIMELINE ---
@@ -530,8 +505,8 @@ def pipeline_main(input_video_path: str, output_dir: str):
     successful_yolo = sum(1 for result in yolo_results if result is not None)
     successful_scene = sum(1 for result in scene_results if result is not None and result.get('processing_info', {}).get('success', False))
     successful_nsfw = sum(1 for result in nsfw_results if result is not None and result.get("success"))
-    successful_motion = sum(1 for result in motion_results if result is not None and result.get("success"))
-    successful_face = sum(1 for result in face_results if result is not None and result.get("success"))
+    successful_motion = sum(1 for result in motion_results if result is not None and result.get("success") )
+    successful_face = sum(1 for result in face_results if result is not None and result.get("success") )
     total_shards = len(shard_paths)
     
     # Log detailed results
@@ -574,35 +549,43 @@ def pipeline_main(input_video_path: str, output_dir: str):
         json.dump(results_summary, f, indent=2)
     
     logger.info(f"Pipeline summary saved to {summary_file}")
-    logger.info("🚀 Simplified unified pipeline complete!")
     
-    # --- STAGE F: GENERATE LABEL STUDIO JSON ---
-    azure_video_url = "https://oslotestvideo.blob.core.windows.net/instavideo/azure_directory_path/DCIM/Camera01/VID_20250808_213114_00_042.insv?sp=r&st=2025-08-21T06:50:33Z&se=2026-02-28T16:05:33Z&spr=https&sv=2024-11-04&sr=b&sig=azJo5m4IOvPIE8UCp7nx0Fpdf3N2nAERMmB6y0fDjAk%3D"
-    try:
-        labelstudio_path = ray.get(generate_label_studio_json.remote(output_dir, azure_video_url))
-        logger.info(f"📝 Label Studio task JSON saved to: {labelstudio_path}")
-    except Exception as e:
-        logger.error(f"Failed to generate Label Studio JSON: {e}")
+    # --- STAGE F: IMPORT TASKS TO LABEL STUDIO ---
+    logger.info("Consolidating and importing tasks to Label Studio...")
     
-    # --- STAGE G: SYNC TO LABEL STUDIO STORAGE ---
-    labelstudio_host = "http://annotations-stg.oneforma2.com"
-    project_id = "5392"
-    azure_storage_id = "YOUR_AZURE_STORAGE_ID"  # <-- Replace this or parameterize it
-    sync_url = f"{labelstudio_host}/projects/{project_id}/api/storages/azure/{azure_storage_id}/sync"
-    headers = {
-        "Authorization": "Token YOUR_LABELSTUDIO_TOKEN"
-    }
-    response = requests.post(sync_url, headers=headers)
+    # WARNING: Hardcoding credentials is not recommended for production.
+    # These should be loaded from a secure config or environment variables.
+    LABEL_STUDIO_URL = "https://annotations-stg.oneforma2.com/"
+    LABEL_STUDIO_API_TOKEN = "d75a31c7994b96099cfbf7d61e15cff643943853" # Replace with your actual token
+    PROJECT_ID = "5437" # Replace with your actual project ID
+
+    if LABEL_STUDIO_API_TOKEN == "d75a31c7994b96099cfbf7d61e15cff643943853":
+        logger.warning("Using a placeholder Label Studio API token. Please replace it with your actual token.")
 
     try:
-        response = requests.post(sync_url)
-        if response.status_code == 200:
-            logger.info(f"✅ Label Studio Azure sync completed for storage ID {azure_storage_id}")
+        # Wait for all the JSON generation tasks to complete
+        json_task_paths = ray.get(label_studio_json_refs)
+        
+        # Now, import all the generated tasks in one go
+        import_result_ref = import_to_labelstudio_task.remote(
+            json_task_paths,
+            LABEL_STUDIO_URL,
+            LABEL_STUDIO_API_TOKEN,
+            PROJECT_ID
+        )
+        
+        import_result = ray.get(import_result_ref)
+        
+        if import_result.get("success"):
+            logger.info("✅ Successfully imported tasks to Label Studio.")
+            logger.info(f"Server response: {import_result.get('result')}")
         else:
-            logger.warning(f"⚠️ Sync failed. Status: {response.status_code}, Response: {response.text}")
+            logger.error(f"❌ Failed to import tasks to Label Studio: {import_result.get('error')}")
+
     except Exception as e:
-        logger.error(f"❌ Error syncing to Label Studio Azure storage: {e}")
-    
+        logger.error(f"An error occurred during Label Studio import process: {e}")
+
+    logger.info("🚀 Simplified unified pipeline complete!")
     return results_summary
 
 if __name__ == "__main__":
