@@ -17,7 +17,7 @@ from ray_jobs.run_yolodetect_task import run_yolodetect_on_shard
 from ray_jobs.audio_diarization_pii import process_audio_diarization
 
 # Import new ray jobs
-from ray_jobs.nsfw_det import process_video_chunks_for_nsfw
+from ray_jobs.nsfw_det_final import process_video_chunks_for_nsfw
 from ray_jobs.motion_energy import compute_motion_energy
 from ray_jobs.face_age_detector import process_video_chunks_for_face_detection
 from ray_jobs.labelstudio_tasks import build_labelstudio_json_for_shard_task, import_to_labelstudio_task
