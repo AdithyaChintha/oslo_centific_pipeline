@@ -1,10 +1,11 @@
 {
   "total_nsfw_detections": 0,
-  "total_processing_time_seconds": 4.35,
+  "total_processing_time_seconds": 5.35,
   "nsfw_timestamps": [],
   "flagged_segments": [],
   "chunks_processed": 1,
-  "chunks_failed": 0,
-  "failed_chunks": [],
+  "successful_chunks": 1,
+  "model_path": "/home/nvcoe_admin/arian/insta360-video-activity-segmentation/nsfw_model/model.onnx",
+  "labels_path": "/home/nvcoe_admin/arian/insta360-video-activity-segmentation/nsfw_model/labels.json",
   "success": true
 }

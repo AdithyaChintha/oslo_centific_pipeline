@@ -1,0 +1,25 @@
+{
+  "file_path": "outputs/simplified_unified_pipeline_output/video_shards/vaccum_floor_1GB_part0.mp4",
+  "file_type": "video",
+  "duration_seconds": 60.011,
+  "sample_rate": 44100,
+  "clap_count": 1,
+  "clap_timestamps": [
+    {
+      "timestamp_seconds": 1.672,
+      "timestamp_formatted": "00:01.672"
+    }
+  ],
+  "detection_parameters": {
+    "threshold_bias": 6000,
+    "frequency_range": {
+      "lowcut": 200,
+      "highcut": 3200
+    },
+    "debounce_time": 0.15
+  },
+  "processing_time_seconds": 0.55,
+  "output_file": "outputs/simplified_unified_pipeline_output/shard_1/clap_output/vaccum_floor_1GB_part0_clap_detection.json",
+  "processed_at": "2025-08-22T06:00:23.292908",
+  "success": true
+}
