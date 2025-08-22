@@ -12,7 +12,7 @@ from yolo_detection_r.detection_module import detect_events_raw
 from yolo_detection_r.detection_module import people_count_bins_from_events
 from yolo_detection_r.detection_module import people_presence_spans_from_events
 
-@ray.remote(num_cpus=1) # Can be changed to num_gpus=1 if a GPU model is used
+@ray.remote(num_cpus=1, num_gpus=1) # Can be changed to num_gpus=1 if a GPU model is used
 def run_yolo_detection(
     video_path: str,
     output_dir: str,
@@ -76,10 +76,10 @@ def run_yolo_detection(
 
         counts = people_count_bins_from_events( events=events, bin_size_sec=bin_size_sec, person_classes=person_classes)
         json_path = save_people_count_bins_json(counts, video_path=video_path, output_dir=output_dir)
-        print("Saved to:", json_path)
+        print("People count saved to:", json_path)
 
         presence = people_presence_spans_from_events(events, gap_sec=1.0, person_classes=person_classes)
         json_path = save_people_presence_json(presence, video_path, output_dir)
-        print("Per-person presence saved to:", json_path) 
+        print("Person presence saved to:", json_path) 
         
     return events_out_path

@@ -1,5 +1,6 @@
 import ray
 import os
+import time
 from utils.logger import get_logger
 
 # Import setup and all necessary Ray tasks
@@ -49,6 +50,9 @@ def pipeline_main(input_video_path: str, output_dir: str):
     
     yolo_detection_tasks = []
 
+    # measure how long it takes to launch tasks
+    yolo_launch_start = time.time()
+
     for i, shard_path in enumerate(shard_paths):
         shard_output_dir = os.path.join(output_dir, f"shard_{i}")
         os.makedirs(shard_output_dir, exist_ok=True)
@@ -58,16 +62,23 @@ def pipeline_main(input_video_path: str, output_dir: str):
         yolo_task = run_yolo_detection.remote(shard_path, yolo_output_dir)
         yolo_detection_tasks.append(yolo_task)
 
+    launch_elapsed = time.time() - yolo_launch_start
+    logger.info(f"Launched {len(yolo_detection_tasks)} YOLO tasks in {launch_elapsed:.2f}s")
+
     # --- STAGE D: GATHER RESULTS ---
     logger.info("Waiting for YOLO tasks to complete...")
+    yolo_wait_start = time.time()
     yolo_results = ray.get(yolo_detection_tasks)
-    
+    yolo_wait_elapsed = time.time() - yolo_wait_start
+    total_elapsed = time.time() - yolo_launch_start
+
+    logger.info(f"YOLO tasks finished; waited {yolo_wait_elapsed:.2f}s for results (total time since launch {total_elapsed:.2f}s)")
     logger.info("YOLO-only pipeline complete.")
     logger.info(f"YOLO Detection Results: {yolo_results}")
 
 if __name__ == "__main__":
     # Define the input video and the main output directory
-    INPUT_VIDEO = "video_with_minors.mp4"  # input video
+    INPUT_VIDEO = "test_view2.mp4"  # input video test_view2.mp4 video_with_minors.mp4
     OUTPUT_DIR = "outputs/yolo_only_output"
     
     pipeline_main(INPUT_VIDEO, OUTPUT_DIR)

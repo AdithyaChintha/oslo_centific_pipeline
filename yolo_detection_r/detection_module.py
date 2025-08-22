@@ -295,7 +295,7 @@ def detect_events_raw(
     conf: float = 0.5,
     iou: float = 0.5,
     frame_stride: int = 5,
-    classes: Optional[List[int]] = [0],
+    classes: Optional[List[int]] = None,
     device: Optional[str] = None,
     preprocess: Optional[Callable[[any], any]] = None,
     return_frames: bool = False,  
