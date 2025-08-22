@@ -65,7 +65,7 @@ import subprocess
 import cv2
 
 @ray.remote
-def split_video_into_shards(video_path, output_dir="/tmp/shards", duration_sec=60):
+def split_video_into_shards(video_path, output_dir="/tmp/shards", duration_sec=60, downscale_to_480p=True):
     """Split video into shards preserving both video AND audio"""
     
     # Get video info first
@@ -93,9 +93,15 @@ def split_video_into_shards(video_path, output_dir="/tmp/shards", duration_sec=6
             '-ss', str(current_time),          # Start time
             '-t', str(duration_sec),           # Duration
             '-c:v', 'libx264',                 # Force H.264 video (consistent format)
+        ]
+
+        if downscale_to_480p:
+            cmd.extend(['-vf', 'scale=-2:480'])
+        
+        cmd.extend([
             '-c:a', 'copy',                    # Copy audio as-is (preserve quality)
             shard_path
-        ]
+        ])
         
         try:
             result = subprocess.run(cmd, capture_output=True, text=True)
