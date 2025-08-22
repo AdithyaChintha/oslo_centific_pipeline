@@ -1,4 +1,3 @@
-
 import os
 import json
 import ray
@@ -15,11 +14,46 @@ from utils.logger import get_logger
 
 logger = get_logger("LabelStudioTasks")
 
+
+def merge_segments_for_labelstudio(segments: List[Dict[str, Any]], merge_threshold: float = 1.0) -> List[Dict[str, Any]]:
+    """
+    Merges overlapping or very close segments and combines their labels.
+    Adapted for the Label Studio data structure.
+    """
+    if not segments:
+        return []
+
+    # Sort by start time
+    sorted_segments = sorted(segments, key=lambda x: x['start'])
+    merged = []
+
+    for segment in sorted_segments:
+        if not merged:
+            merged.append(segment)
+            continue
+
+        last_segment = merged[-1]
+
+        # Check if segments overlap or are very close
+        if segment['start'] <= last_segment['end'] + merge_threshold:
+            # Merge segments by extending the end time
+            last_segment['end'] = max(last_segment['end'], segment['end'])
+
+            # Combine labels, avoiding duplicates
+            for label in segment['labels']:
+                if label not in last_segment['labels']:
+                    last_segment['labels'].append(label)
+        else:
+            merged.append(segment)
+
+    return merged
+
+
 @ray.remote
 def build_labelstudio_json_for_shard_task(shard_output_dir: str, shard_video_path: str) -> str:
     """
-    Generates a Label Studio task JSON for a single shard by consolidating results
-    from various models.
+    Generates a Label Studio task JSON for a single shard by consolidating and merging
+    results from various models into a common timeline.
     """
     segment_results = []
     
@@ -30,7 +64,6 @@ def build_labelstudio_json_for_shard_task(shard_output_dir: str, shard_video_pat
                 with open(file_path, 'r') as f:
                     data = json.load(f)
                 
-                # Logic adapted from the original generate_label_studio_json.py
                 if "flagged_segments" in data:
                     for seg in data["flagged_segments"]:
                         segment_results.append({
@@ -42,7 +75,7 @@ def build_labelstudio_json_for_shard_task(shard_output_dir: str, shard_video_pat
                     for seg in data["scenes"]:
                         segment_results.append({
                             "start": seg.get("start_time", 0),
-                            "end": seg.get("end_time", 60), # Defaulting to 60s for scenes
+                            "end": seg.get("end_time", 60),
                             "labels": ["scene"]
                         })
                 elif "segments" in data: # For motion energy
@@ -56,7 +89,10 @@ def build_labelstudio_json_for_shard_task(shard_output_dir: str, shard_video_pat
             except Exception as e:
                 logger.error(f"Error processing file {file_path}: {e}")
 
-    # Format results into Label Studio's prediction format
+    # Merge the collected segments to create a common timeline
+    merged_segments = merge_segments_for_labelstudio(segment_results)
+
+    # Format merged results into Label Studio's prediction format
     result_entries = [
         {
             "from_name": "label",
@@ -67,12 +103,10 @@ def build_labelstudio_json_for_shard_task(shard_output_dir: str, shard_video_pat
                 "end": seg["end"],
                 "labels": seg["labels"]
             }
-        } for seg in segment_results
+        } for seg in merged_segments
     ]
 
     # Create the task structure for this shard
-    # NOTE: Using a local file path for 'video'. Label Studio needs access to this path.
-    # For a real deployment, this should be a URL (e.g., from a cloud storage presigned URL).
     task = {
         "data": {
             "video": shard_video_path 
@@ -90,7 +124,7 @@ def build_labelstudio_json_for_shard_task(shard_output_dir: str, shard_video_pat
     with open(save_path, "w") as f:
         json.dump(task, f, indent=2)
         
-    logger.info(f"Label Studio task for shard '{shard_name}' saved to {save_path}")
+    logger.info(f"Label Studio task for shard '{shard_name}' saved to {save_path} with {len(merged_segments)} merged segments.")
     return save_path
 
 
