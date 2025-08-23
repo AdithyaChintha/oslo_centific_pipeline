@@ -63,6 +63,24 @@ import ray
 import os
 import subprocess
 import cv2
+from pathlib import Path
+
+def _nvenc_available() -> bool:
+    """Return True if ffmpeg reports the h264_nvenc encoder."""
+    try:
+        out = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, text=True, timeout=10)
+        return out.returncode == 0 and ("h264_nvenc" in out.stdout or "hevc_nvenc" in out.stdout)
+    except Exception:
+        return False
+
+
+def _scale_cuda_available() -> bool:
+    """Return True if ffmpeg reports the scale_cuda filter."""
+    try:
+        out = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True, timeout=10)
+        return out.returncode == 0 and ("scale_cuda" in out.stdout)
+    except Exception:
+        return False
 
 @ray.remote
 def split_video_into_shards(video_path, output_dir="/tmp/shards", duration_sec=60, downscale_to_480p=True):
@@ -116,6 +134,82 @@ def split_video_into_shards(video_path, output_dir="/tmp/shards", duration_sec=6
         shard_idx += 1
     
     return shard_paths
+
+@ray.remote
+def _downscale_nvenc(shard_path: str, output_dir: str, height: int = 480) -> str:
+    """Downscale a shard, preferring GPU paths, with safe CPU fallback.
+
+    Priority:
+      1) CUDA scale + NVENC encode (fastest) if both are available
+      2) CPU scale + NVENC encode (still fast, GPU encode only)
+      3) CPU scale + libx264 encode (fallback)
+    """
+    shard_path = str(Path(shard_path))
+    _ensure_dir(output_dir)
+    base = _basename_noext(shard_path)
+    out_path = os.path.join(output_dir, f"{base}_h{height}.mp4")
+
+    use_nvenc = _nvenc_available()
+    use_scale_cuda = _scale_cuda_available()
+
+    # Allow overrides via env for debugging
+    force_cpu = os.getenv("SPLITTER_FORCE_CPU", "0") == "1"
+    if force_cpu:
+        use_nvenc = False
+        use_scale_cuda = False
+
+    if use_nvenc and use_scale_cuda:
+        # Full GPU path: decode/scale on CUDA, encode via NVENC
+        cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-hwaccel", "cuda",
+            "-i", shard_path,
+            "-vf", f"scale_cuda=-2:{height}",
+            "-c:v", "h264_nvenc",
+            "-preset", os.getenv("SPLITTER_NVENC_PRESET", "p4"),
+            "-tune", os.getenv("SPLITTER_NVENC_TUNE", "hq"),
+            "-cq", os.getenv("SPLITTER_NVENC_CQ", "23"),
+            "-c:a", "copy",
+            out_path,
+        ]
+        path_label = "GPU scale + NVENC"
+
+    elif use_nvenc:
+        # Mixed path: CPU scale but NVENC encode
+        cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-i", shard_path,
+            "-vf", f"scale=-2:{height}",
+            "-c:v", "h264_nvenc",
+            "-preset", os.getenv("SPLITTER_NVENC_PRESET", "p4"),
+            "-tune", os.getenv("SPLITTER_NVENC_TUNE", "hq"),
+            "-cq", os.getenv("SPLITTER_NVENC_CQ", "23"),
+            "-c:a", "copy",
+            out_path,
+        ]
+        path_label = "CPU scale + NVENC"
+
+    else:
+        # Full CPU fallback
+        cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-i", shard_path,
+            "-vf", f"scale=-2:{height}",
+            "-c:v", "libx264",
+            "-preset", os.getenv("SPLITTER_X264_PRESET", "veryfast"),
+            "-crf", os.getenv("SPLITTER_X264_CRF", "23"),
+            "-c:a", "copy",
+            out_path,
+        ]
+        path_label = "CPU scale + libx264"
+
+    # Lightweight visibility for Ray logs
+    print(f"[splitter] Downscale path: {path_label} | in={shard_path} -> out={out_path}")
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"Downscale failed for {shard_path}: {result.stderr[:500]}")
+    return out_path
 
 #//
 
