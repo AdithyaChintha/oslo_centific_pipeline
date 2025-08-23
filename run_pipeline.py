@@ -558,6 +558,307 @@ def load_jsonl_file(file_path):
     return events
 
 
+def reorganize_and_consolidate_per_shard(all_results, local_outputs_dir, local_input_path):
+    """
+    Reorganize the output structure to have each shard as a top-level folder
+    with view_1, view_2 subfolders and consolidated JSON for each shard.
+    
+    Target structure:
+    outputs/
+    ├── shard_1/
+    │   ├── view_1/          (individual view_1 results for shard_1)
+    │   ├── view_2/          (individual view_2 results for shard_1)
+    │   └── consolidated_shard_1_output.json  (consolidated results for shard_1)
+    ├── shard_2/
+    │   ├── view_1/          (individual view_1 results for shard_2)
+    │   ├── view_2/          (individual view_2 results for shard_2)  
+    │   └── consolidated_shard_2_output.json  (consolidated results for shard_2)
+    
+    Args:
+        all_results: List of view processing results
+        local_outputs_dir: Base output directory
+        local_input_path: Path to input file
+        
+    Returns:
+        dict: Summary of reorganization and consolidation
+    """
+    import json
+    import os
+    import glob
+    import shutil
+    from datetime import datetime
+    
+    logger.info("🔄 REORGANIZING OUTPUT STRUCTURE PER SHARD...")
+    
+    # Find all unique shard names across all views
+    all_shards = set()
+    for view_result in all_results:
+        view_local_dir = view_result["local_output_dir"]
+        shard_dirs = glob.glob(os.path.join(view_local_dir, "shard_*"))
+        for shard_dir in shard_dirs:
+            shard_name = os.path.basename(shard_dir)
+            all_shards.add(shard_name)
+    
+    all_shards = sorted(list(all_shards))
+    logger.info("Found %d shards to reorganize: %s", len(all_shards), all_shards)
+    
+    reorganization_summary = []
+    
+    # Create the new structure for each shard
+    for shard_name in all_shards:
+        logger.info("📁 Reorganizing %s...", shard_name)
+        
+        # Create new shard directory structure
+        new_shard_dir = os.path.join(local_outputs_dir, shard_name)
+        os.makedirs(new_shard_dir, exist_ok=True)
+        
+        # Create view subdirectories within shard
+        new_view1_dir = os.path.join(new_shard_dir, "view_1")
+        new_view2_dir = os.path.join(new_shard_dir, "view_2")
+        os.makedirs(new_view1_dir, exist_ok=True)
+        os.makedirs(new_view2_dir, exist_ok=True)
+        
+        moved_views = []
+        
+        # Move shard content from each view to the new structure
+        for view_result in all_results:
+            view_name = view_result["view"]
+            view_local_dir = view_result["local_output_dir"]
+            
+            # Source: old view structure (outputs/VIDEO/view_1/shard_N)
+            old_shard_path = os.path.join(view_local_dir, shard_name)
+            
+            # Destination: new shard structure (outputs/VIDEO/shard_N/view_1)
+            if view_name == "view_1":
+                new_view_path = new_view1_dir
+            else:  # view_2
+                new_view_path = new_view2_dir
+            
+            if os.path.exists(old_shard_path):
+                logger.info("  Moving %s %s content...", shard_name, view_name)
+                
+                # Move all content from old shard to new view directory
+                for item in os.listdir(old_shard_path):
+                    src_item = os.path.join(old_shard_path, item)
+                    dst_item = os.path.join(new_view_path, item)
+                    
+                    if os.path.isdir(src_item):
+                        if os.path.exists(dst_item):
+                            shutil.rmtree(dst_item)
+                        shutil.copytree(src_item, dst_item)
+                    else:
+                        shutil.copy2(src_item, dst_item)
+                
+                moved_views.append(view_name)
+                logger.info("    ✅ %s %s content moved", shard_name, view_name)
+            else:
+                logger.warning("    ⚠️  %s not found in %s", shard_name, view_name)
+        
+        # Generate consolidated JSON for this shard using the reorganized structure
+        logger.info("  Creating consolidated JSON for %s...", shard_name)
+        shard_consolidated = consolidate_single_shard_from_reorganized(
+            shard_name, new_shard_dir, local_input_path
+        )
+        
+        # Save the consolidated JSON in the shard directory
+        consolidated_file = os.path.join(new_shard_dir, f"consolidated_{shard_name}_output.json")
+        with open(consolidated_file, 'w') as f:
+            json.dump(shard_consolidated, f, indent=2)
+        
+        logger.info("    ✅ Consolidated JSON saved: %s", os.path.basename(consolidated_file))
+        
+        reorganization_summary.append({
+            "shard_name": shard_name,
+            "shard_directory": new_shard_dir,
+            "views_moved": moved_views,
+            "consolidated_file": consolidated_file,
+            "statistics": shard_consolidated["shard_statistics"]
+        })
+    
+    # Create overall reorganization summary
+    master_summary = {
+        "reorganization_info": {
+            "input_file": local_input_path,
+            "total_shards_reorganized": len(all_shards),
+            "reorganization_timestamp": datetime.now().isoformat(),
+            "new_structure": "Each shard has own directory with view_1/, view_2/ subdirectories and consolidated JSON"
+        },
+        "shard_summaries": reorganization_summary,
+        "overall_statistics": {
+            "total_yolo_detections": sum(s["statistics"]["total_yolo_detections"] for s in reorganization_summary),
+            "total_scenes": sum(s["statistics"]["total_scenes"] for s in reorganization_summary),
+            "total_motion_segments": sum(s["statistics"]["total_motion_segments"] for s in reorganization_summary),
+            "total_nsfw_analyses": sum(s["statistics"]["total_nsfw_analyses"] for s in reorganization_summary),
+            "total_face_analyses": sum(s["statistics"]["total_face_analyses"] for s in reorganization_summary),
+            "total_audio_analyses": sum(s["statistics"]["total_audio_analyses"] for s in reorganization_summary),
+            "total_clap_detections": sum(s["statistics"]["total_clap_detections"] for s in reorganization_summary)
+        }
+    }
+    
+    # Save master reorganization summary
+    summary_file = os.path.join(local_outputs_dir, "per_shard_reorganization_summary.json")
+    with open(summary_file, 'w') as f:
+        json.dump(master_summary, f, indent=2)
+    
+    logger.info("✅ Reorganization complete! Summary saved: %s", summary_file)
+    logger.info("📊 REORGANIZATION SUMMARY:")
+    logger.info("   Total shards reorganized: %d", len(all_shards))
+    for shard_summary in reorganization_summary:
+        shard_name = shard_summary["shard_name"]
+        stats = shard_summary["statistics"]
+        logger.info("   %s: YOLO=%d, Scenes=%d, Motion=%d", 
+                   shard_name, stats['total_yolo_detections'], 
+                   stats['total_scenes'], stats['total_motion_segments'])
+    
+    return master_summary
+
+
+def consolidate_single_shard_from_reorganized(shard_name, shard_dir, local_input_path):
+    """
+    Create consolidated output for a single shard from the reorganized structure.
+    
+    Args:
+        shard_name: Name of the shard (e.g., 'shard_1')
+        shard_dir: Path to the shard directory (contains view_1/, view_2/ subdirs)
+        local_input_path: Path to input file
+        
+    Returns:
+        dict: Consolidated output for this specific shard
+    """
+    import json
+    import os
+    import glob
+    from datetime import datetime
+    
+    logger.info("    Creating consolidated output for %s...", shard_name)
+    
+    # Initialize consolidated structure for this shard
+    shard_consolidated = {
+        "consolidation_info": {
+            "shard_name": shard_name,
+            "input_file": local_input_path,
+            "consolidation_timestamp": datetime.now().isoformat(),
+            "structure": "Reorganized per-shard structure"
+        },
+        "yolo_detections": [],
+        "scene_detection": [],
+        "nsfw_analysis": [],
+        "face_analysis": [],
+        "motion_analysis": [],
+        "audio_analysis": [],
+        "clap_detection": []
+    }
+    
+    # Process each view subdirectory in the shard
+    for view_name in ["view_1", "view_2"]:
+        view_dir = os.path.join(shard_dir, view_name)
+        
+        if not os.path.exists(view_dir):
+            logger.warning("      Warning: %s not found in %s", view_name, shard_name)
+            continue
+            
+        logger.info("      Processing %s...", view_name)
+        
+        # 1. YOLO Detection Results
+        yolo_dir = os.path.join(view_dir, "yolo_output")
+        if os.path.exists(yolo_dir):
+            yolo_files = glob.glob(os.path.join(yolo_dir, "*.events.jsonl"))
+            for yolo_file in yolo_files:
+                yolo_events = load_jsonl_file(yolo_file)
+                for event in yolo_events:
+                    if "_meta" not in event:  # Skip metadata lines
+                        event["source_view"] = view_name
+                        event["shard"] = shard_name
+                        shard_consolidated["yolo_detections"].append(event)
+        
+        # 2. Scene Detection Results
+        scene_dir = os.path.join(view_dir, "scene_output")
+        if os.path.exists(scene_dir):
+            scene_files = glob.glob(os.path.join(scene_dir, "*_scene_detection_results.json"))
+            for scene_file in scene_files:
+                with open(scene_file, 'r') as f:
+                    scene_data = json.load(f)
+                    for scene in scene_data.get("scenes", []):
+                        scene["source_view"] = view_name
+                        scene["shard"] = shard_name
+                        scene["video_path"] = scene_data.get("video_path", "")
+                        shard_consolidated["scene_detection"].append(scene)
+        
+        # 3. NSFW Analysis Results
+        nsfw_dir = os.path.join(view_dir, "nsfw_output")
+        if os.path.exists(nsfw_dir):
+            nsfw_files = glob.glob(os.path.join(nsfw_dir, "*_nsfw_results.json"))
+            for nsfw_file in nsfw_files:
+                with open(nsfw_file, 'r') as f:
+                    nsfw_data = json.load(f)
+                    nsfw_data["source_view"] = view_name
+                    nsfw_data["shard"] = shard_name
+                    shard_consolidated["nsfw_analysis"].append(nsfw_data)
+        
+        # 4. Face Analysis Results
+        face_dir = os.path.join(view_dir, "face_output")
+        if os.path.exists(face_dir):
+            face_files = glob.glob(os.path.join(face_dir, "*_face_results.json"))
+            for face_file in face_files:
+                with open(face_file, 'r') as f:
+                    face_data = json.load(f)
+                    face_data["source_view"] = view_name
+                    face_data["shard"] = shard_name
+                    shard_consolidated["face_analysis"].append(face_data)
+        
+        # 5. Motion Analysis Results
+        motion_dir = os.path.join(view_dir, "motion_output")
+        if os.path.exists(motion_dir):
+            motion_files = glob.glob(os.path.join(motion_dir, "*_motion_results.json"))
+            for motion_file in motion_files:
+                with open(motion_file, 'r') as f:
+                    motion_data = json.load(f)
+                    for segment in motion_data.get("segments", []):
+                        segment["source_view"] = view_name
+                        segment["shard"] = shard_name
+                        shard_consolidated["motion_analysis"].append(segment)
+        
+        # 6. Audio Analysis Results
+        audio_dir = os.path.join(view_dir, "audio_output")
+        if os.path.exists(audio_dir):
+            audio_files = glob.glob(os.path.join(audio_dir, "*.json"))
+            for audio_file in audio_files:
+                with open(audio_file, 'r') as f:
+                    audio_data = json.load(f)
+                    audio_data["source_view"] = view_name
+                    audio_data["shard"] = shard_name
+                    shard_consolidated["audio_analysis"].append(audio_data)
+        
+        # 7. Clap Detection Results
+        clap_dir = os.path.join(view_dir, "clap_output")
+        if os.path.exists(clap_dir):
+            clap_files = glob.glob(os.path.join(clap_dir, "*.json"))
+            for clap_file in clap_files:
+                with open(clap_file, 'r') as f:
+                    clap_data = json.load(f)
+                    clap_data["source_view"] = view_name
+                    clap_data["shard"] = shard_name
+                    shard_consolidated["clap_detection"].append(clap_data)
+    
+    # Sort data by timestamp
+    shard_consolidated["yolo_detections"].sort(key=lambda x: x.get("t", 0))
+    shard_consolidated["scene_detection"].sort(key=lambda x: x.get("start_time", 0))
+    shard_consolidated["motion_analysis"].sort(key=lambda x: x.get("start_time", 0))
+    
+    # Add statistics for this shard
+    shard_consolidated["shard_statistics"] = {
+        "total_yolo_detections": len(shard_consolidated["yolo_detections"]),
+        "total_scenes": len(shard_consolidated["scene_detection"]),
+        "total_motion_segments": len(shard_consolidated["motion_analysis"]),
+        "total_nsfw_analyses": len(shard_consolidated["nsfw_analysis"]),
+        "total_face_analyses": len(shard_consolidated["face_analysis"]),
+        "total_audio_analyses": len(shard_consolidated["audio_analysis"]),
+        "total_clap_detections": len(shard_consolidated["clap_detection"])
+    }
+    
+    return shard_consolidated
+
+
 def consolidate_per_shard_outputs(all_results, local_outputs_dir, local_input_path):
     """
     Create consolidated outputs for each shard individually.
@@ -835,8 +1136,16 @@ def merge_overlapping_segments(timeline):
             current_segment["end_time"] = max(current_segment["end_time"], segment["end_time"])
             
             # Combine task types and descriptions
-            current_tasks = current_segment.get("task_type", "").split(", ")
+            current_task_type = current_segment.get("task_type", "")
+            if isinstance(current_task_type, list):
+                current_tasks = current_task_type
+            else:
+                current_tasks = current_task_type.split(", ") if current_task_type else []
+            
             new_task = segment.get("task_type", "")
+            if isinstance(new_task, list):
+                new_task = ", ".join(new_task) if new_task else ""
+            
             if new_task and new_task not in current_tasks:
                 current_tasks.append(new_task)
                 current_segment["task_type"] = ", ".join(current_tasks)
@@ -848,8 +1157,16 @@ def merge_overlapping_segments(timeline):
                 current_segment["description"] = f"{current_desc}; {new_desc}"
             
             # Combine source views
-            current_views = current_segment.get("source_view", "").split(", ")
+            current_source_view = current_segment.get("source_view", "")
+            if isinstance(current_source_view, list):
+                current_views = current_source_view
+            else:
+                current_views = current_source_view.split(", ") if current_source_view else []
+            
             new_view = segment.get("source_view", "")
+            if isinstance(new_view, list):
+                new_view = ", ".join(new_view) if new_view else ""
+            
             if new_view and new_view not in current_views:
                 current_views.append(new_view)
                 current_segment["source_view"] = ", ".join(current_views)
@@ -1037,9 +1354,9 @@ def main():
                     all_results, local_outputs_dir, local_input_path
                 )
                 
-                # Generate per-shard consolidated outputs
-                logger.info("Creating per-shard consolidated outputs...")
-                per_shard_summary = consolidate_per_shard_outputs(
+                # Reorganize and generate per-shard consolidated outputs
+                logger.info("Reorganizing output structure and creating per-shard consolidated outputs...")
+                per_shard_summary = reorganize_and_consolidate_per_shard(
                     all_results, local_outputs_dir, local_input_path
                 )
                 
@@ -1058,9 +1375,9 @@ def main():
                         "total_nsfw_detections": consolidated_model_outputs["consolidated_statistics"]["total_nsfw_detections"],
                         "total_faces_detected": consolidated_model_outputs["consolidated_statistics"]["total_faces_detected"]
                     },
-                    "per_shard_consolidation_summary": {
-                        "total_shards_processed": per_shard_summary["consolidation_info"]["total_shards_processed"],
-                        "per_shard_files_generated": len(per_shard_summary["per_shard_summaries"]),
+                    "per_shard_reorganization_summary": {
+                        "total_shards_reorganized": per_shard_summary["reorganization_info"]["total_shards_reorganized"],
+                        "per_shard_files_generated": len(per_shard_summary["shard_summaries"]),
                         "overall_statistics": per_shard_summary["overall_statistics"]
                     }
                 }

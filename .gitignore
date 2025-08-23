@@ -38,6 +38,13 @@ pip-delete-this-directory.txt
 
 # Models
 yolov8n.pt
+nsfw_model/
+*.onnx
+*.pt
+*.pth
+*.h5
+*.pb
+*.tflite
 
 # Testing ray_pipeline
 ray_test_scene_det2.py
