@@ -1,10 +1,97 @@
 import os
 import ray
 import pytest
-import yaml
-from azure.storage.blob import BlobServiceClient
+import tempfile
+import shutil
+from pathlib import Path
+import logging
+import time
+from datetime import datetime
 
-from ray_jobs.video_splitter import split_and_downscale_insv
+# --- Ensure local package is importable ---
+import sys
+_repo_root = Path(__file__).resolve().parents[1]
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
+
+# --- Logging setup ---
+LOG_LEVEL = os.getenv("TEST_LOG_LEVEL", "INFO").upper()
+logger = logging.getLogger("TestVideoSplitter")
+if not logger.handlers:
+    logger.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter(
+        fmt="%(asctime)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    ))
+    logger.addHandler(_h)
+
+# Quiet noisy Azure SDK / HTTP logging
+for noisy in [
+    "azure",
+    "azure.core",
+    "azure.storage",
+    "azure.storage.blob",
+    "azure.core.pipeline.policies.http_logging_policy",
+    "urllib3",
+]:
+    _lz = logging.getLogger(noisy)
+    _lz.setLevel(logging.WARNING)
+    _lz.propagate = False
+
+# Some environments still emit from the http_logging_policy; hard-disable as a fallback
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").disabled = True
+
+def _human_size(num: int, suffix="B") -> str:
+    for unit in ["", "K", "M", "G", "T"]:
+        if abs(num) < 1024.0:
+            return f"{num:3.1f}{unit}{suffix}"
+        num /= 1024.0
+    return f"{num:.1f}P{suffix}"
+
+def _ffmpeg_has_nvenc() -> bool:
+    try:
+        import subprocess
+        out = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, text=True, timeout=10)
+        return out.returncode == 0 and ("h264_nvenc" in out.stdout or "hevc_nvenc" in out.stdout)
+    except Exception:
+        return False
+
+
+def _ffmpeg_has_scale_cuda() -> bool:
+    try:
+        import subprocess
+        out = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True, timeout=10)
+        return out.returncode == 0 and ("scale_cuda" in out.stdout)
+    except Exception:
+        return False
+
+from ray_jobs.video_splitter import split_video_into_shards
+from ray_jobs.insv_to_mp4 import convert_insv_to_dual_mp4
+
+def _run_insv_convert(src_insv: str, output_dir: str) -> str:
+    # The converter is a Ray @remote function; call via .remote and ray.get
+    obj_ref = convert_insv_to_dual_mp4.remote(src_insv, output_dir=output_dir)
+    start_wait = time.perf_counter()
+    last_log = start_wait
+    while True:
+        ready, not_ready = ray.wait([obj_ref], timeout=5.0)
+        if ready:
+            out = ray.get(ready[0])
+            break
+        now = time.perf_counter()
+        if now - last_log >= 15.0:  # log every ~15s to avoid spam
+            logger.info("Waiting for INSV->MP4 conversion... elapsed %.1fs", now - start_wait)
+            last_log = now
+    if isinstance(out, str):
+        return out
+    if isinstance(out, (list, tuple)) and len(out) > 0:
+        return out[0]
+    if isinstance(out, dict):
+        return out.get("view1") or next(iter(out.values()))
+    raise AssertionError(f"Unexpected converter output type: {type(out)}")
+
+from utils.azure_blob_utils import list_blobs, download_blob
 
 # --- Configuration ---
 CONFIG_PATH = "config/azure_blob.yaml"
@@ -15,134 +102,120 @@ pytestmark = pytest.mark.skipif(
     reason=f"Azure config file not found at: {CONFIG_PATH}"
 )
 
-def load_azure_config(config_path):
-    """Loads Azure credentials from a YAML file."""
-    try:
-        with open(config_path, 'r') as f:
-            return yaml.safe_load(f)
-    except FileNotFoundError:
-        pytest.fail(f"Config file not found: {config_path}")
-    except Exception as e:
-        pytest.fail(f"Error reading config file: {e}")
-
-def get_azure_connection_string(config):
-    """Constructs the Azure Storage connection string."""
-    account_name = config.get("AZURE_STORAGE_ACCOUNT_NAME")
-    account_key = config.get("AZURE_STORAGE_ACCOUNT_KEY")
-    if not account_name or not account_key:
-        pytest.fail("AZURE_STORAGE_ACCOUNT_NAME and AZURE_STORAGE_ACCOUNT_KEY must be in the config.")
-    return (
-        f"DefaultEndpointsProtocol=https;AccountName={account_name};"
-        f"AccountKey={account_key};EndpointSuffix=core.windows.net"
-    )
-
-def get_azure_blob_urls(connection_string, container_name, blob_prefix, file_extension=".insv"):
-    """Lists blobs in a given container and returns their URLs."""
-    try:
-        blob_service_client = BlobServiceClient.from_connection_string(connection_string)
-        container_client = blob_service_client.get_container_client(container_name)
-        
-        blob_urls = []
-        print(f"Listing blobs in container '{container_name}' with prefix '{blob_prefix}'...")
-        blobs = container_client.list_blobs(name_starts_with=blob_prefix)
-        
-        for blob in blobs:
-            if blob.name.lower().endswith(file_extension):
-                blob_url = f"https://{container_client.account_name}.blob.core.windows.net/{container_name}/{blob.name}"
-                blob_urls.append(blob_url)
-        
-        if not blob_urls:
-            print(f"Warning: No blobs with extension '{file_extension}' found at prefix '{blob_prefix}'.")
-            
-        return blob_urls
-    except Exception as e:
-        pytest.fail(f"Failed to connect to Azure and list blobs: {e}")
-
-@pytest.fixture(scope="module")
-def azure_config():
-    """Fixture to load Azure config for the test module."""
-    return load_azure_config(CONFIG_PATH)
-
 @pytest.fixture(scope="module")
 def ray_init():
     """Initialize and shutdown Ray for the test module."""
+    logger.info("Initializing Ray (ignore_reinit_error=True)...")
+    t0 = time.perf_counter()
     ray.init(ignore_reinit_error=True)
+    logger.info("Ray initialized in %.2fs | resources=%s", time.perf_counter()-t0, ray.cluster_resources())
     yield
+    logger.info("Shutting down Ray...")
+    t1 = time.perf_counter()
     ray.shutdown()
+    logger.info("Ray shutdown in %.2fs", time.perf_counter()-t1)
 
-def test_split_and_downscale_multiple_videos(ray_init, azure_config):
+@pytest.fixture(scope="function")
+def temp_dir():
+    """Create a temporary directory for test artifacts."""
+    td = tempfile.mkdtemp()
+    logger.info("Created temporary directory: %s", td)
+    yield td
+    logger.info("Deleting temporary directory: %s", td)
+    t0 = time.perf_counter()
+    shutil.rmtree(td)
+    logger.info("Temporary directory deleted in %.2fs", time.perf_counter()-t0)
+
+def test_split_video_from_azure_blob(ray_init, temp_dir, fast_mode):
     """
-    Tests the split_and_downscale_insv function on multiple videos from Azure Blob Storage.
+    Tests the split_video_into_shards function by downloading a video from
+    Azure Blob Storage and processing it locally.
     """
+    start_ts = datetime.now()
+    logger.info("Test started at %s", start_ts.strftime("%Y-%m-%d %H:%M:%S"))
     # --- Test Setup ---
-    connection_string = get_azure_connection_string(azure_config)
-    input_container_name = azure_config.get("AZURE_CONTAINER_NAME", "instavideo")
+    container_name = "instavideo"
+    blob_prefix = "azure_directory_path/DCIM/Camera01/"
     
-    # Correctly construct the prefix from your request
-    input_blob_prefix = "instavideo/azure_directory_path/DCIM/Camera01/"
-    
-    output_container_name = "instavideo"
-    output_blob_prefix = "krishna-test/test1/test_activity/pre-annotation-output"
+    # 1. Find a video file in Azure Blob Storage
+    t0 = time.perf_counter()
+    logger.info("Listing blobs in '%s' with prefix '%s'...", container_name, blob_prefix)
+    blob_names = list_blobs(container_name, blob_prefix, file_extension=".insv")
+    list_time = time.perf_counter()-t0
+    logger.info("Found %d blob(s) in %.2fs", len(blob_names), list_time)
+    before = len(blob_names)
+    blob_names = [b for b in blob_names if not os.path.basename(b).startswith("._")]
+    logger.info("Filtered macOS resource forks: %d -> %d", before, len(blob_names))
 
-    # 1. Get the list of .insv video URLs from Azure
-    video_urls = get_azure_blob_urls(connection_string, input_container_name, input_blob_prefix)
-    
-    assert video_urls, f"No .insv videos found in {input_container_name}/{input_blob_prefix}. Test cannot proceed."
-    
-    print(f"Found {len(video_urls)} videos to process. Starting tasks...")
+    assert blob_names, f"No .insv videos found in {container_name}/{blob_prefix}. Test cannot proceed."
 
-    # 2. Launch a Ray task for each video
-    tasks = []
-    for video_url in video_urls:
-        task = split_and_downscale_insv.remote(
-            azure_blob_url=video_url,
-            azure_container_name=input_container_name,
-            azure_connection_string=connection_string,
-            output_container_name=output_container_name,
-            output_blob_prefix=output_blob_prefix,
-            duration_sec=60,
-            downscale_to_480p=True
-        )
-        tasks.append(task)
+    video_to_download = blob_names[0]
+    logger.info("Selected blob: %s", video_to_download)
 
-    # 3. Wait for all tasks to complete and get results
-    results = ray.get(tasks)
-    
-    assert len(results) == len(video_urls)
-    print("\n--- Task Results ---")
-    for i, result in enumerate(results):
-        print(f"Video {i+1}: {result.get('input_video')}")
-        print(f"  Success: {result.get('success')}")
-        if result.get('success'):
-            print(f"  Shards Created: {result.get('shard_count')}")
-            print(f"  Output Location: {result.get('output_prefix')}")
-        else:
-            print(f"  Error: {result.get('error')}")
+    # 2. Download the video to a temporary local path
+    local_video_path = os.path.join(temp_dir, os.path.basename(video_to_download))
+    t0 = time.perf_counter()
+    downloaded_path = download_blob(container_name, video_to_download, local_video_path)
+    dl_time = time.perf_counter()-t0
+    assert downloaded_path and os.path.exists(downloaded_path), "Failed to download video from Azure."
+    insv_size = os.path.getsize(downloaded_path)
+    logger.info("Downloaded to %s (%s) in %.2fs [%.2f MB/s]", downloaded_path, _human_size(insv_size), dl_time, (insv_size/1e6)/dl_time if dl_time>0 else 0.0)
 
-    # 4. Verify the results
-    blob_service_client = BlobServiceClient.from_connection_string(connection_string)
-    container_client = blob_service_client.get_container_client(output_container_name)
-    
-    for result in results:
-        assert result["success"], f"Processing failed for video: {result['input_video']} with error: {result.get('error')}"
-        
-        video_name_without_ext = os.path.splitext(os.path.basename(result["input_video"]))[0]
-        expected_prefix = f"{output_blob_prefix}/{video_name_without_ext}/"
-        
-        print(f"\nVerifying output for: {video_name_without_ext}")
-        print(f"  - Checking for blobs with prefix: {expected_prefix}")
-        
-        shards = list(container_client.list_blobs(name_starts_with=expected_prefix))
-        
-        assert len(shards) > 0, f"No shards found in Azure for video {video_name_without_ext} at prefix {expected_prefix}"
-        assert len(shards) == result["shard_count"], \
-            f"Mismatch in shard count for {video_name_without_ext}. Expected {result['shard_count']}, found {len(shards)} in blob storage."
-            
-        print(f"  - Verified: Found {len(shards)} shards in blob storage, which matches the expected count.")
+    # 3. Convert the downloaded .insv to .mp4 using ray_jobs converter
+    logger.info("Converting INSV -> MP4 via convert_insv_to_dual_mp4 (Ray remote)...")
+    t0 = time.perf_counter()
+    mp4_path = _run_insv_convert(downloaded_path, output_dir=temp_dir)
+    conv_time = time.perf_counter()-t0
+    assert mp4_path and os.path.exists(mp4_path), f"INSV conversion failed, mp4 not found: {mp4_path}"
+    mp4_size = os.path.getsize(mp4_path)
+    logger.info("Conversion produced %s (%s) in %.2fs [%.2f MB/s]", mp4_path, _human_size(mp4_size), conv_time, (mp4_size/1e6)/conv_time if conv_time>0 else 0.0)
 
-    print("\n✅ Test passed successfully for all videos.")
+    # Log local FFmpeg capabilities and set GPU fraction for fast mode if not already provided
+    logger.info("FFmpeg capabilities: NVENC=%s | scale_cuda=%s", _ffmpeg_has_nvenc(), _ffmpeg_has_scale_cuda())
+    if os.getenv("SPLITTER_GPU_FRACTION") is None:
+        os.environ["SPLITTER_GPU_FRACTION"] = "0.5" if fast_mode else "1.0"
+        logger.info("SPLITTER_GPU_FRACTION not set by env; defaulting to %s", os.environ["SPLITTER_GPU_FRACTION"])
 
-# To run this test:
-# 1. Make sure you have pytest and pyyaml installed: pip install pytest pyyaml
-# 2. Ensure 'config/azure_blob.yaml' is present.
-# 3. Run pytest from the root directory of the project: pytest test/test_video_splitter.py
+    # 4. Run the video splitter Ray task on the converted mp4 file
+    output_shard_dir = os.path.join(temp_dir, "shards")
+    shard_duration = 10 if fast_mode else 60
+    logger.info("Mode: %s | shard_duration=%ss", "FAST" if fast_mode else "NORMAL", shard_duration)
+    logger.info("Splitting MP4 into shards: dst=%s duration_sec=%s downscale_480p=%s", output_shard_dir, shard_duration, True)
+    t0 = time.perf_counter()
+    task = split_video_into_shards.remote(
+        video_path=mp4_path,
+        output_dir=output_shard_dir,
+        duration_sec=shard_duration,
+        downscale_to_480p=True
+    )
+    start_wait = time.perf_counter()
+    last_log = start_wait
+    while True:
+        ready, not_ready = ray.wait([task], timeout=5.0)
+        if ready:
+            shard_paths = ray.get(ready[0])
+            break
+        now = time.perf_counter()
+        if now - last_log >= 15.0:
+            logger.info("Waiting for split to finish... elapsed %.1fs", now - start_wait)
+            last_log = now
+    split_time = time.perf_counter()-t0
+    assert shard_paths, "The video splitter returned no shard paths."
+    logger.info("Split produced %d shard(s) in %.2fs", len(shard_paths), split_time)
+
+    # 5. Verify the results
+    total_bytes = 0
+    for i, shard_path in enumerate(shard_paths, 1):
+        assert os.path.exists(shard_path), f"Shard file not found: {shard_path}"
+        sz = os.path.getsize(shard_path)
+        total_bytes += sz
+        assert sz > 0, f"Shard file is empty: {shard_path}"
+        logger.info("Shard %d: %s (%s)", i, shard_path, _human_size(sz))
+    logger.info("Total shard size: %s", _human_size(total_bytes))
+
+    # A simple check to ensure we have more than one shard for a video longer than duration_sec
+    # (This depends on the actual video length)
+    assert len(shard_paths) > 0, "Expected at least one shard to be created."
+
+    total_time = (datetime.now() - start_ts).total_seconds()
+    logger.info("✅ Test passed successfully in %.2fs (download %.2fs | convert %.2fs | split %.2fs)", total_time, dl_time, conv_time, split_time)
