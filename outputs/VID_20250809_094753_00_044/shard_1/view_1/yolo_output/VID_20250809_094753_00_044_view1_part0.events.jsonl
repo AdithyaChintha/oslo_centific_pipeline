@@ -1,1 +1,0 @@
-{"_meta": {"video": "/tmp/pipeline_output_a46w5n5q/view_1/video_shards/VID_20250809_094753_00_044_view1_part0.mp4", "model": "yolov8n.pt", "conf": 0.5, "iou": 0.5, "frame_stride": 5, "classes": null, "device": null, "base_offset": 0}}
