@@ -1,0 +1,21 @@
+{
+  "success": true,
+  "video_path": "combined_shards",
+  "video_duration_seconds": 9.509500000000001,
+  "processing_time_seconds": 0.5202858448028564,
+  "total_segments": 1,
+  "motion_statistics": {
+    "total_motion_energy": 0,
+    "avg_motion_energy": 0
+  },
+  "segments": [
+    {
+      "start_time": 8.4084,
+      "end_time": 9.509500000000001,
+      "duration": 1.1011,
+      "activity_type": "HIGH_ACTIVITY",
+      "confidence": 0.6348486543452676,
+      "avg_motion_energy": 0.15810654767211546
+    }
+  ]
+}

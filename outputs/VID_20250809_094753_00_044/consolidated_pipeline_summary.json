@@ -1,0 +1,128 @@
+{
+  "input_file": "/tmp/pipeline_input__p1ca2e7/VID_20250809_094753_00_044.insv",
+  "total_duration_seconds": 120,
+  "views_analyzed": 2,
+  "conversion_time_seconds": 1.0065022259950638,
+  "consolidated_processing_summary": {
+    "total_shards": 2,
+    "successful_audio": 2,
+    "successful_yolo": 2,
+    "successful_scene": 2,
+    "successful_nsfw": 2,
+    "successful_motion": 2,
+    "successful_face": 2,
+    "successful_clap": 0,
+    "overall_success_rate": "42.9%"
+  },
+  "consolidated_annotation_summary": {
+    "total_flagged_segments": 3,
+    "flagged_duration_seconds": 68.11828333333332,
+    "high_priority_segments": 0,
+    "annotation_workload_reduction": "43.2%"
+  },
+  "total_consolidated_segments": 1,
+  "consolidated_flagged_timeline": [
+    {
+      "start_time": 0.0,
+      "end_time": 40.5,
+      "task_type": [
+        "scene_detection",
+        "motion_energy"
+      ],
+      "confidence": 0.8,
+      "flag_type": "scene_content",
+      "priority": "medium",
+      "description": "Combined flags: scene_detection, motion_energy; High motion activity: high_activity",
+      "shard_index": 1,
+      "source_view": "view_1, view_2",
+      "view_file": "/tmp/converted_mp4s/VID_20250809_094753_00_044_view1.mp4"
+    }
+  ],
+  "original_timeline_by_view": [
+    {
+      "start_time": 0.0,
+      "end_time": 40.5,
+      "task_type": [
+        "scene_detection",
+        "motion_energy"
+      ],
+      "confidence": 0.8,
+      "flag_type": "scene_content",
+      "priority": "medium",
+      "description": "Combined flags: scene_detection, motion_energy",
+      "shard_index": 1,
+      "source_view": "view_1",
+      "view_file": "/tmp/converted_mp4s/VID_20250809_094753_00_044_view1.mp4"
+    },
+    {
+      "start_time": 0.0,
+      "end_time": 26.0,
+      "task_type": "scene_detection",
+      "confidence": 0.8,
+      "flag_type": "scene_content",
+      "priority": "medium",
+      "description": "Combined flags: scene_detection",
+      "shard_index": 1,
+      "source_view": "view_2",
+      "view_file": "/tmp/converted_mp4s/VID_20250809_094753_00_044_view2.mp4"
+    },
+    {
+      "start_time": 30.847483333333336,
+      "end_time": 32.46576666666667,
+      "task_type": "motion_energy",
+      "confidence": 0.6502003583556399,
+      "flag_type": "high_motion",
+      "priority": "medium",
+      "description": "High motion activity: high_activity",
+      "shard_index": 1,
+      "source_view": "view_2",
+      "view_file": "/tmp/converted_mp4s/VID_20250809_094753_00_044_view2.mp4"
+    }
+  ],
+  "individual_view_summaries": [
+    {
+      "view": "view_1",
+      "pipeline_summary": {
+        "processing_summary": {
+          "total_shards": 1,
+          "successful_audio": 1,
+          "successful_yolo": 1,
+          "successful_scene": 1,
+          "successful_nsfw": 1,
+          "successful_motion": 1,
+          "successful_face": 1,
+          "successful_clap": 0,
+          "overall_success_rate": "85.7%"
+        },
+        "annotation_summary": {
+          "total_flagged_segments": 1,
+          "flagged_duration_seconds": 40.5,
+          "annotation_workload_reduction": "32.5%",
+          "high_priority_segments": 0
+        }
+      }
+    },
+    {
+      "view": "view_2",
+      "pipeline_summary": {
+        "processing_summary": {
+          "total_shards": 1,
+          "successful_audio": 1,
+          "successful_yolo": 1,
+          "successful_scene": 1,
+          "successful_nsfw": 1,
+          "successful_motion": 1,
+          "successful_face": 1,
+          "successful_clap": 0,
+          "overall_success_rate": "85.7%"
+        },
+        "annotation_summary": {
+          "total_flagged_segments": 2,
+          "flagged_duration_seconds": 27.61828333333333,
+          "annotation_workload_reduction": "54.0%",
+          "high_priority_segments": 0
+        }
+      }
+    }
+  ]
+}

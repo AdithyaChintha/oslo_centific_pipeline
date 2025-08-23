@@ -1,0 +1,37 @@
+{
+  "data": {
+    "video": "/tmp/pipeline_output_a46w5n5q/view_2/video_shards/VID_20250809_094753_00_044_view2_part0.mp4"
+  },
+  "predictions": [
+    {
+      "result": [
+        {
+          "from_name": "label",
+          "to_name": "video",
+          "type": "labels",
+          "value": {
+            "start": 0.0,
+            "end": 26.0,
+            "labels": [
+              "scene",
+              "MEDIUM_ACTIVITY"
+            ]
+          }
+        },
+        {
+          "from_name": "label",
+          "to_name": "video",
+          "type": "labels",
+          "value": {
+            "start": 29.3293,
+            "end": 32.46576666666667,
+            "labels": [
+              "MEDIUM_ACTIVITY",
+              "HIGH_ACTIVITY"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "video_file": "/tmp/converted_mp4s/VID_20250809_094753_00_044_view2.mp4",
+  "total_duration_seconds": 60,
+  "flagged_duration_seconds": 27.61828333333333,
+  "annotation_workload_reduction": "54.0%",
+  "total_flagged_segments": 2,
+  "flagged_timeline": [
+    {
+      "start_time": 0.0,
+      "end_time": 26.0,
+      "task_type": "scene_detection",
+      "confidence": 0.8,
+      "flag_type": "scene_content",
+      "priority": "medium",
+      "description": "Combined flags: scene_detection",
+      "shard_index": 1
+    },
+    {
+      "start_time": 30.847483333333336,
+      "end_time": 32.46576666666667,
+      "task_type": "motion_energy",
+      "confidence": 0.6502003583556399,
+      "flag_type": "high_motion",
+      "priority": "medium",
+      "description": "High motion activity: high_activity",
+      "shard_index": 1
+    }
+  ],
+  "high_priority_segments": []
+}

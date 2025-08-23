@@ -1,0 +1,29 @@
+{
+  "video_path": "/tmp/pipeline_output_9_3flben/view_2/video_shards/VID_20250809_094836_00_045_view2_part0.mp4",
+  "scenes": [
+    {
+      "start_time": 0.0,
+      "end_time": 2.6,
+      "description": "The man, dressed in blue attire, stands at the entrance of what appears to be a laundry area, holding a white cloth. He seems to be observing his surroundings."
+    },
+    {
+      "start_time": 2.6,
+      "end_time": 3.5,
+      "description": "He bends down slightly, extending his right arm towards something below him, possibly picking up another item."
+    },
+    {
+      "start_time": 4.0,
+      "end_time": 5.1,
+      "description": "The man rises upright, holding a black shoe in his left hand and a small object in his right. His gaze shifts downward, indicating he might have spotted something interesting or needed to adjust his grip."
+    }
+  ],
+  "raw_response": "```json\n[\n  {\n    \"start_time\": 0.0,\n    \"end_time\": 2.6,\n    \"caption\": \"The man, dressed in blue attire, stands at the entrance of what appears to be a laundry area, holding a white cloth. He seems to be observing his surroundings.\"\n  },\n  {\n    \"start_time\": 2.6,\n    \"end_time\": 3.5,\n    \"caption\": \"He bends down slightly, extending his right arm towards something below him, possibly picking up another item.\"\n  },\n  {\n    \"start_time\": 4.0,\n    \"end_time\": 5.1,\n    \"caption\": \"The man rises upright, holding a black shoe in his left hand and a small object in his right. His gaze shifts downward, indicating he might have spotted something interesting or needed to adjust his grip.\"\n  }\n]\n```",
+  "total_scenes": 3,
+  "processing_info": {
+    "model": "nvidia/Cosmos-Reason1-7B",
+    "success": true,
+    "gpu_memory_utilization": 0.25,
+    "max_model_len": 6144,
+    "scenes_extracted": 3
+  }
+}

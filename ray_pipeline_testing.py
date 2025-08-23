@@ -202,7 +202,15 @@ def pipeline_main(input_video_path: str, output_dir: str):
     """
     Simplified unified Ray pipeline for video analysis with time-based detection segments
     """
-    ray.init()
+    # Initialize Ray with proper error handling
+    try:
+        if not ray.is_initialized():
+            ray.init()
+    except RuntimeError as e:
+        if "ray.init twice" in str(e):
+            logger.warning("Ray already initialized, continuing...")
+        else:
+            raise
     
     # Ensure the output directory exists
     os.makedirs(output_dir, exist_ok=True)

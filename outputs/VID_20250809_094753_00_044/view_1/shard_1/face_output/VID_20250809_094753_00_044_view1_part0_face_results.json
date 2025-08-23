@@ -1,0 +1,19 @@
+{
+  "total_faces_detected": 0,
+  "total_processed_frames": 0,
+  "flagged_segments": [],
+  "detailed_analysis_summary": {
+    "gender_distribution": {},
+    "age_distribution": {
+      "minors": 0,
+      "adults": 0,
+      "seniors": 0
+    },
+    "emotion_distribution": {},
+    "race_distribution": {},
+    "total_unique_faces": 0,
+    "frames_with_faces": 0
+  },
+  "chunks_processed": 1,
+  "success": true
+}

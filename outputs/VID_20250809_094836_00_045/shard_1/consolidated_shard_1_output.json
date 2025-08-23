@@ -1,0 +1,473 @@
+{
+  "consolidation_info": {
+    "shard_name": "shard_1",
+    "input_file": "/tmp/pipeline_input_kzgogbs4/VID_20250809_094836_00_045.insv",
+    "consolidation_timestamp": "2025-08-23T17:17:07.600223",
+    "views_processed": 2,
+    "structure": "reorganized per-shard"
+  },
+  "yolo_detections": [
+    {
+      "t": 1.001,
+      "ts": "00:00:01.001",
+      "frame": 30,
+      "cls": "person",
+      "conf": 0.5262,
+      "bbox": [
+        223.47,
+        197.38,
+        279.75,
+        325.77
+      ],
+      "source_view": "view_2",
+      "shard": "shard_1"
+    },
+    {
+      "t": 1.168,
+      "ts": "00:00:01.168",
+      "frame": 35,
+      "cls": "person",
+      "conf": 0.7528,
+      "bbox": [
+        219.54,
+        203.6,
+        286.44,
+        329.93
+      ],
+      "source_view": "view_2",
+      "shard": "shard_1"
+    },
+    {
+      "t": 1.335,
+      "ts": "00:00:01.335",
+      "frame": 40,
+      "cls": "person",
+      "conf": 0.7538,
+      "bbox": [
+        215.95,
+        205.64,
+        287.4,
+        332.58
+      ],
+      "source_view": "view_2",
+      "shard": "shard_1"
+    },
+    {
+      "t": 1.835,
+      "ts": "00:00:01.835",
+      "frame": 55,
+      "cls": "person",
+      "conf": 0.6491,
+      "bbox": [
+        202.14,
+        206.44,
+        282.13,
+        334.95
+      ],
+      "source_view": "view_2",
+      "shard": "shard_1"
+    },
+    {
+      "t": 2.002,
+      "ts": "00:00:02.002",
+      "frame": 60,
+      "cls": "person",
+      "conf": 0.6738,
+      "bbox": [
+        201.56,
+        206.59,
+        275.99,
+        335.46
+      ],
+      "source_view": "view_2",
+      "shard": "shard_1"
+    },
+    {
+      "t": 2.169,
+      "ts": "00:00:02.169",
+      "frame": 65,
+      "cls": "person",
+      "conf": 0.5077,
+      "bbox": [
+        201.94,
+        208.98,
+        275.33,
+        335.93
+      ],
+      "source_view": "view_2",
+      "shard": "shard_1"
+    },
+    {
+      "t": 2.502,
+      "ts": "00:00:02.502",
+      "frame": 75,
+      "cls": "person",
+      "conf": 0.5017,
+      "bbox": [
+        204.45,
+        221.32,
+        296.35,
+        336.3
+      ],
+      "source_view": "view_2",
+      "shard": "shard_1"
+    },
+    {
+      "t": 3.17,
+      "ts": "00:00:03.170",
+      "frame": 95,
+      "cls": "person",
+      "conf": 0.5468,
+      "bbox": [
+        224.46,
+        210.25,
+        295.13,
+        328.96
+      ],
+      "source_view": "view_2",
+      "shard": "shard_1"
+    },
+    {
+      "t": 3.504,
+      "ts": "00:00:03.504",
+      "frame": 105,
+      "cls": "person",
+      "conf": 0.5476,
+      "bbox": [
+        227.35,
+        215.54,
+        284.1,
+        308.73
+      ],
+      "source_view": "view_2",
+      "shard": "shard_1"
+    },
+    {
+      "t": 3.67,
+      "ts": "00:00:03.670",
+      "frame": 110,
+      "cls": "person",
+      "conf": 0.6832,
+      "bbox": [
+        227.79,
+        208.87,
+        278.3,
+        302.54
+      ],
+      "source_view": "view_2",
+      "shard": "shard_1"
+    },
+    {
+      "t": 3.837,
+      "ts": "00:00:03.837",
+      "frame": 115,
+      "cls": "person",
+      "conf": 0.5225,
+      "bbox": [
+        230.62,
+        220.63,
+        272.04,
+        299.39
+      ],
+      "source_view": "view_2",
+      "shard": "shard_1"
+    },
+    {
+      "t": 4.004,
+      "ts": "00:00:04.004",
+      "frame": 120,
+      "cls": "person",
+      "conf": 0.5276,
+      "bbox": [
+        232.39,
+        223.75,
+        271.38,
+        297.73
+      ],
+      "source_view": "view_2",
+      "shard": "shard_1"
+    },
+    {
+      "t": 4.505,
+      "ts": "00:00:04.505",
+      "frame": 135,
+      "cls": "person",
+      "conf": 0.6081,
+      "bbox": [
+        231.5,
+        209.29,
+        267.34,
+        298.39
+      ],
+      "source_view": "view_2",
+      "shard": "shard_1"
+    },
+    {
+      "t": 7.341,
+      "ts": "00:00:07.341",
+      "frame": 220,
+      "cls": "person",
+      "conf": 0.6193,
+      "bbox": [
+        232.0,
+        209.18,
+        267.34,
+        300.4
+      ],
+      "source_view": "view_2",
+      "shard": "shard_1"
+    },
+    {
+      "t": 8.342,
+      "ts": "00:00:08.342",
+      "frame": 250,
+      "cls": "person",
+      "conf": 0.6883,
+      "bbox": [
+        78.2,
+        211.36,
+        320.53,
+        441.7
+      ],
+      "source_view": "view_2",
+      "shard": "shard_1"
+    },
+    {
+      "t": 8.508,
+      "ts": "00:00:08.508",
+      "frame": 255,
+      "cls": "person",
+      "conf": 0.6998,
+      "bbox": [
+        18.05,
+        206.78,
+        317.15,
+        449.36
+      ],
+      "source_view": "view_2",
+      "shard": "shard_1"
+    },
+    {
+      "t": 8.675,
+      "ts": "00:00:08.675",
+      "frame": 260,
+      "cls": "person",
+      "conf": 0.5293,
+      "bbox": [
+        15.47,
+        208.87,
+        311.99,
+        458.85
+      ],
+      "source_view": "view_2",
+      "shard": "shard_1"
+    },
+    {
+      "t": 8.842,
+      "ts": "00:00:08.842",
+      "frame": 265,
+      "cls": "person",
+      "conf": 0.6597,
+      "bbox": [
+        174.73,
+        332.99,
+        454.65,
+        464.25
+      ],
+      "source_view": "view_1",
+      "shard": "shard_1"
+    },
+    {
+      "t": 8.842,
+      "ts": "00:00:08.842",
+      "frame": 265,
+      "cls": "person",
+      "conf": 0.6086,
+      "bbox": [
+        14.43,
+        202.71,
+        302.24,
+        469.71
+      ],
+      "source_view": "view_2",
+      "shard": "shard_1"
+    },
+    {
+      "t": 9.176,
+      "ts": "00:00:09.176",
+      "frame": 275,
+      "cls": "person",
+      "conf": 0.5697,
+      "bbox": [
+        40.26,
+        179.12,
+        296.4,
+        463.62
+      ],
+      "source_view": "view_2",
+      "shard": "shard_1"
+    },
+    {
+      "t": 9.343,
+      "ts": "00:00:09.343",
+      "frame": 280,
+      "cls": "person",
+      "conf": 0.5034,
+      "bbox": [
+        39.8,
+        203.84,
+        290.57,
+        466.62
+      ],
+      "source_view": "view_2",
+      "shard": "shard_1"
+    }
+  ],
+  "scene_detection": [
+    {
+      "start_time": 0.0,
+      "end_time": 2.7,
+      "description": "The video starts with a view of a white countertop, with a sink located towards the left side. On top of the counter, there is a red container holding some green items along with several papers scattered around it. To the right of this setup, part of another piece of furniture can be seen. A hand then enters the frame from the bottom center, moving towards the right.",
+      "source_view": "view_1",
+      "shard": "shard_1",
+      "video_path": "/tmp/pipeline_output_9_3flben/view_1/video_shards/VID_20250809_094836_00_045_view1_part0.mp4"
+    },
+    {
+      "start_time": 0.0,
+      "end_time": 2.6,
+      "description": "The man, dressed in blue attire, stands at the entrance of what appears to be a laundry area, holding a white cloth. He seems to be observing his surroundings.",
+      "source_view": "view_2",
+      "shard": "shard_1",
+      "video_path": "/tmp/pipeline_output_9_3flben/view_2/video_shards/VID_20250809_094836_00_045_view2_part0.mp4"
+    },
+    {
+      "start_time": 2.6,
+      "end_time": 3.5,
+      "description": "He bends down slightly, extending his right arm towards something below him, possibly picking up another item.",
+      "source_view": "view_2",
+      "shard": "shard_1",
+      "video_path": "/tmp/pipeline_output_9_3flben/view_2/video_shards/VID_20250809_094836_00_045_view2_part0.mp4"
+    },
+    {
+      "start_time": 3.5,
+      "end_time": 4.8,
+      "description": "In this scene, a small section of a beige-colored wall becomes visible behind the red container on the countertop. Additionally, part of a brownish surface appears at the top of the frame. The hand re-enters from the bottom center and reaches toward the red container.",
+      "source_view": "view_1",
+      "shard": "shard_1",
+      "video_path": "/tmp/pipeline_output_9_3flben/view_1/video_shards/VID_20250809_094836_00_045_view1_part0.mp4"
+    },
+    {
+      "start_time": 4.0,
+      "end_time": 5.1,
+      "description": "The man rises upright, holding a black shoe in his left hand and a small object in his right. His gaze shifts downward, indicating he might have spotted something interesting or needed to adjust his grip.",
+      "source_view": "view_2",
+      "shard": "shard_1",
+      "video_path": "/tmp/pipeline_output_9_3flben/view_2/video_shards/VID_20250809_094836_00_045_view2_part0.mp4"
+    }
+  ],
+  "nsfw_analysis": [
+    {
+      "total_nsfw_detections": 0,
+      "total_processing_time_seconds": 0.24,
+      "nsfw_timestamps": [],
+      "flagged_segments": [],
+      "chunks_processed": 1,
+      "successful_chunks": 1,
+      "model_path": "/home/nvcoe_admin/code/oslo/test/re_test/insta360-video-activity-segmentation/nsfw_model/model.onnx",
+      "labels_path": "/home/nvcoe_admin/code/oslo/test/re_test/insta360-video-activity-segmentation/nsfw_model/labels.json",
+      "success": true,
+      "source_view": "view_1",
+      "shard": "shard_1"
+    },
+    {
+      "total_nsfw_detections": 0,
+      "total_processing_time_seconds": 0.24,
+      "nsfw_timestamps": [],
+      "flagged_segments": [],
+      "chunks_processed": 1,
+      "successful_chunks": 1,
+      "model_path": "/home/nvcoe_admin/code/oslo/test/re_test/insta360-video-activity-segmentation/nsfw_model/model.onnx",
+      "labels_path": "/home/nvcoe_admin/code/oslo/test/re_test/insta360-video-activity-segmentation/nsfw_model/labels.json",
+      "success": true,
+      "source_view": "view_2",
+      "shard": "shard_1"
+    }
+  ],
+  "face_analysis": [
+    {
+      "total_faces_detected": 0,
+      "total_processed_frames": 0,
+      "flagged_segments": [],
+      "detailed_analysis_summary": {
+        "gender_distribution": {},
+        "age_distribution": {
+          "minors": 0,
+          "adults": 0,
+          "seniors": 0
+        },
+        "emotion_distribution": {},
+        "race_distribution": {},
+        "total_unique_faces": 0,
+        "frames_with_faces": 0
+      },
+      "chunks_processed": 1,
+      "success": true,
+      "source_view": "view_1",
+      "shard": "shard_1"
+    },
+    {
+      "total_faces_detected": 0,
+      "total_processed_frames": 0,
+      "flagged_segments": [],
+      "detailed_analysis_summary": {
+        "gender_distribution": {},
+        "age_distribution": {
+          "minors": 0,
+          "adults": 0,
+          "seniors": 0
+        },
+        "emotion_distribution": {},
+        "race_distribution": {},
+        "total_unique_faces": 0,
+        "frames_with_faces": 0
+      },
+      "chunks_processed": 1,
+      "success": true,
+      "source_view": "view_2",
+      "shard": "shard_1"
+    }
+  ],
+  "motion_analysis": [
+    {
+      "start_time": 8.141466666666666,
+      "end_time": 9.509500000000001,
+      "duration": 1.3680333333333334,
+      "activity_type": "HIGH_ACTIVITY",
+      "confidence": 0.626727799139339,
+      "avg_motion_energy": 0.14199530419320497,
+      "source_view": "view_2",
+      "shard": "shard_1"
+    },
+    {
+      "start_time": 8.4084,
+      "end_time": 9.509500000000001,
+      "duration": 1.1011,
+      "activity_type": "HIGH_ACTIVITY",
+      "confidence": 0.6348486543452676,
+      "avg_motion_energy": 0.15810654767211546,
+      "source_view": "view_1",
+      "shard": "shard_1"
+    }
+  ],
+  "audio_analysis": [],
+  "clap_detection": [],
+  "shard_statistics": {
+    "total_yolo_detections": 21,
+    "total_scenes": 5,
+    "total_motion_segments": 2,
+    "total_nsfw_analyses": 2,
+    "total_face_analyses": 2,
+    "total_audio_analyses": 0,
+    "total_clap_detections": 0
+  }
+}

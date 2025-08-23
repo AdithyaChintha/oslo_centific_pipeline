@@ -1,0 +1,38 @@
+{
+  "reorganization_info": {
+    "input_file": "/tmp/pipeline_input_kzgogbs4/VID_20250809_094836_00_045.insv",
+    "total_shards_processed": 1,
+    "views_processed": 2,
+    "reorganization_timestamp": "2025-08-23T17:17:07.602439",
+    "structure": "per-shard directories with view subdirectories and consolidated JSON"
+  },
+  "per_shard_summaries": [
+    {
+      "shard_name": "shard_1",
+      "shard_directory": "/home/nvcoe_admin/code/oslo/test/re_test/insta360-video-activity-segmentation/outputs/VID_20250809_094836_00_045/shard_1",
+      "output_file": "/home/nvcoe_admin/code/oslo/test/re_test/insta360-video-activity-segmentation/outputs/VID_20250809_094836_00_045/shard_1/consolidated_shard_1_output.json",
+      "view_directories": {
+        "view_1": "/home/nvcoe_admin/code/oslo/test/re_test/insta360-video-activity-segmentation/outputs/VID_20250809_094836_00_045/shard_1/view_1",
+        "view_2": "/home/nvcoe_admin/code/oslo/test/re_test/insta360-video-activity-segmentation/outputs/VID_20250809_094836_00_045/shard_1/view_2"
+      },
+      "statistics": {
+        "total_yolo_detections": 21,
+        "total_scenes": 5,
+        "total_motion_segments": 2,
+        "total_nsfw_analyses": 2,
+        "total_face_analyses": 2,
+        "total_audio_analyses": 0,
+        "total_clap_detections": 0
+      }
+    }
+  ],
+  "overall_statistics": {
+    "total_yolo_detections": 21,
+    "total_scenes": 5,
+    "total_motion_segments": 2,
+    "total_nsfw_analyses": 2,
+    "total_face_analyses": 2,
+    "total_audio_analyses": 0,
+    "total_clap_detections": 0
+  }
+}
