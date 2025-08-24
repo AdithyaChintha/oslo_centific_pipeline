@@ -1,18 +1,22 @@
 {
   "video_file": "/home/nvcoe_admin/code/oslo/whole_pipeline_testing/kamwai_chan_input_videos/vaccum_floor_1GB.mp4",
   "total_duration_seconds": 120,
-  "flagged_duration_seconds": 3.6719999999999997,
-  "annotation_workload_reduction": "96.9%",
+  "flagged_duration_seconds": 66.9,
+  "annotation_workload_reduction": "44.2%",
   "total_flagged_segments": 1,
   "flagged_timeline": [
     {
-      "start_time": 0,
-      "end_time": 3.6719999999999997,
-      "task_type": "clap_detection",
+      "start_time": 0.0,
+      "end_time": 66.9,
+      "task_type": [
+        "face_detection",
+        "scene_detection",
+        "motion_energy"
+      ],
       "confidence": 0.9,
-      "flag_type": "clap_detected",
+      "flag_type": "face_detected",
       "priority": "medium",
-      "description": "Clap detected at 00:01.672",
+      "description": "Combined flags: face_detection, scene_detection, motion_energy",
       "shard_index": 1
     }
   ],
