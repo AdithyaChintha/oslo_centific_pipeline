@@ -1195,74 +1195,142 @@ def merge_overlapping_segments(timeline):
     return merged
 
 
+def upload_consolidated_files_to_azure(connection_string: str, local_outputs_dir: str, final_output_prefix: str):
+    """
+    Upload all consolidated files from local directory to Azure Blob Storage.
+    
+    Args:
+        connection_string: Azure Storage connection string
+        local_outputs_dir: Local directory containing consolidated files
+        final_output_prefix: Azure blob prefix for output files
+    """
+    try:
+        logger.info("🚀 UPLOADING CONSOLIDATED FILES TO AZURE...")
+        
+        # Create blob service client
+        blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+        
+        # Parse the output container from final_output_prefix
+        output_container = final_output_prefix.split('/', 1)[0]
+        output_path_prefix = final_output_prefix.split('/', 1)[1] if '/' in final_output_prefix else ''
+        
+        container_client = blob_service_client.get_container_client(output_container)
+        
+        # Ensure container exists
+        if not container_client.exists():
+            logger.info(f"Creating container '{output_container}'...")
+            container_client.create_container()
+        
+        uploaded_files = []
+        total_size = 0
+        
+        # Walk through all files in local outputs directory
+        for root, dirs, files in os.walk(local_outputs_dir):
+            for filename in files:
+                local_file_path = os.path.join(root, filename)
+                
+                # Get relative path from local_outputs_dir
+                relative_path = os.path.relpath(local_file_path, local_outputs_dir)
+                
+                # Construct blob name
+                if output_path_prefix:
+                    blob_name = f"{output_path_prefix}/{relative_path}".replace("\\", "/")
+                else:
+                    blob_name = relative_path.replace("\\", "/")
+                
+                # Get file size for logging
+                file_size = os.path.getsize(local_file_path)
+                total_size += file_size
+                
+                logger.info(f"📤 Uploading: {relative_path} ({_human_size(file_size)}) -> {blob_name}")
+                
+                # Upload file
+                blob_client = container_client.get_blob_client(blob_name)
+                with open(local_file_path, "rb") as data:
+                    blob_client.upload_blob(data, overwrite=True)
+                
+                uploaded_files.append({
+                    "local_path": relative_path,
+                    "blob_name": blob_name,
+                    "size_bytes": file_size
+                })
+        
+        logger.info("✅ CONSOLIDATED FILES UPLOAD COMPLETE!")
+        logger.info(f"📊 Total files uploaded: {len(uploaded_files)}")
+        logger.info(f"📊 Total size uploaded: {_human_size(total_size)}")
+        
+        # Log consolidated files specifically
+        consolidated_files = [f for f in uploaded_files if 'consolidated' in f['local_path']]
+        if consolidated_files:
+            logger.info("📋 CONSOLIDATED FILES UPLOADED:")
+            for file_info in consolidated_files:
+                logger.info(f"   - {file_info['local_path']}")
+        
+        return {
+            "success": True,
+            "uploaded_files": uploaded_files,
+            "total_files": len(uploaded_files),
+            "total_size_bytes": total_size
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to upload consolidated files to Azure: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "uploaded_files": [],
+            "total_files": 0,
+            "total_size_bytes": 0
+        }
+
+
 def main():
     """
-    The main entry point for running the Ray pipeline with Azure Blob I/O.
-    Enhanced with blob listing and selection functionality from test_video_splitter.py
+    The main entry point for running the Ray pipeline with Azure Blob I/O,
+    now including correct Azure upload of all local consolidated files.
     """
     start_ts = datetime.now()
     logger.info("Pipeline started at %s", start_ts.strftime("%Y-%m-%d %H:%M:%S"))
-    
+
     # ==================================================================
-    # == 1. CONFIGURATION - MANUAL VIDEO PATH INPUT                   ==
+    # == 1. CONFIGURATION - MANUAL VIDEO PATH INPUT ==
     # ==================================================================
-    # EDIT THIS: Specify your exact video path in blob storage
-    # Format: "container-name/full/path/to/video.insv"
     input_path = "instavideo/azure_directory_path/DCIM/Camera01/VID_20250809_094753_00_044.insv"
-    
-    # The PARENT directory for your output in Azure Blob Storage
-    # Format: "container-name/path/for/all/outputs/"
     output_parent_dir = "instavideo/krishna-test/test1/test_activity/pre-annotation-output"
-    # ==================================================================
-
 
     # ==================================================================
-    # == 2. PREPARE PIPELINE WITH MANUAL VIDEO PATH                   ==
+    # == 2. PREPARE PIPELINE WITH MANUAL VIDEO PATH ==
     # ==================================================================
     config_file = "blobfuse2_config.yaml"
     try:
         connection_string = get_connection_string_from_yaml(config_file)
     except (ValueError, FileNotFoundError):
         sys.exit(1)
-    
-    logger.info("Using manually specified video: %s", input_path)
-    
-    # Get the base name of the video file (e.g., "my_cool_video.mp4")
-    video_filename = os.path.basename(input_path.split('/', 1)[1])  # Extract filename from blob path
-    # Get the video name without the extension (e.g., "my_cool_video")
-    video_name_folder = os.path.splitext(video_filename)[0]
 
-    # Create the final, specific output path by joining the parent dir and the video name.
-    # The result will be e.g., "results/all-pipeline-runs/my_cool_video"
+    logger.info("Using manually specified video: %s", input_path)
+    video_filename = os.path.basename(input_path.split('/', 1)[1])
+    video_name_folder = os.path.splitext(video_filename)[0]
     final_output_prefix = os.path.join(output_parent_dir, video_name_folder)
-    # ==================================================================
 
     logger.info(f"Input video: {input_path}")
     logger.info(f"Final output will be stored under: {final_output_prefix}")
-    
+
     try:
-        # The wrapper is initialized with the final, specific output path
         with AzureBlobPipeline(connection_string, input_path, final_output_prefix) as (local_input_path, local_output_dir):
             logger.info("Azure Blob environment is ready. Starting Ray pipeline...")
-            
-            # ==================================================================
-            # == 3. DUAL-VIEW PROCESSING FOR INSV FILES                       ==
-            # ==================================================================
-            # Create local outputs directory in the same directory as this script
+
             script_dir = os.path.dirname(os.path.abspath(__file__))
             local_outputs_dir = os.path.join(script_dir, "outputs", video_name_folder)
             os.makedirs(local_outputs_dir, exist_ok=True)
             logger.info(f"Local outputs will also be saved to: {local_outputs_dir}")
-            
-            # Check if input is INSV file for dual-view processing
+
+            # ---- DUAL-VIEW PROCESSING FOR INSV FILES ----
             if local_input_path.lower().endswith('.insv'):
                 logger.info("INSV file detected - will process both views")
-                
-                # Import the conversion function
+
                 from ray_jobs.insv_to_mp4 import convert_insv_to_dual_mp4
                 import ray
-                
-                # Initialize Ray with proper error handling
+
                 try:
                     if not ray.is_initialized():
                         ray.init()
@@ -1271,47 +1339,41 @@ def main():
                         logger.warning("Ray already initialized, continuing...")
                     else:
                         raise
-                
-                # Convert INSV to dual MP4
+
                 logger.info("Converting INSV to dual MP4...")
                 t0 = time.perf_counter()
                 conversion_result = ray.get(convert_insv_to_dual_mp4.remote(local_input_path))
                 conv_time = time.perf_counter() - t0
-                
+
                 if not conversion_result.get('success', False):
                     raise RuntimeError(f"INSV conversion failed: {conversion_result.get('error', 'Unknown error')}")
-                
-                # Get both view paths
+
                 view1_path = conversion_result['output_view_1']
                 view2_path = conversion_result['output_view_2']
                 logger.info("INSV converted to dual MP4 in %.2fs", conv_time)
                 logger.info("View 1: %s", view1_path)
                 logger.info("View 2: %s", view2_path)
-                
-                # Process both views
+
                 mp4_paths = [view1_path, view2_path]
                 view_names = ["view_1", "view_2"]
-                
                 all_results = []
-                
+
                 for i, (mp4_path, view_name) in enumerate(zip(mp4_paths, view_names)):
                     logger.info("="*60)
                     logger.info("PROCESSING %s (%d/2)", view_name.upper(), i+1)
                     logger.info("="*60)
-                    
-                    # Create view-specific output directories
+
                     view_temp_output_dir = os.path.join(local_output_dir, view_name)
                     view_local_output_dir = os.path.join(local_outputs_dir, view_name)
                     os.makedirs(view_temp_output_dir, exist_ok=True)
                     os.makedirs(view_local_output_dir, exist_ok=True)
-                    
-                    # Run the pipeline for this view
+
                     logger.info("Running pipeline for %s...", view_name)
                     pipeline_main(
                         input_video_path=mp4_path,
                         output_dir=view_temp_output_dir
                     )
-                    
+
                     # Copy view outputs to local directory
                     if os.path.exists(view_temp_output_dir) and os.listdir(view_temp_output_dir):
                         logger.info("Copying %s outputs to local directory...", view_name)
@@ -1327,40 +1389,36 @@ def main():
                                 shutil.copy2(src_path, dst_path)
                         copy_time = time.perf_counter() - copy_start
                         logger.info("%s local copy completed in %.2fs", view_name, copy_time)
-                        
-                        all_results.append({
-                            "view": view_name,
-                            "mp4_path": mp4_path,
-                            "temp_output_dir": view_temp_output_dir,
-                            "local_output_dir": view_local_output_dir
-                        })
                     else:
                         logger.warning("No outputs to copy for %s", view_name)
-                
-                # ==============================================================
-                # == 4. CONSOLIDATE OUTPUTS FROM BOTH VIEWS                  ==
-                # ==============================================================
+
+                    all_results.append({
+                        "view": view_name,
+                        "mp4_path": mp4_path,
+                        "temp_output_dir": view_temp_output_dir,
+                        "local_output_dir": view_local_output_dir
+                    })
+
+                # -----------------------------------------------------------
+                # == 4. CONSOLIDATE OUTPUTS FROM BOTH VIEWS ==
+                # -----------------------------------------------------------
                 logger.info("="*60)
                 logger.info("CONSOLIDATING OUTPUTS FROM BOTH VIEWS")
                 logger.info("="*60)
-                
                 consolidated_summary = consolidate_dual_view_outputs(
                     all_results, local_outputs_dir, conv_time, local_input_path
                 )
-                
-                # Consolidate all individual model outputs  
+
                 logger.info("Consolidating all model outputs from both views...")
                 consolidated_model_outputs = consolidate_all_model_outputs(
                     all_results, local_outputs_dir, local_input_path
                 )
-                
-                # Reorganize and generate per-shard consolidated outputs
+
                 logger.info("Reorganizing output structure and creating per-shard consolidated outputs...")
                 per_shard_summary = reorganize_and_consolidate_per_shard(
                     all_results, local_outputs_dir, local_input_path
                 )
-                
-                # Create a summary for dual-view processing
+
                 dual_view_summary = {
                     "input_file": local_input_path,
                     "file_type": "INSV",
@@ -1381,13 +1439,12 @@ def main():
                         "overall_statistics": per_shard_summary["overall_statistics"]
                     }
                 }
-                
-                # Save dual-view summary
+
                 summary_file = os.path.join(local_outputs_dir, "dual_view_processing_summary.json")
                 with open(summary_file, 'w') as f:
                     import json
                     json.dump(dual_view_summary, f, indent=2)
-                
+
                 logger.info("="*60)
                 logger.info("DUAL-VIEW PROCESSING COMPLETE")
                 logger.info("="*60)
@@ -1395,24 +1452,61 @@ def main():
                 logger.info("Conversion time: %.2fs", dual_view_summary['conversion_time_seconds'])
                 logger.info("Consolidated segments: %d", consolidated_summary['total_consolidated_segments'])
                 logger.info("🎯 CONSOLIDATED MODEL RESULTS:")
-                logger.info("  YOLO detections: %d", consolidated_model_outputs["consolidated_statistics"]["total_yolo_detections"])
-                logger.info("  Scene descriptions: %d", consolidated_model_outputs["consolidated_statistics"]["total_scenes"])
-                logger.info("  Motion segments: %d", consolidated_model_outputs["consolidated_statistics"]["total_motion_segments"])
-                logger.info("  NSFW detections: %d", consolidated_model_outputs["consolidated_statistics"]["total_nsfw_detections"])
-                logger.info("  Face detections: %d", consolidated_model_outputs["consolidated_statistics"]["total_faces_detected"])
+                logger.info(" YOLO detections: %d", consolidated_model_outputs["consolidated_statistics"]["total_yolo_detections"])
+                logger.info(" Scene descriptions: %d", consolidated_model_outputs["consolidated_statistics"]["total_scenes"])
+                logger.info(" Motion segments: %d", consolidated_model_outputs["consolidated_statistics"]["total_motion_segments"])
+                logger.info(" NSFW detections: %d", consolidated_model_outputs["consolidated_statistics"]["total_nsfw_detections"])
+                logger.info(" Face detections: %d", consolidated_model_outputs["consolidated_statistics"]["total_faces_detected"])
                 logger.info("Summary saved to: %s", summary_file)
-                
+
+                # ==============================================================
+                # == 5. UPLOAD ALL FILES TO AZURE (INCLUDING CONSOLIDATED) ==
+                # ==============================================================
+                logger.info("="*60)
+                logger.info("UPLOADING ALL FILES TO AZURE")
+                logger.info("="*60)
+
+                upload_result = upload_consolidated_files_to_azure(
+                    connection_string,
+                    local_outputs_dir,
+                    final_output_prefix
+                )
+
+                if upload_result["success"]:
+                    logger.info("✅ All consolidated files uploaded successfully to Azure")
+                    dual_view_summary["azure_upload"] = {
+                        "status": "success",
+                        "uploaded_files": upload_result["total_files"],
+                        "total_size_bytes": upload_result["total_size_bytes"],
+                        "upload_timestamp": datetime.now().isoformat()
+                    }
+                    consolidated_uploads = [f for f in upload_result["uploaded_files"] if 'consolidated' in f['local_path']]
+                    logger.info("🎯 CONSOLIDATED FILES NOW AVAILABLE IN AZURE:")
+                    for file_info in consolidated_uploads:
+                        logger.info(f"   📄 {file_info['blob_name']}")
+
+                else:
+                    logger.error("❌ Failed to upload consolidated files to Azure")
+                    dual_view_summary["azure_upload"] = {
+                        "status": "failed",
+                        "error": upload_result["error"],
+                        "upload_timestamp": datetime.now().isoformat()
+                    }
+                    logger.warning("⚠️ Continuing despite upload failure - files are available locally")
+
+                # Update summary file
+                summary_file = os.path.join(local_outputs_dir, "dual_view_processing_summary.json")
+                with open(summary_file, 'w') as f:
+                    import json
+                    json.dump(dual_view_summary, f, indent=2)
+
             else:
                 # Single view processing (regular MP4)
                 logger.info("Single MP4 file - processing single view")
-                
-                # Run the pipeline
                 pipeline_main(
                     input_video_path=local_input_path,
                     output_dir=local_output_dir
                 )
-                
-                # Copy outputs to local directory as well
                 if os.path.exists(local_output_dir) and os.listdir(local_output_dir):
                     logger.info("Copying pipeline outputs to local directory...")
                     copy_start = time.perf_counter()
@@ -1433,7 +1527,7 @@ def main():
     except Exception as e:
         logger.critical(f"An unhandled error occurred in the pipeline wrapper: {e}", exc_info=True)
         sys.exit(1)
-    
+
     total_time = (datetime.now() - start_ts).total_seconds()
     logger.info("✅ Pipeline completed successfully in %.2fs", total_time)
 
