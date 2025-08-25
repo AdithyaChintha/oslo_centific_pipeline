@@ -1,3 +1,6 @@
+azure-storage-blob>=12.19.0
+PyYAML>=6.0
+tqdm>=4.65.0
 ray[default]
 azure-storage-blob
 opencv-python>=4.5.0

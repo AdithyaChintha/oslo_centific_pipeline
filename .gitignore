@@ -5,6 +5,7 @@ __pycache__/
 
 # C extensions
 *.so
+*.wav
 
 # Distribution / packaging
 .Python
@@ -54,6 +55,7 @@ ray_pipeline_age_detect.py
 # Intermediate outputs
 test_outputs/
 outputs/
+test_files/
 
 # models
 models/
