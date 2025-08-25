@@ -12,26 +12,24 @@ logger = logging.getLogger("face_age_detector")
 
 # GPU Configuration - Ensure CUDA can access GPU
 def configure_gpu():
-    """Configure GPU settings to ensure CUDA can access the GPU."""
-    # Clear any restrictive CUDA environment variables
-    if "CUDA_VISIBLE_DEVICES" in os.environ and os.environ["CUDA_VISIBLE_DEVICES"] == "":
-        logger.info("Clearing restrictive CUDA_VISIBLE_DEVICES setting")
-        os.environ.pop("CUDA_VISIBLE_DEVICES", None)
-    
-    # Set CUDA to use the first available GPU
-    if "CUDA_VISIBLE_DEVICES" not in os.environ:
-        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-        logger.info("Set CUDA_VISIBLE_DEVICES=0 to use first GPU")
-    
-    # Set other GPU-related environment variables
+    """Configure GPU settings without fighting Ray's assignment."""
+    assigned = os.environ.get("CUDA_VISIBLE_DEVICES")
+
+    # If Ray/Container already set it, just log and DO NOT change it.
+    if assigned is not None and assigned != "":
+        logger.info(f"GPU Configuration: respecting CUDA_VISIBLE_DEVICES={assigned}")
+    else:
+        # Standalone fallback only (no Ray assignment present)
+        default = os.environ.get("DEFAULT_CUDA_VISIBLE_DEVICES", "0")
+        os.environ["CUDA_VISIBLE_DEVICES"] = default
+        logger.info(f"Set CUDA_VISIBLE_DEVICES={default} (standalone fallback)")
+
+    # TensorFlow niceties
     os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
-    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Reduce TensorFlow logging
-    
-    # Additional GPU configuration for better performance
+    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
     os.environ["TF_GPU_THREAD_MODE"] = "gpu_private"
     os.environ["TF_GPU_THREAD_COUNT"] = "1"
-    
-    # Try to configure TensorFlow GPU memory growth
+
     try:
         import tensorflow as tf
         gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -43,11 +41,10 @@ def configure_gpu():
         logger.info("TensorFlow not available during GPU configuration")
     except Exception as e:
         logger.warning(f"Could not configure TensorFlow GPU memory growth: {e}")
-    
-    logger.info(f"GPU Configuration: CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', 'Not set')}")
+
 
 # Configure GPU before any other imports
-configure_gpu()
+# configure_gpu()
 
 def verify_gpu_access():
     """Verify that GPU is accessible and working."""
