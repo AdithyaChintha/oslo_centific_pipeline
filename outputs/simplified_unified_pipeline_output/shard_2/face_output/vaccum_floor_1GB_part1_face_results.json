@@ -30,8 +30,8 @@
               "age": 34,
               "gender_label": "Man",
               "gender_scores": {
-                "Woman": 9.640860557556152,
-                "Man": 90.35913848876953
+                "Woman": 10.172367095947266,
+                "Man": 89.82762908935547
               }
             }
           },
@@ -41,8 +41,8 @@
               "age": 34,
               "gender_label": "Man",
               "gender_scores": {
-                "Woman": 9.402381896972656,
-                "Man": 90.59761810302734
+                "Woman": 9.80772876739502,
+                "Man": 90.19226837158203
               }
             }
           },
@@ -52,19 +52,19 @@
               "age": 34,
               "gender_label": "Man",
               "gender_scores": {
-                "Woman": 9.377631187438965,
-                "Man": 90.62236785888672
+                "Woman": 9.813116073608398,
+                "Man": 90.1868896484375
               }
             }
           },
           {
             "timestamp": 3.0,
             "face_analysis": {
-              "age": 26,
+              "age": 34,
               "gender_label": "Man",
               "gender_scores": {
-                "Woman": 0.5803808569908142,
-                "Man": 99.41961669921875
+                "Woman": 10.080208778381348,
+                "Man": 89.91978454589844
               }
             }
           },
@@ -74,8 +74,8 @@
               "age": 34,
               "gender_label": "Man",
               "gender_scores": {
-                "Woman": 8.932902336120605,
-                "Man": 91.06709289550781
+                "Woman": 9.125295639038086,
+                "Man": 90.87471008300781
               }
             }
           },
@@ -85,8 +85,8 @@
               "age": 35,
               "gender_label": "Man",
               "gender_scores": {
-                "Woman": 8.578103065490723,
-                "Man": 91.4218978881836
+                "Woman": 8.489078521728516,
+                "Man": 91.51092529296875
               }
             }
           },
@@ -96,8 +96,8 @@
               "age": 34,
               "gender_label": "Man",
               "gender_scores": {
-                "Woman": 7.827884674072266,
-                "Man": 92.172119140625
+                "Woman": 7.887990951538086,
+                "Man": 92.11200714111328
               }
             }
           }
@@ -120,5 +120,6 @@
     "frames_with_faces": 7
   },
   "chunks_processed": 1,
+  "total_processing_time_seconds": 3.1733860969543457,
   "success": true
 }

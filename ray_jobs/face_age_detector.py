@@ -206,8 +206,12 @@ def process_video_for_face_detection_sync(video_path: str, output_dir: str = "/t
         if save_frames is not None and hasattr(detector.config, 'SAVE_FRAMES'):
             detector.config.SAVE_FRAMES = save_frames
         
-        # Process the video
-        results = detector.process_video(video_path, output_dir)
+        # Process the video with timing
+        import time
+        start_time = time.time()
+        results = detector.process_video(video_path)
+        end_time = time.time()
+        processing_time = end_time - start_time
         
         # Get processing summary
         summary = detector.get_processing_summary()
@@ -263,6 +267,7 @@ def process_video_for_face_detection_sync(video_path: str, output_dir: str = "/t
             "frames_with_errors": summary["frames_with_errors"],
             "flagged_segments": flagged_segments,
             "detailed_analysis_summary": detailed_summary,
+            "total_processing_time_seconds": processing_time,
             "success": True
         }
         
@@ -273,7 +278,8 @@ def process_video_for_face_detection_sync(video_path: str, output_dir: str = "/t
             "success": False,
             "total_faces_detected": 0,
             "total_processed_frames": 0,
-            "flagged_segments": []
+            "flagged_segments": [],
+            "total_processing_time_seconds": 0
         }
 
 @ray.remote
@@ -525,6 +531,7 @@ def process_video_chunks_for_face_detection(chunk_paths: list, config=None,
         all_flagged_segments = []
         total_faces = 0
         total_frames = 0
+        total_processing_time = 0
         combined_detailed_analysis = {
             "gender_distribution": defaultdict(int),
             "age_distribution": {"minors": 0, "adults": 0, "seniors": 0},
@@ -551,6 +558,7 @@ def process_video_chunks_for_face_detection(chunk_paths: list, config=None,
             if result["success"]:
                 total_faces += result["total_faces_detected"]
                 total_frames += result["total_processed_frames"]
+                total_processing_time += result.get("total_processing_time_seconds", 0)
                 
                 # Add flagged segments (already have correct timestamps from sync function)
                 all_flagged_segments.extend(result.get("flagged_segments", []))
@@ -594,6 +602,7 @@ def process_video_chunks_for_face_detection(chunk_paths: list, config=None,
             "flagged_segments": all_flagged_segments,
             "detailed_analysis_summary": combined_detailed_analysis,
             "chunks_processed": len(chunk_paths),
+            "total_processing_time_seconds": total_processing_time,
             "success": True
         }
         
@@ -604,7 +613,8 @@ def process_video_chunks_for_face_detection(chunk_paths: list, config=None,
             "success": False,
             "total_faces_detected": 0,
             "total_processed_frames": 0,
-            "flagged_segments": []
+            "flagged_segments": [],
+            "total_processing_time_seconds": 0
         }
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 {
-  "video_path": "/tmp/pipeline_output_qn6uyfcp/video_shards/VID_20250720_152154_00_011_view1_part0.mp4",
+  "video_path": "/home/nvcoe_admin/code/oslo/insta360-video-activity-segmentation/video-age-detection-pipeline/outputs/chunks_view_1/VID_20250720_152154_00_011_view1_part0.mp4",
   "frame_interval": 30,
   "results": [
     {
@@ -9,11 +9,11 @@
       "num_faces": 1,
       "faces": [
         {
-          "age": 34,
+          "age": 33,
           "gender_label": "Man",
           "gender_scores": {
-            "Woman": 7.575613021850586,
-            "Man": 92.42437744140625
+            "Woman": 7.636563301086426,
+            "Man": 92.36343383789062
           }
         }
       ],
@@ -26,11 +26,11 @@
       "num_faces": 1,
       "faces": [
         {
-          "age": 33,
+          "age": 34,
           "gender_label": "Man",
           "gender_scores": {
-            "Woman": 6.786365985870361,
-            "Man": 93.21363067626953
+            "Woman": 7.574246883392334,
+            "Man": 92.4257583618164
           }
         }
       ],
@@ -46,8 +46,8 @@
           "age": 34,
           "gender_label": "Man",
           "gender_scores": {
-            "Woman": 7.263664245605469,
-            "Man": 92.73633575439453
+            "Woman": 7.435634613037109,
+            "Man": 92.56436920166016
           }
         }
       ],
@@ -60,11 +60,11 @@
       "num_faces": 1,
       "faces": [
         {
-          "age": 33,
+          "age": 34,
           "gender_label": "Man",
           "gender_scores": {
-            "Woman": 7.068460464477539,
-            "Man": 92.93153381347656
+            "Woman": 7.355076789855957,
+            "Man": 92.6449203491211
           }
         }
       ],
@@ -80,8 +80,8 @@
           "age": 34,
           "gender_label": "Man",
           "gender_scores": {
-            "Woman": 6.800684928894043,
-            "Man": 93.1993179321289
+            "Woman": 6.935244560241699,
+            "Man": 93.06475830078125
           }
         }
       ],
@@ -94,11 +94,11 @@
       "num_faces": 1,
       "faces": [
         {
-          "age": 29,
+          "age": 34,
           "gender_label": "Man",
           "gender_scores": {
-            "Woman": 23.31990623474121,
-            "Man": 76.68009948730469
+            "Woman": 9.341207504272461,
+            "Man": 90.6587905883789
           }
         }
       ],
@@ -114,8 +114,8 @@
           "age": 34,
           "gender_label": "Man",
           "gender_scores": {
-            "Woman": 9.980986595153809,
-            "Man": 90.01901245117188
+            "Woman": 10.388260841369629,
+            "Man": 89.61174011230469
           }
         }
       ],
@@ -128,11 +128,11 @@
       "num_faces": 1,
       "faces": [
         {
-          "age": 34,
+          "age": 33,
           "gender_label": "Man",
           "gender_scores": {
-            "Woman": 7.924606800079346,
-            "Man": 92.07539367675781
+            "Woman": 9.019777297973633,
+            "Man": 90.980224609375
           }
         }
       ],
@@ -145,11 +145,11 @@
       "num_faces": 1,
       "faces": [
         {
-          "age": 34,
+          "age": 33,
           "gender_label": "Man",
           "gender_scores": {
-            "Woman": 7.9952239990234375,
-            "Man": 92.00477600097656
+            "Woman": 8.381082534790039,
+            "Man": 91.6189193725586
           }
         }
       ],
@@ -165,8 +165,8 @@
           "age": 32,
           "gender_label": "Man",
           "gender_scores": {
-            "Woman": 8.247523307800293,
-            "Man": 91.75247955322266
+            "Woman": 9.159977912902832,
+            "Man": 90.84001922607422
           }
         }
       ],
@@ -182,8 +182,8 @@
           "age": 34,
           "gender_label": "Man",
           "gender_scores": {
-            "Woman": 11.85023021697998,
-            "Man": 88.14976501464844
+            "Woman": 11.408478736877441,
+            "Man": 88.59152221679688
           }
         }
       ],
@@ -196,11 +196,11 @@
       "num_faces": 1,
       "faces": [
         {
-          "age": 33,
+          "age": 32,
           "gender_label": "Man",
           "gender_scores": {
-            "Woman": 6.702104091644287,
-            "Man": 93.29789733886719
+            "Woman": 7.004501819610596,
+            "Man": 92.99549865722656
           }
         }
       ],
@@ -216,8 +216,8 @@
           "age": 33,
           "gender_label": "Man",
           "gender_scores": {
-            "Woman": 6.40553092956543,
-            "Man": 93.59446716308594
+            "Woman": 7.048730373382568,
+            "Man": 92.9512710571289
           }
         }
       ],
@@ -230,11 +230,11 @@
       "num_faces": 1,
       "faces": [
         {
-          "age": 34,
+          "age": 33,
           "gender_label": "Man",
           "gender_scores": {
-            "Woman": 7.132812023162842,
-            "Man": 92.8671875
+            "Woman": 7.397369384765625,
+            "Man": 92.60263061523438
           }
         }
       ],
@@ -247,11 +247,11 @@
       "num_faces": 1,
       "faces": [
         {
-          "age": 34,
+          "age": 33,
           "gender_label": "Man",
           "gender_scores": {
-            "Woman": 7.348149299621582,
-            "Man": 92.65185546875
+            "Woman": 7.5683979988098145,
+            "Man": 92.43160247802734
           }
         }
       ],
@@ -264,11 +264,11 @@
       "num_faces": 1,
       "faces": [
         {
-          "age": 33,
+          "age": 34,
           "gender_label": "Man",
           "gender_scores": {
-            "Woman": 7.814643383026123,
-            "Man": 92.18536376953125
+            "Woman": 7.983107089996338,
+            "Man": 92.01689147949219
           }
         }
       ],
@@ -284,8 +284,8 @@
           "age": 34,
           "gender_label": "Man",
           "gender_scores": {
-            "Woman": 6.635307312011719,
-            "Man": 93.36470031738281
+            "Woman": 7.484963417053223,
+            "Man": 92.5150375366211
           }
         }
       ],
@@ -301,8 +301,8 @@
           "age": 34,
           "gender_label": "Man",
           "gender_scores": {
-            "Woman": 7.487229824066162,
-            "Man": 92.51277160644531
+            "Woman": 7.610350608825684,
+            "Man": 92.3896484375
           }
         }
       ],
@@ -318,8 +318,8 @@
           "age": 34,
           "gender_label": "Man",
           "gender_scores": {
-            "Woman": 7.698681831359863,
-            "Man": 92.30132293701172
+            "Woman": 7.958138942718506,
+            "Man": 92.04186248779297
           }
         }
       ],
@@ -335,348 +335,8 @@
           "age": 34,
           "gender_label": "Man",
           "gender_scores": {
-            "Woman": 8.681909561157227,
-            "Man": 91.3180923461914
-          }
-        }
-      ],
-      "error": ""
-    },
-    {
-      "frame_num": 600,
-      "timestamp": "0:00:20",
-      "frame_path": "",
-      "num_faces": 1,
-      "faces": [
-        {
-          "age": 34,
-          "gender_label": "Man",
-          "gender_scores": {
-            "Woman": 8.90063190460205,
-            "Man": 91.099365234375
-          }
-        }
-      ],
-      "error": ""
-    },
-    {
-      "frame_num": 630,
-      "timestamp": "0:00:21",
-      "frame_path": "",
-      "num_faces": 1,
-      "faces": [
-        {
-          "age": 34,
-          "gender_label": "Man",
-          "gender_scores": {
-            "Woman": 9.3446683883667,
-            "Man": 90.65533447265625
-          }
-        }
-      ],
-      "error": ""
-    },
-    {
-      "frame_num": 660,
-      "timestamp": "0:00:22",
-      "frame_path": "",
-      "num_faces": 1,
-      "faces": [
-        {
-          "age": 34,
-          "gender_label": "Man",
-          "gender_scores": {
-            "Woman": 8.914867401123047,
-            "Man": 91.08512878417969
-          }
-        }
-      ],
-      "error": ""
-    },
-    {
-      "frame_num": 690,
-      "timestamp": "0:00:23",
-      "frame_path": "",
-      "num_faces": 1,
-      "faces": [
-        {
-          "age": 34,
-          "gender_label": "Man",
-          "gender_scores": {
-            "Woman": 8.88589859008789,
-            "Man": 91.11409759521484
-          }
-        }
-      ],
-      "error": ""
-    },
-    {
-      "frame_num": 720,
-      "timestamp": "0:00:24",
-      "frame_path": "",
-      "num_faces": 1,
-      "faces": [
-        {
-          "age": 34,
-          "gender_label": "Man",
-          "gender_scores": {
-            "Woman": 8.21132755279541,
-            "Man": 91.7886734008789
-          }
-        }
-      ],
-      "error": ""
-    },
-    {
-      "frame_num": 750,
-      "timestamp": "0:00:25",
-      "frame_path": "",
-      "num_faces": 1,
-      "faces": [
-        {
-          "age": 33,
-          "gender_label": "Man",
-          "gender_scores": {
-            "Woman": 8.05515193939209,
-            "Man": 91.9448471069336
-          }
-        }
-      ],
-      "error": ""
-    },
-    {
-      "frame_num": 780,
-      "timestamp": "0:00:26",
-      "frame_path": "",
-      "num_faces": 1,
-      "faces": [
-        {
-          "age": 29,
-          "gender_label": "Woman",
-          "gender_scores": {
-            "Woman": 91.57759857177734,
-            "Man": 8.42240047454834
-          }
-        }
-      ],
-      "error": ""
-    },
-    {
-      "frame_num": 810,
-      "timestamp": "0:00:27",
-      "frame_path": "",
-      "num_faces": 1,
-      "faces": [
-        {
-          "age": 36,
-          "gender_label": "Man",
-          "gender_scores": {
-            "Woman": 36.09229278564453,
-            "Man": 63.907711029052734
-          }
-        }
-      ],
-      "error": ""
-    },
-    {
-      "frame_num": 840,
-      "timestamp": "0:00:28",
-      "frame_path": "",
-      "num_faces": 1,
-      "faces": [
-        {
-          "age": 34,
-          "gender_label": "Man",
-          "gender_scores": {
-            "Woman": 9.824868202209473,
-            "Man": 90.17512512207031
-          }
-        }
-      ],
-      "error": ""
-    },
-    {
-      "frame_num": 870,
-      "timestamp": "0:00:29",
-      "frame_path": "",
-      "num_faces": 1,
-      "faces": [
-        {
-          "age": 34,
-          "gender_label": "Man",
-          "gender_scores": {
-            "Woman": 9.999800682067871,
-            "Man": 90.00019836425781
-          }
-        }
-      ],
-      "error": ""
-    },
-    {
-      "frame_num": 900,
-      "timestamp": "0:00:30",
-      "frame_path": "",
-      "num_faces": 1,
-      "faces": [
-        {
-          "age": 35,
-          "gender_label": "Man",
-          "gender_scores": {
-            "Woman": 11.740478515625,
-            "Man": 88.259521484375
-          }
-        }
-      ],
-      "error": ""
-    },
-    {
-      "frame_num": 930,
-      "timestamp": "0:00:31",
-      "frame_path": "",
-      "num_faces": 1,
-      "faces": [
-        {
-          "age": 33,
-          "gender_label": "Woman",
-          "gender_scores": {
-            "Woman": 91.1149673461914,
-            "Man": 8.88503360748291
-          }
-        }
-      ],
-      "error": ""
-    },
-    {
-      "frame_num": 960,
-      "timestamp": "0:00:32",
-      "frame_path": "",
-      "num_faces": 1,
-      "faces": [
-        {
-          "age": 34,
-          "gender_label": "Man",
-          "gender_scores": {
-            "Woman": 6.856654644012451,
-            "Man": 93.14334106445312
-          }
-        }
-      ],
-      "error": ""
-    },
-    {
-      "frame_num": 990,
-      "timestamp": "0:00:33",
-      "frame_path": "",
-      "num_faces": 1,
-      "faces": [
-        {
-          "age": 30,
-          "gender_label": "Woman",
-          "gender_scores": {
-            "Woman": 82.14883422851562,
-            "Man": 17.851160049438477
-          }
-        }
-      ],
-      "error": ""
-    },
-    {
-      "frame_num": 1020,
-      "timestamp": "0:00:34",
-      "frame_path": "",
-      "num_faces": 1,
-      "faces": [
-        {
-          "age": 34,
-          "gender_label": "Man",
-          "gender_scores": {
-            "Woman": 6.7453107833862305,
-            "Man": 93.25469207763672
-          }
-        }
-      ],
-      "error": ""
-    },
-    {
-      "frame_num": 1050,
-      "timestamp": "0:00:35",
-      "frame_path": "",
-      "num_faces": 1,
-      "faces": [
-        {
-          "age": 34,
-          "gender_label": "Man",
-          "gender_scores": {
-            "Woman": 7.188807487487793,
-            "Man": 92.81119537353516
-          }
-        }
-      ],
-      "error": ""
-    },
-    {
-      "frame_num": 1080,
-      "timestamp": "0:00:36",
-      "frame_path": "",
-      "num_faces": 1,
-      "faces": [
-        {
-          "age": 34,
-          "gender_label": "Man",
-          "gender_scores": {
-            "Woman": 7.04774284362793,
-            "Man": 92.95225524902344
-          }
-        }
-      ],
-      "error": ""
-    },
-    {
-      "frame_num": 1110,
-      "timestamp": "0:00:37",
-      "frame_path": "",
-      "num_faces": 1,
-      "faces": [
-        {
-          "age": 29,
-          "gender_label": "Woman",
-          "gender_scores": {
-            "Woman": 83.00724029541016,
-            "Man": 16.992755889892578
-          }
-        }
-      ],
-      "error": ""
-    },
-    {
-      "frame_num": 1140,
-      "timestamp": "0:00:38",
-      "frame_path": "",
-      "num_faces": 1,
-      "faces": [
-        {
-          "age": 34,
-          "gender_label": "Man",
-          "gender_scores": {
-            "Woman": 7.2874603271484375,
-            "Man": 92.71253204345703
-          }
-        }
-      ],
-      "error": ""
-    },
-    {
-      "frame_num": 1170,
-      "timestamp": "0:00:39",
-      "frame_path": "",
-      "num_faces": 1,
-      "faces": [
-        {
-          "age": 34,
-          "gender_label": "Man",
-          "gender_scores": {
-            "Woman": 9.923859596252441,
-            "Man": 90.07613372802734
+            "Woman": 8.572711944580078,
+            "Man": 91.42728424072266
           }
         }
       ],

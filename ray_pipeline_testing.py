@@ -198,7 +198,7 @@ def merge_overlapping_segments(segments, merge_threshold=1.0):
     
     return merged
 
-def pipeline_main(input_video_path: str, output_dir: str):
+def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str):
     """
     Simplified unified Ray pipeline for video analysis with time-based detection segments
     """
@@ -295,7 +295,7 @@ def pipeline_main(input_video_path: str, output_dir: str):
         logger.info(f"  - Running audio diarization for shard {i+1}...")
         try:
             audio_output_dir = os.path.join(shard_output_dir, "audio_output")
-            audio_task = process_audio_diarization.remote([shard_path], audio_output_dir)
+            audio_task = process_audio_diarization.remote([input_audio_path], audio_output_dir)
             audio_result = ray.get(audio_task)
             audio_results.append(audio_result)
             
@@ -526,6 +526,7 @@ def pipeline_main(input_video_path: str, output_dir: str):
 
         clear_gpu_memory()
         
+        
     # --- STAGE D: CREATE MASTER TIMELINE ---
     logger.info("Creating master flagged timeline for annotation workload reduction...")
     
@@ -661,9 +662,10 @@ if __name__ == "__main__":
     # Define the input video and the main output directory
     INPUT_VIDEO = "/home/nvcoe_admin/code/oslo/whole_pipeline_testing/kamwai_chan_input_videos/vaccum_floor_1GB.mp4"
     OUTPUT_DIR = "outputs/simplified_unified_pipeline_output"
+    INPUT_AUDIO = "/home/nvcoe_admin/arian/insta360-video-activity-segmentation/test_files/cleaning-surfaces-20250819_1325-audio.WAV"
     
     try:
-        results = pipeline_main(INPUT_VIDEO, OUTPUT_DIR)
+        results = pipeline_main(INPUT_VIDEO,INPUT_AUDIO, OUTPUT_DIR)
         
         print(f"\n🎉 Simplified Pipeline completed!")
         print(f"📊 Processing Summary:")

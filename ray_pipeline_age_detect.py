@@ -77,7 +77,9 @@ def pipeline_main_age_detection(input_path: str, output_dir: str = "/tmp/age_det
                          logger.info(f"Face age detection complete for {view_name}")
                          logger.info(f"Total faces detected: {face_detection_results['total_faces_detected']}")
                          logger.info(f"Total frames processed: {face_detection_results['total_processed_frames']}")
-                         logger.info(f"Processing time: {face_detection_results['total_processing_time_seconds']}s")
+                         # Calculate processing time if not available
+                         processing_time = face_detection_results.get('total_processing_time_seconds', 0)
+                         logger.info(f"Processing time: {processing_time}s")
                          
                          # Save detailed results for this view
                          output_file = Path(output_dir) / f"{input_path.stem}_{view_name}_face_analysis_results.json"
@@ -96,9 +98,10 @@ def pipeline_main_age_detection(input_path: str, output_dir: str = "/tmp/age_det
                              
                              # Find results for this chunk
                              chunk_results = []
-                             for frame_result in face_detection_results["face_analysis_results"]:
-                                 if frame_result.get("chunk_offset_seconds") == j * chunk_duration_sec:
-                                     chunk_results.append(frame_result)
+                             # Use flagged_segments instead of face_analysis_results
+                             for segment in face_detection_results.get("flagged_segments", []):
+                                 if segment.get("chunk_offset_seconds") == j * chunk_duration_sec:
+                                     chunk_results.append(segment)
                              
                              with open(chunk_result_file, 'w') as f:
                                  json.dump({
@@ -114,7 +117,7 @@ def pipeline_main_age_detection(input_path: str, output_dir: str = "/tmp/age_det
                              "results_file": str(output_file),
                              "total_faces_detected": face_detection_results["total_faces_detected"],
                              "total_processed_frames": face_detection_results["total_processed_frames"],
-                             "processing_time": face_detection_results["total_processing_time_seconds"],
+                             "processing_time": face_detection_results.get("total_processing_time_seconds", 0),
                              "chunks_processed": face_detection_results["chunks_processed"]
                          })
                      else:
