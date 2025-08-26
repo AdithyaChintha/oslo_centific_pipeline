@@ -4,8 +4,20 @@ import os, re
 from typing import Any, Dict, Optional
 import ray
 
-
 from pathlib import Path
+
+# ==== EDIT THESE ====
+VIDEO_PATH   = "test_view2.mp4"   # put your video path here
+MODEL_NAME   = "yolo11m.pt"       # or your custom weight path
+CONF         = 0.5
+IOU          = 0.5
+FRAME_STRIDE = 5
+CLASSES      = [0]                  # e.g., [0] for "person", None for all
+DEVICE       = "cuda:0"                 # e.g., "cuda:0" to force GPU
+GAP_SEC      = 10.0                  # merge gap for spans
+EVENTS_OUT   = "outputs/events.jsonl"
+SPANS_OUT    = "outputs/events_spans.jsonl"
+# ====================
 
 def _part_index(filename: str) -> int:
     """Extract shard index from names like 'xxx_part3.mp4' -> 3; default to 0."""
@@ -17,13 +29,13 @@ def run_yolodetect_on_shard(
     video_path: str,
     out_dir: str = "/tmp/yolo_demo",
     shard_seconds: int = 60,
-    model: str = "yolov8n.pt",
-    conf: float = 0.5,
-    iou: float = 0.5,
-    frame_stride: int = 5,
-    classes: Optional[list[int]] = None,
-    device: Optional[str] = None,
-    gap_sec: float = 10.0,
+    model: str = MODEL_NAME,
+    conf: float = CONF,
+    iou: float = IOU,
+    frame_stride: int = FRAME_STRIDE,
+    classes: Optional[list[int]] = CLASSES,
+    device: Optional[str] = DEVICE,
+    gap_sec: float = GAP_SEC,
 ) -> Dict[str, Any]:
     """
     Minimal Ray task: call yolodetect(...) for a single shard.

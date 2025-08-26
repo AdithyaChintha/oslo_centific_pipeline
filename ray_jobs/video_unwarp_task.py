@@ -21,6 +21,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from pathlib import Path
 
 import ray
+import cv2
 
 # ---------------------------------------------------------------------------
 # Utilities
@@ -41,6 +42,16 @@ def _ensure_runtime_env() -> dict:
     wd = str(Path(__file__).resolve().parents[1])
     return {"working_dir": wd}
 
+def opencv_tune_for_worker(num_threads: int = 1, use_opencl: bool = False):
+    """Call this at the top of every Ray remote task or in the module imported by workers."""
+    cv2.setUseOptimized(True)
+    cv2.setNumThreads(int(num_threads))  # keep small in multi-process setting
+    try:
+        if use_opencl and cv2.ocl.haveOpenCL():
+            cv2.ocl.setUseOpenCL(True)
+    except Exception:
+        pass
+
 
 # ---------------------------------------------------------------------------
 # Ray tasks
@@ -57,6 +68,7 @@ def erp_unwarp_task(mp4_path: str,
 
     Returns a dict {view_name: output_path}.
     """
+    opencv_tune_for_worker(num_threads=1)
     try:
         from utils.video_unwarp import unwarp_equirectangular_views
         if views is None:

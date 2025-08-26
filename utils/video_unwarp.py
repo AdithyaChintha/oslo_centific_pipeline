@@ -29,9 +29,27 @@ from __future__ import annotations
 from typing import Dict, Optional, Sequence, Tuple, List
 from pathlib import Path
 
+import os
 import cv2
 import numpy as np
 from math import tan, atan, radians, degrees
+
+# ------------------------- Optimization -------------------------
+# 1) Enable OpenCV optimizations (IPP/SIMD etc., depends on how OpenCV was built)
+cv2.setUseOptimized(True)
+print("useOptimized:", cv2.useOptimized())  # True means optimizations are on
+
+# 2) Set the number of OpenCV internal threads (affects parallel_for_ ops like remap)
+cv2.setNumThreads(max(1, (os.cpu_count() or 8) - 1))
+print("numThreads:", cv2.getNumThreads())
+
+# (Optional) 3) Enable OpenCL if your OpenCV build supports it
+try:
+    if cv2.ocl.haveOpenCL():
+        cv2.ocl.setUseOpenCL(True)
+        print("useOpenCL:", cv2.ocl.useOpenCL())
+except Exception:
+    pass
 
 # ------------------------- math / geometry helpers -------------------------
 
