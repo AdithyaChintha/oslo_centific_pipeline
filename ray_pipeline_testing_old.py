@@ -16,14 +16,13 @@ from ray_jobs.insv_to_mp4 import convert_insv_to_dual_mp4
 from ray_jobs.scene_det import detect_scenes
 from ray_jobs.run_yolodetect_task import run_yolodetect_on_shard
 from ray_jobs.audio_diarization_pii import process_audio_diarization
-from ray_jobs.clap_detector import detect_claps_in_media
 
 # Import new ray jobs
 from ray_jobs.nsfw_det_final import process_video_chunks_for_nsfw
 from ray_jobs.motion_energy import compute_motion_energy
 from ray_jobs.face_age_detector import process_video_chunks_for_face_detection
 from ray_jobs.labelstudio_tasks import build_labelstudio_json_for_shard_task, import_to_labelstudio_task
-
+from ray_jobs.clap_detector import detect_claps_in_media
 
 logger = get_logger("SimplifiedUnifiedPipeline")
 
@@ -133,7 +132,7 @@ def extract_flagged_segments(task_result, task_type, shard_index, shard_offset_s
                     "description": seg.get('description', 'Face detected'),
                     "shard_index": shard_index + 1
                 })
-
+                
         elif task_type == "clap":
             # Clap detection returns timestamps
             clap_timestamps = task_result.get('clap_timestamps', [])
@@ -200,59 +199,19 @@ def merge_overlapping_segments(segments, merge_threshold=1.0):
     
     return merged
 
-def generate_azure_shard_urls(azure_blob_client, container, shard_paths, output_prefix):
-    """
-    Upload video shards to Azure and generate SAS URLs for Label Studio
-    """
-    shard_urls = {}
-    from datetime import datetime, timedelta
-    
-    # Generate SAS token that expires in 3 months
-    expiry = datetime.utcnow() + timedelta(days=90)
-    
-    for i, shard_path in enumerate(shard_paths):
-        if not os.path.exists(shard_path):
-            logger.warning(f"Shard file not found: {shard_path}")
-            continue
-            
-        # Create blob name for the shard
-        shard_filename = os.path.basename(shard_path)
-        blob_name = f"{output_prefix}/video_shards/{shard_filename}"
-        
-        try:
-            # Upload shard to Azure
-            blob_client = azure_blob_client.get_blob_client(container=container, blob=blob_name)
-            logger.info(f"Uploading shard {i+1} to Azure: {blob_name}")
-            
-            with open(shard_path, "rb") as data:
-                blob_client.upload_blob(data, overwrite=True)
-            
-            # Generate SAS URL
-            from azure.storage.blob import generate_blob_sas, BlobSasPermissions
-            sas_token = generate_blob_sas(
-                account_name=azure_blob_client.account_name,
-                container_name=container,
-                blob_name=blob_name,
-                account_key=azure_blob_client.credential.account_key,
-                permission=BlobSasPermissions(read=True),
-                expiry=expiry
-            )
-            
-            shard_url = f"https://{azure_blob_client.account_name}.blob.core.windows.net/{container}/{blob_name}?{sas_token}"
-            shard_urls[i] = shard_url
-            logger.info(f"Generated SAS URL for shard {i+1}")
-            
-        except Exception as e:
-            logger.error(f"Failed to upload shard {i+1}: {e}")
-            shard_urls[i] = None
-    
-    return shard_urls
-
-def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, azure_blob_client=None, azure_container=None, azure_output_prefix=None):
+def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str):
     """
     Simplified unified Ray pipeline for video analysis with time-based detection segments
     """
-    ray.init()
+    # Initialize Ray with proper error handling
+    try:
+        if not ray.is_initialized():
+            ray.init()
+    except RuntimeError as e:
+        if "ray.init twice" in str(e):
+            logger.warning("Ray already initialized, continuing...")
+        else:
+            raise
     
     # Ensure the output directory exists
     os.makedirs(output_dir, exist_ok=True)
@@ -283,22 +242,20 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
         mp4_path = input_video_path
 
     # Split the video into shards
-    shards_dir = os.path.join(output_dir, "video_shards")
+    shards_video_dir = os.path.join(output_dir, "video_shards")
     shards_audio_dir = os.path.join(output_dir, "audio_shards")
-    shard_paths_ref = split_video_into_shards.remote(mp4_path, output_dir=shards_dir, duration_sec=60)
+    shard_video_paths_ref = split_video_into_shards.remote(mp4_path, output_dir=shards_video_dir, duration_sec=60)
     shard_audio_paths_ref = split_audio_into_shards.remote(input_audio_path,output_dir=shards_audio_dir,duration_sec=60)
-    shard_paths = ray.get(shard_paths_ref)
+    shard_video_paths = ray.get(shard_video_paths_ref)
     shard_audio_paths = ray.get(shard_audio_paths_ref)
-    logger.info(f"Video split into {len(shard_paths)} shards in {shards_dir}")
+    logger.info(f"Video split into {len(shard_video_paths)} shards in {shards_video_dir}")
     logger.info(f"Audio split into {len(shard_audio_paths)} shards in {shards_audio_dir}")
 
-    # Upload shards to Azure and get URLs (if Azure client provided)
-    shard_urls = {}
-    if azure_blob_client and azure_container and azure_output_prefix:
-        logger.info("Uploading video shards to Azure Blob Storage...")
-        shard_urls = generate_azure_shard_urls(azure_blob_client, azure_container, shard_paths, azure_output_prefix)
-    else:
-        logger.warning("Azure Blob client not provided - using local paths for Label Studio (will not work)")
+    # Check if sharding was successful
+    if not shard_video_paths or not shard_audio_paths:
+        error_msg = f"Failed to create shards - Video: {len(shard_video_paths)}, Audio: {len(shard_audio_paths)}"
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)
 
     # --- STAGE C: SEQUENTIAL ANALYSIS ---
     logger.info("Launching sequential analysis tasks for each shard...")
@@ -310,8 +267,8 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
     nsfw_results = []
     motion_results = []
     face_results = []
-    clap_results = []
     label_studio_json_refs = [] # To hold refs for Label Studio JSON generation tasks
+    clap_results = []
     
     # All flagged segments across all shards
     all_flagged_segments = []
@@ -336,12 +293,12 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
         logger.info(f"Created default prompt file at {prompt_path}")
 
     # Process each shard sequentially
-    for i, (shard_path, shard_audio_path) in enumerate(zip(shard_paths, shard_audio_paths)):
+    for i, (shard_video_path, shard_audio_path) in enumerate(zip(shard_video_paths, shard_audio_paths)):
         shard_output_dir = os.path.join(output_dir, f"shard_{i+1}")
         os.makedirs(shard_output_dir, exist_ok=True)
         shard_offset_sec = i * 60  # Each shard is 60 seconds
         
-        logger.info(f"Processing shard {i+1}/{len(shard_paths)}: {os.path.basename(shard_path)}")
+        logger.info(f"Processing shard {i+1}/{len(shard_video_paths)}: {os.path.basename(shard_video_path)}")
         
         # --- EXISTING TASKS ---
         
@@ -357,9 +314,9 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
             segments = extract_flagged_segments(audio_result, "audio", i, shard_offset_sec)
             all_flagged_segments.extend(segments)
             
-            logger.info(f"  - Audio diarization completed for shard {i+1}")
+            logger.info(f"  - ✅ Audio diarization completed for shard {i+1}")
         except Exception as e:
-            logger.error(f"  - Audio diarization failed for shard {i+1}: {e}")
+            logger.error(f"  - ❌ Audio diarization failed for shard {i+1}: {e}")
             audio_results.append(None)
         
         # clear_gpu_memory()
@@ -368,7 +325,7 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
         logger.info(f"  - Running YOLO detection for shard {i+1}...")
         try:
             yolo_output_dir = os.path.join(shard_output_dir, "yolo_output")
-            yolo_task = run_yolodetect_on_shard.remote(shard_path, yolo_output_dir)
+            yolo_task = run_yolodetect_on_shard.remote(shard_video_path, yolo_output_dir)
             yolo_result = ray.get(yolo_task)
             yolo_results.append(yolo_result)
             
@@ -376,9 +333,9 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
             segments = extract_flagged_segments(yolo_result, "yolo", i, shard_offset_sec)
             all_flagged_segments.extend(segments)
             
-            logger.info(f"  - YOLO detection completed for shard {i+1}")
+            logger.info(f"  - ✅ YOLO detection completed for shard {i+1}")
         except Exception as e:
-            logger.error(f"  - YOLO detection failed for shard {i+1}: {e}")
+            logger.error(f"  - ❌ YOLO detection failed for shard {i+1}: {e}")
             yolo_results.append(None)
         
         clear_gpu_memory()
@@ -387,7 +344,7 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
         logger.info(f"  - Running scene detection for shard {i+1}...")
         try:
             scene_output_dir = os.path.join(shard_output_dir, "scene_output")
-            scene_task = detect_scenes.remote(shard_path, prompt_path, scene_output_dir)
+            scene_task = detect_scenes.remote(shard_video_path, prompt_path, scene_output_dir)
             scene_result = ray.get(scene_task)
             scene_results.append(scene_result)
             
@@ -408,10 +365,11 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
                 error_msg = scene_result.get('processing_info', {}).get('error', 'Unknown error') if scene_result else 'No result returned'
                 logger.error(f"  - Scene detection failed for shard {i+1}: {error_msg}")
         except Exception as e:
-            logger.error(f"  - Scene detection failed for shard {i+1}: {e}")
+            logger.error(f"  - ❌ Scene detection failed for shard {i+1}: {e}")
             scene_results.append(None)
         
         clear_gpu_memory()
+        
 
         # Task 4: NSFW Detection - FIXED PARAMETERS
         logger.info(f"  - Running NSFW detection for shard {i+1}...")
@@ -421,7 +379,7 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
             
             # Fix: Use correct parameters that match nsfw_det.py function signature
             nsfw_task = process_video_chunks_for_nsfw.remote(
-                chunk_paths=[shard_path],
+                chunk_paths=[shard_video_path],
                 confidence_threshold=0.5,
                 chunk_duration_sec=60
             )
@@ -436,14 +394,14 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
                 # Save detailed NSFW results with segments
                 nsfw_detailed_result = {
                     "shard_index": i + 1,
-                    "shard_file": shard_path,
+                    "shard_file": shard_video_path,
                     "shard_offset_seconds": shard_offset_sec,
                     "nsfw_result": nsfw_result,
                     "extracted_segments": segments
                 }
                 
                 if nsfw_result and nsfw_result.get("success"):
-                    video_name = os.path.splitext(os.path.basename(shard_path))[0]
+                    video_name = os.path.splitext(os.path.basename(shard_video_path))[0]
                     nsfw_file = os.path.join(nsfw_output_dir, f"{video_name}_nsfw_results.json")
                     with open(nsfw_file, 'w') as f:
                         json.dump(nsfw_result, f, indent=2)
@@ -451,7 +409,7 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
                 # Log what we found
                 total_detections = nsfw_result.get('total_nsfw_detections', 0)
                 flagged_segments = len(nsfw_result.get('flagged_segments', []))
-                logger.info(f"  - NSFW detection completed for shard {i+1}")
+                logger.info(f"  - ✅ NSFW detection completed for shard {i+1}")
                 logger.info(f"    Found {total_detections} NSFW detections in {flagged_segments} segments")
                 
                 # Log segment details for debugging
@@ -460,10 +418,10 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
                                f"(confidence: {seg.get('confidence', 0):.2f})")
             else:
                 error_msg = nsfw_result.get('error', 'Unknown error') if nsfw_result else 'No result returned'
-                logger.warning(f"  - NSFW detection failed for shard {i+1}: {error_msg}")
+                logger.warning(f"  - ⚠️ NSFW detection failed for shard {i+1}: {error_msg}")
                 
         except Exception as e:
-            logger.error(f"  - NSFW detection failed for shard {i+1}: {e}")
+            logger.error(f"  - ❌ NSFW detection failed for shard {i+1}: {e}")
             nsfw_results.append(None)
         
         clear_gpu_memory()
@@ -475,7 +433,7 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
             os.makedirs(motion_output_dir, exist_ok=True)
             
             motion_task = compute_motion_energy.remote(
-                [shard_path], sensitivity_level="medium", save_detailed_data=False
+                [shard_video_path], sensitivity_level="medium", save_detailed_data=False
             )
             motion_result = ray.get(motion_task)
             motion_results.append(motion_result)
@@ -487,14 +445,14 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
                 
                 # Save motion energy results
                 if motion_result and motion_result.get("success"):
-                    video_name = os.path.splitext(os.path.basename(shard_path))[0]
+                    video_name = os.path.splitext(os.path.basename(shard_video_path))[0]
                     motion_file = os.path.join(motion_output_dir, f"{video_name}_motion_results.json")
                     with open(motion_file, 'w') as f:
                         json.dump(motion_result, f, indent=2)
                     
-            logger.info(f"  - Motion energy analysis completed for shard {i+1}")
+            logger.info(f"  - ✅ Motion energy analysis completed for shard {i+1}")
         except Exception as e:
-            logger.error(f"  - Motion energy analysis failed for shard {i+1}: {e}")
+            logger.error(f"  - ❌ Motion energy analysis failed for shard {i+1}: {e}")
             motion_results.append(None)
         
         clear_gpu_memory()
@@ -506,7 +464,7 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
             os.makedirs(face_output_dir, exist_ok=True)
             
             face_task = process_video_chunks_for_face_detection.remote(
-                [shard_path], config=None, frame_interval=30, 
+                [shard_video_path], config=None, frame_interval=30, 
                 save_frames=False, chunk_duration_sec=60
             )
             face_result = ray.get(face_task)
@@ -519,18 +477,19 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
                 
                 # Save face detection results
                 if face_result and face_result.get("success"):
-                    video_name = os.path.splitext(os.path.basename(shard_path))[0]
+                    video_name = os.path.splitext(os.path.basename(shard_video_path))[0]
                     face_file = os.path.join(face_output_dir, f"{video_name}_face_results.json")
                     with open(face_file, 'w') as f:
                         json.dump(face_result, f, indent=2)
                     
-            logger.info(f"  - Face age detection completed for shard {i+1}")
+            logger.info(f"  - ✅ Face age detection completed for shard {i+1}")
         except Exception as e:
-            logger.error(f"  - Face age detection failed for shard {i+1}: {e}")
+            logger.error(f"  - ❌ Face age detection failed for shard {i+1}: {e}")
             face_results.append(None)
         
         clear_gpu_memory()
 
+                # Task 7: Clap Detection
         logger.info(f"  - Running clap detection for shard {i+1}...")
         try:
             clap_output_dir = os.path.join(shard_output_dir, "clap_output")
@@ -552,7 +511,7 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
                 all_flagged_segments.extend(segments)
                 
                 # Save clap detection results
-                video_name = os.path.splitext(os.path.basename(shard_path))[0]
+                video_name = os.path.splitext(os.path.basename(shard_video_path))[0]
                 clap_file = os.path.join(clap_output_dir, f"{video_name}_clap_results.json")
                 with open(clap_file, 'w') as f:
                     json.dump(clap_result, f, indent=2)
@@ -572,20 +531,15 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
         
         # After all models have run for the shard, generate its Label Studio JSON
         logger.info(f"  - Generating Label Studio JSON for shard {i+1}...")
-        
-        # Get Azure URL for this shard (if available)
-        shard_azure_url = shard_urls.get(i, shard_path)  # Fallback to local path if no Azure URL
-        
-        json_ref = build_labelstudio_json_for_shard_task.remote(
-            shard_output_dir, 
-            shard_azure_url,  # Pass Azure URL instead of local path
-            i + 1,  # shard number
-            shard_offset_sec  # shard offset for metadata
-        )
+        json_ref = build_labelstudio_json_for_shard_task.remote(shard_output_dir, shard_video_path)
         label_studio_json_refs.append(json_ref)
+        
 
-        logger.info(f"Completed processing for shard {i+1}/{len(shard_paths)}")
+        logger.info(f"✅ Completed processing for shard {i+1}/{len(shard_video_paths)}")
+        
 
+        
+        
     # --- STAGE D: CREATE MASTER TIMELINE ---
     logger.info("Creating master flagged timeline for annotation workload reduction...")
     
@@ -597,7 +551,7 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
         merged_segments = merge_overlapping_segments(all_flagged_segments, merge_threshold=1.0)
         
         # Calculate annotation workload reduction
-        total_video_duration = len(shard_paths) * 60  # 60 seconds per shard
+        total_video_duration = len(shard_video_paths) * 60  # 60 seconds per shard
         total_flagged_duration = sum(seg['end_time'] - seg['start_time'] for seg in merged_segments)
         annotation_reduction = ((total_video_duration - total_flagged_duration) / total_video_duration) * 100
         
@@ -614,9 +568,9 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
                 "high_priority_segments": [s for s in merged_segments if s.get('priority') == 'high']
             }, f, indent=2)
         
-        logger.info(f"Master timeline created: {len(merged_segments)} segments")
-        logger.info(f"Annotation workload reduction: {annotation_reduction:.1f}%")
-        logger.info(f"Only {total_flagged_duration:.1f}s of {total_video_duration}s needs manual review")
+        logger.info(f"📊 Master timeline created: {len(merged_segments)} segments")
+        logger.info(f"🎯 Annotation workload reduction: {annotation_reduction:.1f}%")
+        logger.info(f"⚡ Only {total_flagged_duration:.1f}s of {total_video_duration}s needs manual review")
     else:
         logger.info("No flagged segments found across all shards")
         annotation_reduction = 0
@@ -632,8 +586,8 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
     successful_nsfw = sum(1 for result in nsfw_results if result is not None and result.get("success"))
     successful_motion = sum(1 for result in motion_results if result is not None and result.get("success") )
     successful_face = sum(1 for result in face_results if result is not None and result.get("success") )
-    successful_clap = sum(1 for result in clap_results if result is not None and result.get("success") )
-    total_shards = len(shard_paths)
+    successful_clap = sum(1 for result in clap_results if result is not None and result.get("success"))
+    total_shards = len(shard_video_paths)
     
     # Log detailed results
     logger.info(f"Processing complete:")
@@ -644,8 +598,10 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
     logger.info(f"  - Motion Energy Analysis: {successful_motion}/{total_shards} successful")
     logger.info(f"  - Face Age Detection: {successful_face}/{total_shards} successful")
     logger.info(f"  - Clap Detection: {successful_clap}/{total_shards} successful")
+    
     total_tasks = total_shards * 7  # 7 tasks per shard
     successful_tasks = successful_audio + successful_yolo + successful_scene + successful_nsfw + successful_motion + successful_face + successful_clap
+
     
     # Create summary
     results_summary = {
@@ -658,7 +614,7 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
             'successful_motion': successful_motion,
             'successful_face': successful_face,
             'successful_clap': successful_clap,
-            'overall_success_rate': f"{(successful_tasks / total_tasks * 100):.1f}%"
+            'overall_success_rate': f"{(successful_tasks / total_tasks * 100):.1f}%" if total_tasks > 0 else "0.0%"
         },
         'annotation_summary': {
             'total_flagged_segments': len(merged_segments),
@@ -667,6 +623,7 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
             'high_priority_segments': len([s for s in merged_segments if s.get('priority') == 'high']) if merged_segments else 0
         }
     }
+    
     
     
     # Save summary to file
@@ -703,34 +660,34 @@ def pipeline_main(input_video_path: str,input_audio_path:str, output_dir: str, a
         import_result = ray.get(import_result_ref)
         
         if import_result.get("success"):
-            logger.info("Successfully imported tasks to Label Studio.")
+            logger.info("✅ Successfully imported tasks to Label Studio.")
             logger.info(f"Server response: {import_result.get('result')}")
         else:
-            logger.error(f"Failed to import tasks to Label Studio: {import_result.get('error')}")
+            logger.error(f"❌ Failed to import tasks to Label Studio: {import_result.get('error')}")
 
     except Exception as e:
         logger.error(f"An error occurred during Label Studio import process: {e}")
 
-    logger.info("Simplified unified pipeline complete!")
+    logger.info("🚀 Simplified unified pipeline complete!")
     return results_summary
 
 if __name__ == "__main__":
     # Define the input video and the main output directory
-    INPUT_VIDEO = "/dev/shm/cleaning-surfaces-20250819_1325-video.insv_1.insv"
-    INPUT_AUDIO = "/home/nvcoe_admin/arian/cleaning-surfaces-20250819_1325-audio.WAV"
+    INPUT_VIDEO = '/home/nvcoe_admin/code/oslo/whole_pipeline_testing/kamwai_chan_input_videos/vaccum_floor_1GB_480p.mp4' #"/dev/shm/cleaning-surfaces-20250819_1325-video.insv_1.insv"
     OUTPUT_DIR = "/dev/shm/outputs/simplified_unified_pipeline_output"
+    INPUT_AUDIO = "/home/nvcoe_admin/arian/cleaning-surfaces-20250819_1325-audio_part1.wav"
     
     try:
-        results = pipeline_main(INPUT_VIDEO, INPUT_AUDIO, OUTPUT_DIR)
+        results = pipeline_main(INPUT_VIDEO,INPUT_AUDIO, OUTPUT_DIR)
         
-        print(f"\nSimplified Pipeline completed!")
-        print(f"Processing Summary:")
-        for task in ['audio', 'yolo', 'scene', 'nsfw', 'motion', 'face', 'clap']:
+        print(f"\n🎉 Simplified Pipeline completed!")
+        print(f"📊 Processing Summary:")
+        for task in ['audio', 'yolo', 'scene', 'nsfw', 'motion', 'face','clap']:
             count = results['processing_summary'][f'successful_{task}']
             total = results['processing_summary']['total_shards']
             print(f"   {task.title()}: {count}/{total} successful")
         
-        print(f"\nAnnotation Workload Reduction:")
+        print(f"\n🎯 Annotation Workload Reduction:")
         print(f"   Flagged Segments: {results['annotation_summary']['total_flagged_segments']}")
         print(f"   Workload Reduction: {results['annotation_summary']['annotation_workload_reduction']}")
         print(f"   High Priority Segments: {results['annotation_summary']['high_priority_segments']}")
@@ -738,5 +695,5 @@ if __name__ == "__main__":
         
     except Exception as e:
         logger.error(f"Pipeline failed: {e}")
-        print(f"Pipeline failed: {e}")
+        print(f"❌ Pipeline failed: {e}")
         raise

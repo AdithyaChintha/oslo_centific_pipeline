@@ -138,7 +138,18 @@ def _shard_task(
         res = _run(cmd, timeout=3600)
         if res.returncode == 0:
             return output_path
-        print("ffmpeg stderr:", res.stderr[:400])
+        
+        # If GPU failed, try CPU fallback for high-resolution videos
+        if use_gpu and ("Video width" in res.stderr and "not within range" in res.stderr):
+            print(f"GPU decoding failed due to resolution limits, falling back to CPU for {Path(output_path).name}")
+            fallback_cmd = base_cmd  # Use CPU-only command
+            print(f"🔧 shard {Path(output_path).name} | GPU=fallback-cpu | vf={' '.join(vf_args) or 'none'}")
+            fallback_res = _run(fallback_cmd, timeout=3600)
+            if fallback_res.returncode == 0:
+                return output_path
+            print("CPU fallback stderr:", fallback_res.stderr[:400])
+        else:
+            print("ffmpeg stderr:", res.stderr[:400])
         return None
     except Exception as e:
         print("shard error:", e)
