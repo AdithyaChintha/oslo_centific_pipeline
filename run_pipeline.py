@@ -26,7 +26,9 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("AzurePipelineWrapper")
-
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.ERROR)  # Hide HTTP request/response details
+logging.getLogger("azure.storage.blob").setLevel(logging.WARNING)  # Show warnings and errors only
+logging.getLogger("azure.core").setLevel(logging.WARNING)  # General Azure core logging
 
 def _human_size(num: int, suffix="B") -> str:
     """Convert bytes to human readable format"""
@@ -71,18 +73,24 @@ class AzureBlobPipeline:
     """
     A context manager to handle Azure Blob I/O for a local pipeline.
     """
-    def __init__(self, connection_string: str, input_blob_path: str, output_blob_prefix: str):
+    def __init__(self, connection_string: str, input_blob_path: str, input_audio_path: str, output_blob_prefix: str):
         if not connection_string:
             raise ValueError("The Azure Storage connection string is required.")
         
         self.blob_service_client = BlobServiceClient.from_connection_string(connection_string)
         
         self.input_container, self.input_blob_name = self._parse_blob_path(input_blob_path)
+        self.input_audio_container, self.input_audio_blob_name = self._parse_blob_path(input_audio_path)
         self.output_container, self.output_prefix = self._parse_blob_path(output_blob_prefix)
 
         self.temp_input_dir = None
         self.temp_output_dir = None
         self.local_input_path = None
+        self.local_audio_path = None
+
+        self.chunk_size = 8 * 1024 * 1024  # 8MB chunks for optimal throughput
+        self.max_workers = 10  # Parallel download threads
+        self.retry_attempts = 3
 
     @staticmethod
     def _parse_blob_path(path: str) -> tuple[str, str]:
@@ -102,8 +110,9 @@ class AzureBlobPipeline:
         logger.info(f"Created temporary output dir: {self.temp_output_dir}")
 
         self._download_input_blob()
+        self._download_audio_blob()
 
-        return self.local_input_path, self.temp_output_dir
+        return self.local_input_path, self.local_audio_path, self.temp_output_dir
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Uploads results on success and always cleans up the local environment."""
@@ -117,25 +126,71 @@ class AzureBlobPipeline:
         self._cleanup()
         logger.info("Cleanup complete.")
 
+    def _download_blob_optimized(self, container: str, blob_name: str, local_path: str, description: str = "file"):
+        """Optimized blob download with chunked streaming, retries, and progress"""
+        
+        for attempt in range(self.retry_attempts):
+            try:
+                blob_client = self.blob_service_client.get_blob_client(container=container, blob=blob_name)
+                
+                # Get blob properties for progress tracking
+                blob_properties = blob_client.get_blob_properties()
+                total_size = blob_properties.size
+                total_size_mb = total_size / (1024 * 1024)
+                
+                logger.info(f"📥 Downloading {description}: {blob_name} ({total_size_mb:.1f} MB)")
+                
+                start_time = time.time()
+                downloaded_bytes = 0
+                
+                with open(local_path, "wb") as f:
+                    # Stream download in chunks
+                    stream = blob_client.download_blob()
+                    for chunk in stream.chunks():
+                        f.write(chunk)
+                        downloaded_bytes += len(chunk)
+                        
+                        # Progress indication every 100MB
+                        if downloaded_bytes % (100 * 1024 * 1024) == 0:
+                            progress = (downloaded_bytes / total_size) * 100
+                            speed_mbps = (downloaded_bytes / (1024 * 1024)) / (time.time() - start_time)
+                            logger.info(f"   Progress: {progress:.1f}% ({speed_mbps:.1f} MB/s)")
+                
+                download_time = time.time() - start_time
+                speed_mbps = total_size_mb / download_time
+                logger.info(f"✅ {description} download complete: {total_size_mb:.1f} MB in {download_time:.1f}s ({speed_mbps:.1f} MB/s)")
+                return True
+                
+            except Exception as e:
+                logger.warning(f"Download attempt {attempt + 1} failed for {blob_name}: {e}")
+                if attempt == self.retry_attempts - 1:
+                    logger.error(f"❌ Failed to download {blob_name} after {self.retry_attempts} attempts")
+                    raise
+                time.sleep(2 ** attempt)  # Exponential backoff
+
     def _download_input_blob(self):
-        """Downloads the source blob to the local temporary input directory."""
-        try:
-            blob_client = self.blob_service_client.get_blob_client(
-                container=self.input_container, blob=self.input_blob_name
-            )
-            
-            file_name = os.path.basename(self.input_blob_name)
-            self.local_input_path = os.path.join(self.temp_input_dir, file_name)
-            
-            logger.info(f"Downloading '{self.input_container}/{self.input_blob_name}' to '{self.local_input_path}'...")
-            with open(self.local_input_path, "wb") as f:
-                f.write(blob_client.download_blob().readall())
-            logger.info("Download complete.")
+        """Downloads the source blob using optimized streaming"""
+        file_name = os.path.basename(self.input_blob_name)
+        self.local_input_path = os.path.join(self.temp_input_dir, file_name)
+        
+        self._download_blob_optimized(
+            self.input_container, 
+            self.input_blob_name, 
+            self.local_input_path,
+            "video"
+        )
 
-        except ResourceNotFoundError:
-            logger.error(f"Input blob not found: '{self.input_container}/{self.input_blob_name}'")
-            raise
-
+    def _download_audio_blob(self):
+        """Downloads the audio blob using optimized streaming"""
+        file_name = os.path.basename(self.input_audio_blob_name)
+        self.local_audio_path = os.path.join(self.temp_input_dir, file_name)
+        
+        self._download_blob_optimized(
+            self.input_audio_container, 
+            self.input_audio_blob_name, 
+            self.local_audio_path,
+            "audio"
+        )
     def _upload_output_folder(self):
         """Uploads all files from the local temp output dir to Azure Blob Storage."""
         if not os.path.isdir(self.temp_output_dir) or not os.listdir(self.temp_output_dir):
@@ -1295,8 +1350,11 @@ def main():
     # ==================================================================
     # == 1. CONFIGURATION - MANUAL VIDEO PATH INPUT ==
     # ==================================================================
-    input_path = "instavideo/azure_directory_path/DCIM/Camera01/VID_20250809_094753_00_044.insv"
-    output_parent_dir = "instavideo/krishna-test/test1/test_activity/pre-annotation-output"
+    
+    input_path = "instavideo/azure_directory_path/Nathanvideos/skincare-20250819_1359-video.insv.insv"
+    input_audio_path = "instavideo/azure_directory_path/Nathanvideos/skincare-20250819_1359-audio.WAV"
+
+    output_parent_dir = "instavideo/krishna-test/test1/test_activity/pre-annotation-output/test"
 
     # ==================================================================
     # == 2. PREPARE PIPELINE WITH MANUAL VIDEO PATH ==
@@ -1316,7 +1374,7 @@ def main():
     logger.info(f"Final output will be stored under: {final_output_prefix}")
 
     try:
-        with AzureBlobPipeline(connection_string, input_path, final_output_prefix) as (local_input_path, local_output_dir):
+        with AzureBlobPipeline(connection_string, input_path, input_audio_path, final_output_prefix) as (local_input_path, local_audio_path, local_output_dir):
             logger.info("Azure Blob environment is ready. Starting Ray pipeline...")
 
             script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1371,6 +1429,7 @@ def main():
                     logger.info("Running pipeline for %s...", view_name)
                     pipeline_main(
                         input_video_path=mp4_path,
+                        input_audio_path=local_audio_path,
                         output_dir=view_temp_output_dir
                     )
 
@@ -1505,6 +1564,7 @@ def main():
                 logger.info("Single MP4 file - processing single view")
                 pipeline_main(
                     input_video_path=local_input_path,
+                    input_audio_path=local_audio_path,
                     output_dir=local_output_dir
                 )
                 if os.path.exists(local_output_dir) and os.listdir(local_output_dir):
