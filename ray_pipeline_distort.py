@@ -245,7 +245,7 @@ def pipeline_main(input_video_path: str, output_dir: str):
         mp4_path = input_video_path
 
 
-    # Undistort the video
+    # Undistort the video (new tested)
     #views4 = [("front",0,0),("right",90,0),("back",180,0),("left",-90,0)]
     views4 = erp_unwarp_task.remote(mp4_path)
     flat_result = ray.get(views4)
@@ -257,7 +257,7 @@ def pipeline_main(input_video_path: str, output_dir: str):
     # shard_paths = ray.get(shard_paths_ref)
     # logger.info(f"Video split into {len(shard_paths)} shards in {shards_dir}")
 
-    # Split the video into shards(new tested)
+    # Split the video into shards (new tested)
     shards_dir = os.path.join(output_dir, "video_shards")
     os.makedirs(shards_dir, exist_ok=True)
 

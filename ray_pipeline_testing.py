@@ -23,6 +23,9 @@ from ray_jobs.face_age_detector import process_video_chunks_for_face_detection
 from ray_jobs.labelstudio_tasks import build_labelstudio_json_for_shard_task, import_to_labelstudio_task
 from ray_jobs.clap_detector import detect_claps_in_media
 
+# Test unwarp
+from ray_jobs.video_unwarp_task import erp_unwarp_task
+
 logger = get_logger("SimplifiedUnifiedPipeline")
 
 def clear_gpu_memory():
@@ -240,11 +243,24 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str)
     else:
         mp4_path = input_video_path
 
-    # Split the video into shards
+    # Undistort the video (new tested)
+    #views4 = [("front",0,0),("right",90,0),("back",180,0),("left",-90,0)]
+    views4 = erp_unwarp_task.remote(mp4_path)
+    flat_result = ray.get(views4)
+    logger.info(f"Videos undistorted into {len(flat_result)} views under {flat_result}")
+
+    # Split the video into shards (new tested)
     shards_dir = os.path.join(output_dir, "video_shards")
-    shard_paths_ref = split_video_into_shards.remote(mp4_path, output_dir=shards_dir, duration_sec=60)
-    shard_paths = ray.get(shard_paths_ref)
-    logger.info(f"Video split into {len(shard_paths)} shards in {shards_dir}")
+    os.makedirs(shards_dir, exist_ok=True)
+
+    jobs = []
+    for view, vpath in flat_result.items():
+        vdir = os.path.join(shards_dir, view)
+        os.makedirs(vdir, exist_ok=True)
+        jobs.append(split_video_into_shards.remote(vpath, output_dir=vdir, duration_sec=60))
+
+    shard_paths = [p for lst in ray.get(jobs) for p in lst]
+    logger.info(f"Flatten views split into {len(shard_paths)} shards in {shards_dir}")
 
     # --- STAGE C: SEQUENTIAL ANALYSIS ---
     logger.info("Launching sequential analysis tasks for each shard...")
