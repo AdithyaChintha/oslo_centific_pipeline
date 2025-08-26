@@ -40,15 +40,7 @@ def _ensure_runtime_env() -> dict:
     # package the repository root (one level above ray_jobs) so top-level
     # packages like `utils` are available to workers
     wd = str(Path(__file__).resolve().parents[1])
-    # exclude very large files/paths from the package to speed upload and avoid
-    # pushing unnecessary artifacts (e.g. .git pack files, local debs)
-    excludes = [
-        "**/.git/objects/pack/*.pack",
-        "**/.git/**",
-        "**/*.deb",
-        "**/node_modules/**",
-    ]
-    return {"working_dir": wd, "excludes": excludes}
+    return {"working_dir": wd}
 
 def opencv_tune_for_worker(num_threads: int = 1, use_opencl: bool = False):
     """Call this at the top of every Ray remote task or in the module imported by workers."""

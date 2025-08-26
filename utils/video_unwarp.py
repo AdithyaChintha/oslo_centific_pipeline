@@ -570,7 +570,7 @@ def unwarp_equirectangular_viewsP(
             "-preset",
             "ultrafast",    # fastest; for higher quality use "veryfast"/"faster" and lower CRF
             "-crf",
-            "20",           # 18–30: larger -> faster/smaller (softer image)
+            "22",           # 18–30: larger -> faster/smaller (softer image)
             "-pix_fmt",
             "yuv420p",
             "-movflags",
