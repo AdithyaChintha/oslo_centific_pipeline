@@ -40,7 +40,15 @@ def _ensure_runtime_env() -> dict:
     # package the repository root (one level above ray_jobs) so top-level
     # packages like `utils` are available to workers
     wd = str(Path(__file__).resolve().parents[1])
-    return {"working_dir": wd}
+    # exclude very large files/paths from the package to speed upload and avoid
+    # pushing unnecessary artifacts (e.g. .git pack files, local debs)
+    excludes = [
+        "**/.git/objects/pack/*.pack",
+        "**/.git/**",
+        "**/*.deb",
+        "**/node_modules/**",
+    ]
+    return {"working_dir": wd, "excludes": excludes}
 
 def opencv_tune_for_worker(num_threads: int = 1, use_opencl: bool = False):
     """Call this at the top of every Ray remote task or in the module imported by workers."""
@@ -70,10 +78,10 @@ def erp_unwarp_task(mp4_path: str,
     """
     opencv_tune_for_worker(num_threads=1)
     try:
-        from utils.video_unwarp import unwarp_equirectangular_views
+        from utils.video_unwarp import unwarp_equirectangular_viewsP
         if views is None:
             views = DEFAULT_VIEWS4_ERP
-        return unwarp_equirectangular_views(
+        return unwarp_equirectangular_viewsP(
             mp4_path=mp4_path,
             views=views,
             out_size=out_size,
