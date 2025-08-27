@@ -460,9 +460,14 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
                 f"{azure_output_prefix}/view_2_shards",
                 azure_account_name, azure_account_key
             )
+            audio_shard_urls = generate_azure_shard_urls(
+                azure_blob_client, azure_container, audio_shards,
+                f"{azure_output_prefix}/audio_shards",
+                azure_account_name, azure_account_key
+            )
         else:
             logger.warning("Azure client/prefix or account key missing — LS URLs will be local and likely won’t stream.")
-            view1_shard_urls, view2_shard_urls = {}, {}
+            view1_shard_urls, view2_shard_urls, audio_shard_urls = {}, {}, {}
         
         min_len = min(len(view1_shards), len(view2_shards), len(audio_shards))
         if min_len < len(view1_shards) or min_len < len(view2_shards) or min_len < len(audio_shards):
@@ -475,7 +480,7 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
             shard_results = process_time_aligned_shard(
                 shard_index, view1_shards[shard_index], view2_shards[shard_index], 
                 audio_shards[shard_index], output_dir,
-                view1_shard_urls.get(shard_index), view2_shard_urls.get(shard_index)
+                view1_shard_urls.get(shard_index), view2_shard_urls.get(shard_index), audio_shard_urls.get(shard_index)
             )
             label_studio_tasks.append(shard_results['label_studio_task'])
         
@@ -500,40 +505,73 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
             logger.info("🎥 Regular video file - single view processing")
             mp4_path = input_video_path
         
-        return _process_single_view(mp4_path, input_audio_path, output_dir, 
-                                  azure_blob_client, azure_container, azure_output_prefix)
+        return _process_single_view(
+                    mp4_path,
+                    input_audio_path,
+                    output_dir,
+                    azure_blob_client,
+                    azure_container,
+                    azure_output_prefix,
+                    azure_account_name,        
+                    azure_account_key          
+                )
 
-def process_time_aligned_shard(shard_index, view1_shard_path, view2_shard_path, 
-                              audio_shard_path, base_output_dir, 
-                              view1_azure_url, view2_azure_url):
+def process_time_aligned_shard(
+    shard_index,
+    view1_shard_path,
+    view2_shard_path,          # may be None for single-view
+    audio_shard_path,
+    base_output_dir,
+    view1_azure_url,
+    view2_azure_url,           # may be None/"" for single-view
+    audio_url
+):
+    """
+    Process one time-aligned shard. If `view2_shard_path` is None, this behaves as single-view,
+    but still generates the SAME consolidated LS task JSON used in dual-view.
+    """
     shard_output_dir = os.path.join(base_output_dir, f"shard_{shard_index+1}")
     shard_offset_sec = shard_index * 60
+    os.makedirs(shard_output_dir, exist_ok=True)
 
+    # --- View 1 ---
     logger.info(f"Processing view 1 of shard {shard_index+1}")
     view1_output_dir = os.path.join(shard_output_dir, "view_1")
     view1_results = process_single_shard_through_pipeline(
         view1_shard_path, audio_shard_path, view1_output_dir, shard_offset_sec, shard_index
     )
 
-    logger.info(f"Processing view 2 of shard {shard_index+1}")
-    view2_output_dir = os.path.join(shard_output_dir, "view_2")
-    view2_results = process_single_shard_through_pipeline(
-        view2_shard_path, audio_shard_path, view2_output_dir, shard_offset_sec, shard_index
-    )
+    # --- View 2 (optional) ---
+    if view2_shard_path:
+        logger.info(f"Processing view 2 of shard {shard_index+1}")
+        view2_output_dir = os.path.join(shard_output_dir, "view_2")
+        view2_results = process_single_shard_through_pipeline(
+            view2_shard_path, audio_shard_path, view2_output_dir, shard_offset_sec, shard_index
+        )
+    else:
+        logger.info(f"No view 2 for shard {shard_index+1} — running single-view consolidation")
+        view2_results = {}
 
+    # --- Consolidate & Build LS task (same function for single/dual) ---
     logger.info(f"Consolidating results for shard {shard_index+1}")
     consolidated_results = consolidate_time_segment_results(
         view1_results, view2_results, shard_index, shard_offset_sec
     )
 
     task_json_path = generate_consolidated_shard_labelstudio_task(
-        shard_output_dir, view1_azure_url, view2_azure_url, 
-        consolidated_results, shard_index+1, shard_offset_sec
+        shard_output_dir,
+        view1_azure_url,
+        (view2_azure_url or ""),   # keep key present even if blank
+        consolidated_results,
+        shard_index+1,
+        shard_offset_sec,
+        audio_url
     )
+
     return {
         "shard_index": shard_index,
         "view1_results": view1_results,
-        "view2_results": view2_results, 
+        "view2_results": view2_results,
         "consolidated_results": consolidated_results,
         "label_studio_task": task_json_path
     }
@@ -547,43 +585,40 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     os.makedirs(output_dir, exist_ok=True)
     results = {}
 
+    # Define output directories for models that need them
+    audio_output_dir = os.path.join(output_dir, "audio_output")
+    yolo_output_dir = os.path.join(output_dir, "yolo_output")
+    scene_output_dir = os.path.join(output_dir, "scene_output")
+    clap_output_dir = os.path.join(output_dir, "clap_output")
+
     # Define the prompt for scene detection
     prompt_path = "config/cosmos_prompt.yaml"
     
     # Verify prompt file exists
     ensure_prompt_file_exists(prompt_path)
     
-    # 1. Audio Diarization & PII
-    audio_output_dir = os.path.join(output_dir, "audio_output")
-    audio_task = process_audio_diarization.remote([audio_shard_path], audio_output_dir)
-    results['audio'] = ray.get(audio_task)
+    audio_ref = process_audio_diarization.remote([audio_shard_path], audio_output_dir)
+    yolo_ref  = run_yolodetect_on_shard.remote(video_shard_path, yolo_output_dir)
+    scene_ref = detect_scenes.remote(video_shard_path, prompt_path, scene_output_dir)
+    nsfw_ref  = process_video_chunks_for_nsfw.remote([video_shard_path], confidence_threshold=0.5, chunk_duration_sec=60)
+    motion_ref= compute_motion_energy.remote([video_shard_path], sensitivity_level="medium", save_detailed_data=False)
+    face_ref  = process_video_chunks_for_face_detection.remote([video_shard_path], config=None, frame_interval=30, save_frames=False, chunk_duration_sec=60)
+    clap_ref  = detect_claps_in_media.remote(audio_shard_path, clap_output_dir, threshold_bias=6000, lowcut=200, highcut=3200)
+
+    (audio_res, yolo_res, scene_res, nsfw_res, motion_res, face_res, clap_res) = ray.get(
+        [audio_ref, yolo_ref, scene_ref, nsfw_ref, motion_ref, face_ref, clap_ref]
+    )
     
-    # 2. YOLO Detection
-    yolo_output_dir = os.path.join(output_dir, "yolo_output") 
-    yolo_task = run_yolodetect_on_shard.remote(video_shard_path, yolo_output_dir)
-    results['yolo'] = ray.get(yolo_task)
-    
-    # 3. Scene Detection
-    scene_output_dir = os.path.join(output_dir, "scene_output")
-    scene_task = detect_scenes.remote(video_shard_path, prompt_path, scene_output_dir)
-    results['scene'] = ray.get(scene_task)
-    
-    # 4. NSFW Detection
-    nsfw_task = process_video_chunks_for_nsfw.remote([video_shard_path], confidence_threshold=0.5, chunk_duration_sec=60)
-    results['nsfw'] = ray.get(nsfw_task)
-    
-    # 5. Motion Energy
-    motion_task = compute_motion_energy.remote([video_shard_path], sensitivity_level="medium", save_detailed_data=False)
-    results['motion'] = ray.get(motion_task)
-    
-    # 6. Face/Age Detection
-    face_task = process_video_chunks_for_face_detection.remote([video_shard_path], config=None, frame_interval=30, save_frames=False, chunk_duration_sec=60)
-    results['face'] = ray.get(face_task)
-    
-    # 7. Clap Detection
-    clap_output_dir = os.path.join(output_dir, "clap_output")
-    clap_task = detect_claps_in_media.remote(audio_shard_path, clap_output_dir, threshold_bias=6000, lowcut=200, highcut=3200)
-    results['clap'] = ray.get(clap_task)
+    # Store results from Ray tasks
+    results = {
+        'audio': audio_res,
+        'yolo': yolo_res,
+        'scene': scene_res,
+        'nsfw': nsfw_res,
+        'motion': motion_res,
+        'face': face_res,
+        'clap': clap_res
+    }
     
     # Extract flagged segments from all models
     all_segments = []
@@ -624,7 +659,7 @@ def consolidate_time_segment_results(view1_results, view2_results, shard_index, 
 
 
 def generate_consolidated_shard_labelstudio_task(shard_output_dir, view1_azure_url, view2_azure_url, 
-                                                 consolidated_results, shard_number, shard_offset_sec):
+                                                 consolidated_results, shard_number, shard_offset_sec, audio_url):
       """
       Generate single Label Studio task with both view URLs and consolidated AI predictions
       """
@@ -636,17 +671,26 @@ def generate_consolidated_shard_labelstudio_task(shard_output_dir, view1_azure_u
       # Create task with both view URLs (matching annotation_json.json format)
       task = {
           "data": {
-              "meta": {
-                  "domain": "production",
-                  "actions": [],
-                  "annotator_a": "",
-                  "annotator_b": "",
-                  "home_identifier": f"Shard_{shard_number}",
-                  "recording_datetime": current_time
-              },
-              "video_left": view1_azure_url,
-              "video_right": view2_azure_url
+                "meta": "",  # Required empty meta field
+                # Flattened metadata keys at root level to match UI template expectations
+                "meta.home_identifier": f"Shard_{shard_number}",
+                "meta.recording_datetime": current_time,
+                "meta.domain": "production",
+                "meta.actions": "",
+                # Additional metadata (these won't show in UI but good for context)
+                "shard_number": str(shard_number),
+                "shard_offset_seconds": str(shard_offset_sec), 
+                "segments_detected": str(len(prediction_entries)),
+                "video_left": view1_azure_url,
+                "video_right": view2_azure_url,
+                "audio": audio_url,
+                "home_id": "",
+                "start_datetime": "",
+                "end_datetime": "",
+                "total_duration": "",
+                "files_deleted": [],
           },
+          
           "annotations": [],  # Empty for new tasks
           "predictions": [{"result": prediction_entries}] if prediction_entries else []
       }
@@ -1038,7 +1082,7 @@ def import_consolidated_tasks_to_labelstudio(task_file_paths):
             valid_task_files,
             "https://annotations-stg.oneforma2.com/",  # Should be configurable
             "d75a31c7994b96099cfbf7d61e15cff643943853",  # Should be from config
-            "5437"  # Should be configurable
+            "5458"  # Should be configurable
         )
         
         import_result = ray.get(import_result_ref)
@@ -1144,220 +1188,74 @@ def create_consolidated_summary(label_studio_tasks, output_dir):
             "processing_type": "shard_first_dual_view"
         }
 
-def _process_single_view(mp4_path: str, input_audio_path: str, output_dir: str, 
-                        azure_blob_client=None, azure_container=None, azure_output_prefix=None):
+def _process_single_view(
+    mp4_path: str,
+    input_audio_path: str,
+    output_dir: str,
+    azure_blob_client=None,
+    azure_container=None,
+    azure_output_prefix=None,
+    azure_account_name: str = None,
+    azure_account_key: str = None
+):
     """
-    Process a single video view through the complete AI pipeline
-    
-    Args:
-        mp4_path: Path to the MP4 video file
-        input_audio_path: Path to the audio file
-        output_dir: Output directory for results
-        azure_blob_client: Azure blob client for uploading shards
-        azure_container: Azure container name
-        azure_output_prefix: Azure output prefix
-        
-    Returns:
-        dict: Processing results summary
+    Single-view pipeline that reuses the SAME LS task creation & consolidation
+    functions used by the dual-view shard-first flow.
     """
-    
-    # --- VIDEO SHARDING ---
-    logger.info(f"Processing video: {mp4_path}")
-    
-    # Split the video into shards
+    logger.info(f"Processing single-view video: {mp4_path}")
+
+    # --- Shard both video and audio (time-aligned) ---
     shards_dir = os.path.join(output_dir, "video_shards")
     shards_audio_dir = os.path.join(output_dir, "audio_shards")
-    shard_paths_ref = split_video_into_shards.remote(mp4_path, output_dir=shards_dir, duration_sec=60)
-    shard_audio_paths_ref = split_audio_into_shards.remote(input_audio_path, output_dir=shards_audio_dir, duration_sec=60)
-    shard_paths = ray.get(shard_paths_ref)
-    shard_audio_paths = ray.get(shard_audio_paths_ref)
-    logger.info(f"Video split into {len(shard_paths)} shards in {shards_dir}")
-    logger.info(f"Audio split into {len(shard_audio_paths)} shards in {shards_audio_dir}")
+    video_shards = ray.get(split_video_into_shards.remote(mp4_path, output_dir=shards_dir, duration_sec=60))
+    audio_shards = ray.get(split_audio_into_shards.remote(input_audio_path, output_dir=shards_audio_dir, duration_sec=60))
 
-    # Upload shards to Azure and get URLs (if Azure client provided)
-    shard_urls = {}
-    if azure_blob_client and azure_container and azure_output_prefix:
-        logger.info("Uploading video shards to Azure Blob Storage...")
-        shard_urls = generate_azure_shard_urls(azure_blob_client, azure_container, shard_paths, azure_output_prefix)
-    else:
-        logger.warning("Azure Blob client not provided - using local paths for Label Studio (will not work)")
+    logger.info(f"Video split into {len(video_shards)} shards → {shards_dir}")
+    logger.info(f"Audio split into {len(audio_shards)} shards → {shards_audio_dir}")
 
-    # --- SEQUENTIAL ANALYSIS ---
-    logger.info("Launching sequential analysis tasks for each shard...")
-    
-    # Initialize result lists
-    scene_results = []
-    yolo_results = []
-    audio_results = []
-    nsfw_results = []
-    motion_results = []
-    face_results = []
-    clap_results = []
-    label_studio_tasks = []  # To hold refs for Label Studio JSON generation tasks
-    
-    # All flagged segments across all shards
-    all_flagged_segments = []
-    
-    
-
-    # Process each shard sequentially
-    for i, (shard_path, shard_audio_path) in enumerate(zip(shard_paths, shard_audio_paths)):
-        shard_output_dir = os.path.join(output_dir, f"shard_{i+1}")
-        os.makedirs(shard_output_dir, exist_ok=True)
-        shard_offset_sec = i * 60  # Each shard is 60 seconds
-        
-        logger.info(f"Processing shard {i+1}/{len(shard_paths)}: {os.path.basename(shard_path)}")
-        
-        # --- EXISTING TASKS ---
-        
-        shard_results = process_single_shard_through_pipeline(shard_path, shard_audio_path, 
-                                         shard_output_dir, shard_offset_sec)
-        
-        # After all models have run for the shard, generate its Label Studio JSON
-        all_flagged_segments.extend(shard_results['flagged_segments'])
-        
-        audio_results.append(shard_results['audio'])
-        yolo_results.append(shard_results['yolo'])
-        scene_results.append(shard_results['scene'])
-        nsfw_results.append(shard_results['nsfw'])
-        motion_results.append(shard_results['motion'])
-        face_results.append(shard_results['face'])
-        clap_results.append(shard_results['clap'])
-
-        # Generate Label Studio task
-        shard_azure_url = shard_urls.get(i, shard_path)
-        task_json_path = build_labelstudio_json_for_shard_task.remote(
-            shard_output_dir, shard_azure_url, i + 1, shard_offset_sec
+    # --- Upload shards to Azure (optional, recommended for LS streaming) ---
+    if azure_blob_client and azure_container and azure_output_prefix and azure_account_name and azure_account_key:
+        logger.info("Uploading single-view video shards to Azure Blob Storage...")
+        video_urls = generate_azure_shard_urls(
+            azure_blob_client, azure_container, video_shards,
+            f"{azure_output_prefix}/video_shards",
+            azure_account_name, azure_account_key
         )
-        label_studio_tasks.append(ray.get(task_json_path))
-
-    # --- STAGE D: CREATE MASTER TIMELINE ---
-    logger.info("Creating master flagged timeline for annotation workload reduction...")
-    
-    if all_flagged_segments:
-        # Sort segments by start time
-        all_flagged_segments.sort(key=lambda x: x['start_time'])
-        
-        # Merge overlapping segments
-        merged_segments = merge_overlapping_segments(all_flagged_segments, tol=1.0)
-        
-        # Calculate annotation workload reduction
-        total_video_duration = len(shard_paths) * 60  # 60 seconds per shard
-        total_flagged_duration = sum(seg['end_time'] - seg['start_time'] for seg in merged_segments)
-        annotation_reduction = ((total_video_duration - total_flagged_duration) / total_video_duration) * 100
-        
-        # Save master timeline
-        master_timeline_file = os.path.join(output_dir, "master_flagged_timeline.json")
-        with open(master_timeline_file, 'w') as f:
-            json.dump({
-                "video_file": mp4_path,
-                "total_duration_seconds": total_video_duration,
-                "flagged_duration_seconds": total_flagged_duration,
-                "annotation_workload_reduction": f"{annotation_reduction:.1f}%",
-                "total_flagged_segments": len(merged_segments),
-                "flagged_timeline": merged_segments,
-                "high_priority_segments": [s for s in merged_segments if s.get('priority') == 'high']
-            }, f, indent=2)
-        
-        logger.info(f"Master timeline created: {len(merged_segments)} segments")
-        logger.info(f"Annotation workload reduction: {annotation_reduction:.1f}%")
-        logger.info(f"Only {total_flagged_duration:.1f}s of {total_video_duration}s needs manual review")
-    else:
-        logger.info("No flagged segments found across all shards")
-        annotation_reduction = 0
-        merged_segments = []
-
-    # --- STAGE E: RESULTS SUMMARY ---
-    logger.info("All shards processed. Generating summary...")
-    
-    # Calculate success rates
-    successful_audio = sum(1 for result in audio_results if result is not None)
-    successful_yolo = sum(1 for result in yolo_results if result is not None)
-    successful_scene = sum(1 for result in scene_results if result is not None and result.get('processing_info', {}).get('success', False))
-    successful_nsfw = sum(1 for result in nsfw_results if result is not None and result.get("success"))
-    successful_motion = sum(1 for result in motion_results if result is not None and result.get("success") )
-    successful_face = sum(1 for result in face_results if result is not None and result.get("success") )
-    successful_clap = sum(1 for result in clap_results if result is not None and result.get("success") )
-    total_shards = len(shard_paths)
-    
-    # Log detailed results
-    logger.info(f"Processing complete:")
-    logger.info(f"  - Audio Diarization: {successful_audio}/{total_shards} successful")
-    logger.info(f"  - YOLO Detection: {successful_yolo}/{total_shards} successful")  
-    logger.info(f"  - Scene Detection: {successful_scene}/{total_shards} successful")
-    logger.info(f"  - NSFW Detection: {successful_nsfw}/{total_shards} successful")
-    logger.info(f"  - Motion Energy Analysis: {successful_motion}/{total_shards} successful")
-    logger.info(f"  - Face Age Detection: {successful_face}/{total_shards} successful")
-    logger.info(f"  - Clap Detection: {successful_clap}/{total_shards} successful")
-    total_tasks = total_shards * 7  # 7 tasks per shard
-    successful_tasks = successful_audio + successful_yolo + successful_scene + successful_nsfw + successful_motion + successful_face + successful_clap
-    
-    # Create summary
-    results_summary = {
-        'processing_summary': {
-            'total_shards': total_shards,
-            'successful_audio': successful_audio,
-            'successful_yolo': successful_yolo,
-            'successful_scene': successful_scene,
-            'successful_nsfw': successful_nsfw,
-            'successful_motion': successful_motion,
-            'successful_face': successful_face,
-            'successful_clap': successful_clap,
-            'overall_success_rate': f"{(successful_tasks / total_tasks * 100):.1f}%"
-        },
-        'annotation_summary': {
-            'total_flagged_segments': len(merged_segments),
-            'flagged_duration_seconds': sum(seg['end_time'] - seg['start_time'] for seg in merged_segments) if merged_segments else 0,
-            'annotation_workload_reduction': f"{annotation_reduction:.1f}%",
-            'high_priority_segments': len([s for s in merged_segments if s.get('priority') == 'high']) if merged_segments else 0
-        }
-    }
-    
-    
-    # Save summary to file
-    summary_file = os.path.join(output_dir, "pipeline_summary.json")
-    with open(summary_file, 'w') as f:
-        json.dump(results_summary, f, indent=2)
-    
-    logger.info(f"Pipeline summary saved to {summary_file}")
-    
-    # --- STAGE F: IMPORT TASKS TO LABEL STUDIO ---
-    logger.info("Consolidating and importing tasks to Label Studio...")
-    
-    # WARNING: Hardcoding credentials is not recommended for production.
-    # These should be loaded from a secure config or environment variables.
-    LABEL_STUDIO_URL = "https://annotations-stg.oneforma2.com/"
-    LABEL_STUDIO_API_TOKEN = "1af6610f3fa81575f5215067c8455a26682b92ae" # Replace with your actual token
-    PROJECT_ID = "5458" # Replace with your actual project ID
-
-    if LABEL_STUDIO_API_TOKEN == "d75a31c7994b96099cfbf7d61e15cff643943853":
-        logger.warning("Using a placeholder Label Studio API token. Please replace it with your actual token.")
-
-    try:
-        # Wait for all the JSON generation tasks to complete
-        json_task_paths = label_studio_tasks
-        
-        # Now, import all the generated tasks in one go
-        import_result_ref = import_to_labelstudio_task.remote(
-            json_task_paths,
-            LABEL_STUDIO_URL,
-            LABEL_STUDIO_API_TOKEN,
-            PROJECT_ID
+        audio_urls = generate_azure_shard_urls(
+            azure_blob_client, azure_container, audio_shards,
+            f"{azure_output_prefix}/audio_shards",
+            azure_account_name, azure_account_key
         )
-        
-        import_result = ray.get(import_result_ref)
-        
-        if import_result.get("success"):
-            logger.info("Successfully imported tasks to Label Studio.")
-            logger.info(f"Server response: {import_result.get('result')}")
-        else:
-            logger.error(f"Failed to import tasks to Label Studio: {import_result.get('error')}")
+    else:
+        logger.warning("Azure client/prefix or account credentials missing — LS URLs will be local and likely won’t stream.")
+        video_urls, audio_urls = {}, {}
 
-    except Exception as e:
-        logger.error(f"An error occurred during Label Studio import process: {e}")
+    # --- Process time-aligned shards using the SAME per-shard function as dual-view ---
+    label_studio_tasks = []
+    min_len = min(len(video_shards), len(audio_shards))
+    if min_len < len(video_shards) or min_len < len(audio_shards):
+        logger.warning("Shard count mismatch (video=%d, audio=%d). Truncating to %d.",
+                       len(video_shards), len(audio_shards), min_len)
 
-    logger.info("Single view pipeline complete!")
-    return results_summary
+    for idx in range(min_len):
+        shard_results = process_time_aligned_shard(
+            shard_index=idx,
+            view1_shard_path=video_shards[idx],
+            view2_shard_path=None,  # ← single-view
+            audio_shard_path=audio_shards[idx],
+            base_output_dir=output_dir,
+            view1_azure_url=video_urls.get(idx, video_shards[idx]),
+            view2_azure_url=None,   # ← single-view (kept blank in LS task)
+            audio_url=audio_urls.get(idx, audio_shards[idx])
+        )
+        label_studio_tasks.append(shard_results['label_studio_task'])
+
+    # --- Import all tasks to Label Studio (SAME function as dual-view) ---
+    import_consolidated_tasks_to_labelstudio(label_studio_tasks)
+
+    # --- Return consolidated summary (SAME function as dual-view) ---
+    return create_consolidated_summary(label_studio_tasks, output_dir)
+
 
 if __name__ == "__main__":
     # Define the input video and the main output directory

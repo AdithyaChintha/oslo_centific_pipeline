@@ -243,7 +243,7 @@ def main():
     
     # The PARENT directory for your output in Azure Blob Storage
     # Format: "container-name/path/for/all/outputs/"
-    output_parent_dir = "instavideo/krishna-test/test1/test_activity/pre-annotation-output"
+    output_parent_dir = "instavideo/krishna-test/test1/test_activity/pre-annotation-output/test_08_27"
     # ==================================================================
 
 
