@@ -141,7 +141,161 @@ outputs/
 │   ├── <video_name>_view_2_face_analysis_results.json
 │   └── <video_name>_age_detection_summary.json
 ```
+### Output JSON files:
+#### Audio and diarization model:
+```
+{
+  "shard_path": "/tmp/pipeline_output_yeeju1dh/audio_shards/VID_20250809_094836_00_045_part0.wav",
+  "shard_name": "VID_20250809_094836_00_045_part0.wav",
+  "audio_duration": 9.4506875,
+  "transcript": "It's 9.45am and we're going to buy water to make coffee.",
+  "diarization": [
+    {
+      "speaker": "Speaker 1",
+      "start_time": 0.03096875,
+      "end_time": 3.4734687500000003,
+      "duration": 3.4425000000000003
+    }
+  ],
+  "pii_detections": [],
+  "summary": {
+    "total_speakers": 1,
+    "total_segments": 1,
+    "segments_with_pii": 0,
+    "total_pii_detections": 0
+  },
+  "processing_stats": {
+    "total_processing_time": 7.484316,
+    "diarization_time": 0.348663,
+    "transcription_time": 5.873095,
+    "device_used": "cpu"
+  }
+}
+```
 
+#### clap model:
+```
+{
+  "file_path": "/tmp/pipeline_output_yeeju1dh/audio_shards/VID_20250809_094836_00_045_part0.wav",
+  "file_type": "audio",
+  "duration_seconds": 9.451,
+  "sample_rate": 16000,
+  "clap_count": 1,
+  "clap_timestamps": [
+    {
+      "timestamp_seconds": 1.408,
+      "timestamp_formatted": "00:01.408"
+    }
+  ],
+  "detection_parameters": {
+    "threshold_bias": 6000,
+    "frequency_range": {
+      "lowcut": 200,
+      "highcut": 3200
+    },
+    "debounce_time": 0.15
+  },
+  "processing_time_seconds": 0.04,
+  "output_file": "/tmp/pipeline_output_yeeju1dh/shard_1/view_1/clap_output/VID_20250809_094836_00_045_part0_clap_detection.json",
+  "processed_at": "2025-08-27T18:18:23.131071",
+  "success": true
+}
+```
+
+#### Scene detection:
+```
+{
+  "video_path": "/tmp/pipeline_output_yeeju1dh/view_1_shards/VID_20250809_094836_00_045_view1_part0.mp4",
+  "scenes": [
+    {
+      "start_time": 0.0,
+      "end_time": 2.7,
+      "description": "The frame captures a person's hand reaching out towards the sink faucet handle."
+    },
+    {
+      "start_time": 3.6,
+      "end_time": 4.5,
+      "description": "The hand grasps the faucet handle firmly and turns it clockwise, initiating the flow of water into the sink."
+    }
+  ],
+  "raw_response": "```json\n[\n  {\n    \"start_time\": 0.0,\n    \"end_time\": 2.7,\n    \"caption\": \"The frame captures a person's hand reaching out towards the sink faucet handle.\"\n  },\n  {\n    \"start_time\": 3.6,\n    \"end_time\": 4.5,\n    \"caption\": \"The hand grasps the faucet handle firmly and turns it clockwise, initiating the flow of water into the sink.\"\n  }\n]\n```",
+  "total_scenes": 2,
+  "processing_info": {
+    "model": "nvidia/Cosmos-Reason1-7B",
+    "success": true,
+    "gpu_memory_utilization": 0.25,
+    "max_model_len": 6144,
+    "scenes_extracted": 2
+  }
+}
+```
+
+#### yolo detection:
+```
+{"_meta": {"video": "/tmp/pipeline_output_yeeju1dh/view_1_shards/VID_20250809_094836_00_045_view1_part0.mp4", "model": "yolov8n.pt", "conf": 0.5, "iou": 0.5, "frame_stride": 5, "classes": null, "device": null, "base_offset": 0, "enable_tracking": true, "tracker": "ultralytics:botsort.yaml"}}
+{"t": 8.809, "ts": "00:00:08.809", "frame": 264, "cls": "person", "conf": 0.5021, "bbox": [191.04, 335.25, 449.74, 462.56]}
+{"t": 8.842, "ts": "00:00:08.842", "frame": 265, "cls": "person", "conf": 0.6589, "bbox": [175.52, 333.3, 452.91, 463.62], "track_id": 1}
+{"t": 8.876, "ts": "00:00:08.876", "frame": 266, "cls": "person", "conf": 0.5956, "bbox": [169.02, 330.69, 450.93, 463.73], "track_id": 1}
+{"t": 9.343, "ts": "00:00:09.343", "frame": 280, "cls": "pizza", "conf": 0.5208, "bbox": [28.14, 0.08, 477.39, 238.9]}
+```
+
+#### Label studio integration:
+```
+{
+  "data": {
+    "meta": "",
+    "meta.home_identifier": "Shard_1",
+    "meta.recording_datetime": "2025-08-27T18:21:11.736694Z",
+    "meta.domain": "production",
+    "meta.actions": "",
+    "shard_number": "1",
+    "shard_offset_seconds": "0",
+    "segments_detected": "2",
+    "video_left": "https://oslotestvideo.blob.core.windows.net/instavideo/instavideo/krishna-test/test1/test_activity/pre-annotation-output/test_08_27/VID_20250809_094836_00_045/view_1_shards/VID_20250809_094836_00_045_view1_part0.mp4?se=2025-11-25T18%3A18%3A20Z&sp=r&sv=2025-07-05&sr=b&sig=tdwVCT9XIRsLoy%2BLiBnOfmN1/K1bt%2Bi9ZwOFd9I6D7k%3D",
+    "video_right": "https://oslotestvideo.blob.core.windows.net/instavideo/instavideo/krishna-test/test1/test_activity/pre-annotation-output/test_08_27/VID_20250809_094836_00_045/view_2_shards/VID_20250809_094836_00_045_view2_part0.mp4?se=2025-11-25T18%3A18%3A21Z&sp=r&sv=2025-07-05&sr=b&sig=Dr7ijCVNEslO33xle0oAnWUl2wZ96kyXhoGdV6fiy5g%3D",
+    "audio": "https://oslotestvideo.blob.core.windows.net/instavideo/instavideo/krishna-test/test1/test_activity/pre-annotation-output/test_08_27/VID_20250809_094836_00_045/audio_shards/VID_20250809_094836_00_045_part0.wav?se=2025-11-25T18%3A18%3A21Z&sp=r&sv=2025-07-05&sr=b&sig=JzHf9pLTt/SQylhYYDxVXzD9HL6LFW1OAd67uaF7wo0%3D",
+    "home_id": "",
+    "start_datetime": "",
+    "end_datetime": "",
+    "total_duration": "",
+    "files_deleted": []
+  },
+  "annotations": [],
+  "predictions": [
+    {
+      "result": [
+        {
+          "id": "taxonomy_domain_actions_pred",
+          "type": "taxonomy",
+          "value": {
+            "taxonomy": [
+              [
+                "Food & Mealtime",
+                "Washing dishes"
+              ]
+            ]
+          },
+          "score": 0.8,
+          "from_name": "taxonomy_domain_actions",
+          "to_name": "video_left"
+        },
+        {
+          "id": "lighting_pred",
+          "type": "choices",
+          "value": {
+            "choices": [
+              "Bright light"
+            ]
+          },
+          "score": 0.7,
+          "from_name": "lighting",
+          "to_name": "video_left"
+        }
+      ]
+    }
+  ]
+}
+```
 ---
 
 ## 🔧 Configuration
