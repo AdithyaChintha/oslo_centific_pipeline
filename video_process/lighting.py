@@ -55,7 +55,7 @@ def _derive_thresholds_from_seconds(
     sat_high_flag: float = 25.0,
     # adaptive clamps
     base_bands: Dict[str, float] = {"dark": 70.0, "low": 110.0, "bright": 170.0},
-    max_shift: float = 15.0,   # thresholds cannot move more than ±15 from base
+    max_shift: float = 10.0,   # thresholds cannot move more than ±10 from base
 ) -> Dict[str, float]:
     """
     Derive thresholds for Dark / Low-light / Bright lighting levels.
@@ -232,7 +232,9 @@ def merge_lighting_events(
 ) -> Dict[str, Any]:
     """
     Merge consecutive seconds with the same lighting label into events.
-    If thresholds not provided, derive adaptively (with optional overrides).
+    Adds both median (*_med) and average (*_avg) stats per event, plus:
+      - brightness_range_med/avg (from p95 - p5, per second then aggregated)
+      - duration (seconds) and n_seconds
     """
     secs = per_second["seconds"]
     if not secs:
@@ -248,6 +250,22 @@ def merge_lighting_events(
     )
     labels = [_classify_row(r, thr) for r in secs]
 
+    METRIC_KEYS = ["meanY","stdY","p5","p50","p95","pct_low","pct_high","colorfulness","grayworld"]
+
+    def _attach_stats(ev: Dict[str, Any], rows: List[Dict[str, float]]) -> None:
+        """Attach *_med and *_avg for each metric key, plus brightness_range and counters."""
+        for key in METRIC_KEYS:
+            vals = [r[key] for r in rows]
+            ev[f"{key}_med"] = float(np.median(vals))
+            ev[f"{key}_avg"] = float(np.mean(vals))
+        # brightness range per second = p95 - p5; then aggregate
+        br_vals = [r["p95"] - r["p5"] for r in rows]
+        ev["brightness_range_med"] = float(np.median(br_vals))
+        ev["brightness_range_avg"] = float(np.mean(br_vals))
+        # counters
+        ev["n_seconds"] = int(len(rows))
+        ev["duration"] = float(ev["end"] - ev["start"])
+
     events = []
     cur_label = labels[0]
     start_sec = secs[0]["sec"]
@@ -259,8 +277,7 @@ def merge_lighting_events(
             if end_sec - start_sec >= thr["merge_min_sec"]:
                 in_rows = [r for r in secs if start_sec <= r["sec"] < end_sec]
                 ev = {"start": float(start_sec), "end": float(end_sec), "label": cur_label}
-                for key in ["meanY","stdY","p5","p50","p95","pct_low","pct_high","colorfulness","grayworld"]:
-                    ev[key + "_med"] = float(np.median([r[key] for r in in_rows]))
+                _attach_stats(ev, in_rows)
                 events.append(ev)
             cur_label = labels[k]
             start_sec = secs[k]["sec"]
@@ -270,11 +287,11 @@ def merge_lighting_events(
     if end_sec - start_sec >= thr["merge_min_sec"]:
         in_rows = [r for r in secs if start_sec <= r["sec"] < end_sec]
         ev = {"start": float(start_sec), "end": float(end_sec), "label": cur_label}
-        for key in ["meanY","stdY","p5","p50","p95","pct_low","pct_high","colorfulness","grayworld"]:
-            ev[key + "_med"] = float(np.median([r[key] for r in in_rows]))
+        _attach_stats(ev, in_rows)
         events.append(ev)
 
     return {"thresholds": thr, "events": events}
+
 
 # ---------- Wrapper to Save JSON (now fully configurable) ----------
 def run_lighting_two_jsons(
