@@ -471,13 +471,34 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
             duration_sec=60
         ))
 
+        # Optionally upload audio shards for LS streaming
+        if azure_blob_client and azure_container and azure_output_prefix and azure_account_name and azure_account_key:
+            audio_shard_urls = generate_azure_shard_urls(
+                azure_blob_client, azure_container, audio_shards,
+                f"{azure_output_prefix}/audio_shards",
+                azure_account_name, azure_account_key
+            )
+        else:
+            audio_shard_urls = {}
+
         # Split each unwarped view into shards and process each shard
         shards_dir = os.path.join(output_dir, "video_shards")
         os.makedirs(shards_dir, exist_ok=True)
+        label_studio_tasks = []
         for view_name, view_path in flat_result.items():
             vdir = os.path.join(shards_dir, view_name)
             os.makedirs(vdir, exist_ok=True)
             view_shards = ray.get(split_video_into_shards.remote(view_path, output_dir=vdir, duration_sec=60))
+
+            # Optionally upload video shards for LS streaming
+            if azure_blob_client and azure_container and azure_output_prefix and azure_account_name and azure_account_key:
+                view_shard_urls = generate_azure_shard_urls(
+                    azure_blob_client, azure_container, view_shards,
+                    f"{azure_output_prefix}/unwarped_shards/{view_name}",
+                    azure_account_name, azure_account_key
+                )
+            else:
+                view_shard_urls = {}
 
             for i, v_shard in enumerate(view_shards):
                 # Pair audio shard by index (fallback to last if video has more shards)
@@ -487,11 +508,23 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
                 else:
                     a_shard = input_audio_path  # fallback
 
-                shard_output_dir = os.path.join(output_dir, f"{view_name}_shard_{i+1}")
-                os.makedirs(shard_output_dir, exist_ok=True)
-                process_single_shard_through_pipeline(v_shard, a_shard, shard_output_dir, i * 60, i)
+                # Build LS task using existing consolidator for single-view
+                shard_results = process_time_aligned_shard(
+                    shard_index=i,
+                    view1_shard_path=v_shard,
+                    view2_shard_path=None,
+                    audio_shard_path=a_shard,
+                    base_output_dir=output_dir,
+                    view1_azure_url=view_shard_urls.get(i, v_shard),
+                    view2_azure_url=None,
+                    audio_url=audio_shard_urls.get(a_idx, a_shard)
+                )
+                label_studio_tasks.append(shard_results['label_studio_task'])
 
-        return {"status": "completed_unwarped_processing"}
+        # Import all generated tasks to Label Studio
+        import_consolidated_tasks_to_labelstudio(label_studio_tasks)
+
+        return create_consolidated_summary(label_studio_tasks, output_dir)
 
     elif process_dual_views and is_insv_file:
         logger.info("🎥 INSV file detected - enabling shard-first dual-view processing")
