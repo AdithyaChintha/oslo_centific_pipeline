@@ -32,9 +32,6 @@ from ray_jobs.labelstudio_tasks import build_labelstudio_json_for_shard_task, im
 from ray_jobs.video_unwarp_task import erp_unwarp_task
 
 
-# Test unwarp
-from ray_jobs.video_unwarp_task import erp_unwarp_task
-
 logger = get_logger("SimplifiedUnifiedPipeline")
 
 def clear_gpu_memory():
@@ -279,6 +276,97 @@ def generate_azure_shard_urls(azure_blob_client, container, shard_paths, output_
     return shard_urls
 
 
+def upload_output_directory_to_blob(output_dir: str, azure_blob_client, container_name: str, 
+                                   blob_base_path: str, video_name: str):
+    """
+    Upload entire output directory to Azure blob storage
+    
+    Args:
+        output_dir: Local output directory path
+        azure_blob_client: Azure blob service client
+        container_name: Azure container name
+        blob_base_path: Base blob path (e.g., "/krishna-test/test1/test_activity")
+        video_name: Video name for organizing the upload
+        
+    Returns:
+        dict: Upload results with success status and uploaded files list
+    """
+    from pathlib import Path
+    
+    logger.info(f"🔄 Uploading output directory to Azure blob storage...")
+    logger.info(f"   Local path: {output_dir}")
+    logger.info(f"   Blob path: {blob_base_path}/{video_name}")
+    
+    uploaded_files = []
+    failed_files = []
+    
+    try:
+        # Walk through all files in the output directory
+        output_path = Path(output_dir)
+        if not output_path.exists():
+            logger.error(f"Output directory does not exist: {output_dir}")
+            return {"success": False, "error": "Output directory not found"}
+        
+        for file_path in output_path.rglob('*'):
+            if file_path.is_file():
+                # Calculate relative path from output directory
+                relative_path = file_path.relative_to(output_path)
+                
+                # Create blob path
+                blob_name = f"{blob_base_path.strip('/')}/{video_name}/{relative_path}".replace("\\", "/")
+                
+                try:
+                    # Upload file to blob
+                    blob_client = azure_blob_client.get_blob_client(
+                        container=container_name, 
+                        blob=blob_name
+                    )
+                    
+                    with open(file_path, "rb") as data:
+                        blob_client.upload_blob(data, overwrite=True)
+                    
+                    uploaded_files.append({
+                        "local_path": str(file_path),
+                        "blob_path": blob_name,
+                        "size_bytes": file_path.stat().st_size
+                    })
+                    
+                    logger.debug(f"✅ Uploaded: {relative_path} -> {blob_name}")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Failed to upload {relative_path}: {e}")
+                    failed_files.append({
+                        "local_path": str(file_path),
+                        "error": str(e)
+                    })
+        
+        total_size = sum(f["size_bytes"] for f in uploaded_files)
+        
+        logger.info(f"✅ Upload completed!")
+        logger.info(f"   Files uploaded: {len(uploaded_files)}")
+        logger.info(f"   Files failed: {len(failed_files)}")
+        logger.info(f"   Total size: {total_size / (1024*1024):.2f} MB")
+        
+        return {
+            "success": len(failed_files) == 0,
+            "uploaded_files_count": len(uploaded_files),
+            "failed_files_count": len(failed_files),
+            "total_size_bytes": total_size,
+            "uploaded_files": uploaded_files,
+            "failed_files": failed_files,
+            "blob_base_path": f"{blob_base_path}/{video_name}"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to upload output directory: {e}")
+        return {
+            "success": False, 
+            "error": str(e),
+            "uploaded_files_count": len(uploaded_files),
+            "failed_files_count": len(failed_files)
+        }
+
+
 def ensure_prompt_file_exists(prompt_path: str):
     """Ensure the scene-detection prompt exists; create a default if missing."""
     if os.path.exists(prompt_path):
@@ -445,7 +533,7 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
     is_insv_file = input_video_path.lower().endswith('.insv')
     if process_dual_views is None:
         process_dual_views = is_insv_file
-
+    
     # New branch: unwarped multi-view processing for INSV
     if process_unwarped_views and is_insv_file:
         logger.info("🎥 INSV file detected - enabling unwarped view processing")
@@ -476,101 +564,101 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
 
         # Optionally upload audio shards for LS streaming
         if azure_blob_client and azure_container and azure_output_prefix and azure_account_name and azure_account_key:
-            audio_shard_urls = generate_azure_shard_urls(
+            audio_urls = generate_azure_shard_urls(
                 azure_blob_client, azure_container, audio_shards,
                 f"{azure_output_prefix}/audio_shards",
                 azure_account_name, azure_account_key
             )
         else:
-            audio_shard_urls = {}
+            audio_urls = {}
 
         # Split each unwarped view into shards and stage per-view shard lists
-        shards_dir = os.path.join(output_dir, "video_shards")
-        os.makedirs(shards_dir, exist_ok=True)
-
-        # Map: view_name -> [list of shard paths]
-        view_shards_map = {}
-        # Map: view_name -> {index -> azure url}
-        view_shard_urls_map = {}
-
+        view_shards = {}
+        view_shard_urls = {}
         for view_name, view_path in flat_result.items():
-            vdir = os.path.join(shards_dir, view_name)
-            os.makedirs(vdir, exist_ok=True)
-            v_shards = ray.get(split_video_into_shards.remote(view_path, output_dir=vdir, duration_sec=60))
-            view_shards_map[view_name] = v_shards
+            # Split this view into 60s shards
+            shards = ray.get(split_video_into_shards.remote(
+                view_path, 
+                output_dir=os.path.join(output_dir, f"{view_name}_shards"), 
+                duration_sec=60
+            ))
+            view_shards[view_name] = shards
 
-            # Optionally upload video shards for LS streaming
+            # Upload shards if Azure is configured
             if azure_blob_client and azure_container and azure_output_prefix and azure_account_name and azure_account_key:
-                view_shard_urls_map[view_name] = generate_azure_shard_urls(
-                    azure_blob_client, azure_container, v_shards,
+                view_shard_urls[view_name] = generate_azure_shard_urls(
+                    azure_blob_client, azure_container, shards,
                     f"{azure_output_prefix}/unwarped_shards/{view_name}",
                     azure_account_name, azure_account_key
                 )
             else:
-                view_shard_urls_map[view_name] = {}
+                view_shard_urls[view_name] = {}
 
-        # Determine the number of shards we can align across all views and audio
-        per_view_counts = [len(v) for v in view_shards_map.values()] if view_shards_map else [0]
-        min_len = min(per_view_counts + [len(audio_shards) if audio_shards else 0])
-        if min_len == 0:
+        # Find the minimum shard count across all views to avoid index errors
+        min_shards = min(len(shards) for shards in view_shards.values()) if view_shards else 0
+        min_shards = min(min_shards, len(audio_shards)) if audio_shards else min_shards
+
+        if min_shards == 0:
             logger.warning("No aligned shards found across views/audio for unwarped processing")
-            return {"status": "no_shards"}
+            return create_consolidated_summary([], output_dir)
 
+        logger.info(f"Processing {min_shards} aligned shards across {len(view_shards)} unwarped views")
+
+        # Process each shard index across all views
         label_studio_tasks = []
-        # Process per-shard index across all views together: one LS task per time segment
-        for i in range(min_len):
-            shard_offset_sec = i * 60
-
-            # Build dict of view -> shard path/url for this index
+        for shard_idx in range(min_shards):
+            shard_offset_sec = shard_idx * 60
+            
+            # Build dict of view -> shard URL for this index
             view_urls_for_shard = {}
             view_results_for_shard = {}
 
-            for view_name, v_shards in view_shards_map.items():
-                v_shard = v_shards[i]
-                v_url = view_shard_urls_map.get(view_name, {}).get(i, v_shard)
-                view_urls_for_shard[view_name] = v_url
+            for view_name in view_shards:
+                if shard_idx < len(view_shards[view_name]):
+                    v_shard = view_shards[view_name][shard_idx]
+                    v_url = view_shard_urls[view_name].get(shard_idx, v_shard)
+                    view_urls_for_shard[view_name] = v_url
 
-                # Pair audio shard by index (fallback to last if video has more shards)
-                a_idx = min(i, len(audio_shards) - 1) if audio_shards else 0
-                a_shard = audio_shards[a_idx] if audio_shards else input_audio_path
+                    # Pair audio shard by index
+                    a_shard = audio_shards[shard_idx] if shard_idx < len(audio_shards) else input_audio_path
 
-                # Process this view's shard through the models
-                shard_output_dir = os.path.join(output_dir, f"{view_name}_shard_{i+1}")
-                os.makedirs(shard_output_dir, exist_ok=True)
-                view_results = process_single_shard_through_pipeline(
-                    v_shard, a_shard, shard_output_dir, shard_offset_sec, i
-                )
-                view_results_for_shard[view_name] = view_results
+                    # Process this view's shard through the models
+                    shard_output_dir = os.path.join(output_dir, f"{view_name}_shard_{shard_idx+1}")
+                    os.makedirs(shard_output_dir, exist_ok=True)
+                    view_results = process_single_shard_through_pipeline(
+                        v_shard, a_shard, shard_output_dir, shard_offset_sec, shard_idx
+                    )
+                    view_results_for_shard[view_name] = view_results
 
-            # Consolidate results across all views for this shard index
-            consolidated_results = consolidate_time_segment_results_multiview(
-                view_results_for_shard, i, shard_offset_sec
-            )
+            if not view_urls_for_shard:
+                logger.warning(f"No video shards found for shard index {shard_idx}, skipping")
+                continue
 
-            # Choose up to 2 primary views for left/right for UI, keep all as extra fields
+            # For simplified processing, just use the results from first view for now
+            # TODO: Add proper multi-view consolidation like in dub.py
+            first_view_results = list(view_results_for_shard.values())[0] if view_results_for_shard else {}
+            
+            # Choose up to 2 primary views for left/right for UI
             view_names_sorted = sorted(view_urls_for_shard.keys())
             primary_left = view_urls_for_shard.get(view_names_sorted[0], "") if view_names_sorted else ""
             primary_right = view_urls_for_shard.get(view_names_sorted[1], "") if len(view_names_sorted) > 1 else ""
 
-            # Generate a single LS task containing audio + all view URLs for this shard index
-            task_json_path = generate_multiview_shard_labelstudio_task(
-                base_output_dir=output_dir,
-                shard_number=i+1,
-                shard_offset_sec=shard_offset_sec,
-                view_urls=view_urls_for_shard,
-                audio_url=audio_shard_urls.get(i, audio_shards[i]) if audio_shards else input_audio_path,
-                primary_left_url=primary_left,
-                primary_right_url=primary_right,
-                consolidated_results=consolidated_results,
-                total_shards=min_len
+            # Generate Label Studio task for this shard
+            task_json_path = generate_consolidated_shard_labelstudio_task(
+                os.path.join(output_dir, f"shard_{shard_idx+1}"),
+                primary_left,
+                primary_right,
+                first_view_results,
+                shard_idx + 1,
+                shard_offset_sec,
+                audio_urls.get(shard_idx, audio_shards[shard_idx]) if shard_idx < len(audio_shards) else ""
             )
-            label_studio_tasks.append(task_json_path)
-
-        # Import all generated tasks to Label Studio in one batch
-        import_consolidated_tasks_to_labelstudio(label_studio_tasks)
+            
+            if task_json_path:
+                label_studio_tasks.append(task_json_path)
 
         return create_consolidated_summary(label_studio_tasks, output_dir)
-
+        
     elif process_dual_views and is_insv_file:
         logger.info("🎥 INSV file detected - enabling shard-first dual-view processing")
         
@@ -612,23 +700,246 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
             logger.warning("Shard count mismatch (v1=%d, v2=%d, audio=%d). Truncating to %d.",
                            len(view1_shards), len(view2_shards), len(audio_shards), min_len)
                            
-        # Process time-aligned shards
+        # Process time-aligned shards with enhanced first/last shard clap detection
         label_studio_tasks = []
+        consolidated_json_paths = []
+        
+        logger.info(f"🎬 Processing {min_len} shards with enhanced first/last shard clap detection")
+        logger.info(f"🎯 First shard: array[0] = shard {1}")
+        logger.info(f"🎯 Last shard: array[-1] = shard {min_len}")
+        
         for shard_index in range(min_len):
             shard_results = process_time_aligned_shard(
                 shard_index, view1_shards[shard_index], view2_shards[shard_index], 
                 audio_shards[shard_index], output_dir,
-                view1_shard_urls.get(shard_index), view2_shard_urls.get(shard_index), audio_shard_urls.get(shard_index)
+                view1_shard_urls.get(shard_index), view2_shard_urls.get(shard_index), audio_shard_urls.get(shard_index),
+                total_shard_count=min_len  # Pass total shard count for first/last identification
             )
             label_studio_tasks.append(shard_results['label_studio_task'])
+            consolidated_json_paths.append(shard_results['consolidated_model_results_json'])
+        
+        # Generate final combined JSON with all shards
+        generate_final_combined_model_results_json(output_dir, consolidated_json_paths)
         
         # Import consolidated tasks to Label Studio
         import_consolidated_tasks_to_labelstudio(label_studio_tasks)
         
+        # Upload output directory to Azure blob storage
+        if azure_blob_client and azure_container:
+            video_name = os.path.basename(output_dir)
+            upload_result = upload_output_directory_to_blob(
+                output_dir, azure_blob_client, azure_container,
+                "krishna-test/test1/test_activity", video_name
+            )
+            logger.info(f"📤 Upload result: {'✅ Success' if upload_result['success'] else '❌ Failed'}")
+            if not upload_result['success']:
+                logger.error(f"Upload error: {upload_result.get('error', 'Unknown error')}")
+        
         return create_consolidated_summary(label_studio_tasks, output_dir)
+        
     else:
-        logger.warning("Non-INSV input or unsupported mode. Only dual-view or unwarped multi-view for INSV are supported.")
-        return {"status": "skipped", "reason": "non_insv_or_unsupported"}
+        # Single view processing (original logic)
+        if is_insv_file:
+            logger.info("🎥 INSV file detected - processing single view only")
+            mp4_result_ref = convert_insv_to_dual_mp4.remote(input_video_path)
+            mp4_result = ray.get(mp4_result_ref)
+            
+            if mp4_result.get('success', False):
+                mp4_path = mp4_result['output_view_1']  # Use the first view for processing
+                logger.info(f"Using view 1 path for processing: {mp4_path}")
+            else:
+                raise RuntimeError(f"Failed to convert INSV file: {mp4_result.get('error', 'Unknown error')}")
+        else:
+            logger.info("🎥 Regular video file - single view processing")
+            mp4_path = input_video_path
+        
+        return _process_single_view(
+                    mp4_path,
+                    input_audio_path,
+                    output_dir,
+                    azure_blob_client,
+                    azure_container,
+                    azure_output_prefix,
+                    azure_account_name,        
+                    azure_account_key          
+                )
+
+def generate_consolidated_model_results_json(shard_output_dir, shard_number, view1_results, view2_results, total_shards=None):
+    """
+    Generate consolidated JSON file with view1 and view2 as top-level keys,
+    containing all individual model results.
+    
+    Args:
+        shard_output_dir: Directory to save the consolidated JSON
+        shard_number: Shard number for filename
+        view1_results: Results from view 1 processing
+        view2_results: Results from view 2 processing (may be empty for single-view)
+        total_shards: Total number of shards in the processing job
+        
+    Returns:
+        Path to the generated consolidated JSON file
+    """
+    # Extract clap detection flags from view1_results
+    detection_flags = view1_results.get('detection_flags', {
+        "is_first_shard": False,
+        "is_last_shard": False,
+        "is_intro_statement_there": False,
+        "intro_transcript": "",
+        "shard_index": shard_number - 1,
+        "shard_type": "middle",
+        "is_first_shard_processed": False,
+        "is_last_shard_processed": False
+    })
+    
+    consolidated_data = {
+        "shard_info": {
+            "shard_number": shard_number,
+            "shard_id": shard_number,
+            "total_shards": total_shards,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "processing_type": "dual_view" if view2_results else "single_view"
+        },
+        "detection_flags": detection_flags,
+        "view1": {
+            "audio": view1_results.get('audio', {}),
+            "yolo": view1_results.get('yolo', {}),
+            "scene": view1_results.get('scene', {}),
+            "nsfw": view1_results.get('nsfw', {}),
+            "motion": view1_results.get('motion', {}),
+            "face": view1_results.get('face', {}),
+            "clap": view1_results.get('clap', {})
+        }
+    }
+    
+    # Add view2 data if available
+    if view2_results:
+        consolidated_data["view2"] = {
+            "audio": view2_results.get('audio', {}),
+            "yolo": view2_results.get('yolo', {}),
+            "scene": view2_results.get('scene', {}),
+            "nsfw": view2_results.get('nsfw', {}),
+            "motion": view2_results.get('motion', {}),
+            "face": view2_results.get('face', {}),
+            "clap": view2_results.get('clap', {})
+        }
+    else:
+        # For single-view, still include view2 key but mark as not processed
+        consolidated_data["view2"] = {
+            "processing_status": "not_processed_single_view_mode"
+        }
+    
+    # Save consolidated JSON
+    json_file = os.path.join(shard_output_dir, f"shard_{shard_number}_consolidated_model_results.json")
+    with open(json_file, 'w') as f:
+        json.dump(consolidated_data, f, indent=2)
+    
+    logger.info(f"Consolidated model results saved to: {json_file}")
+    return json_file
+
+
+def generate_final_combined_model_results_json(output_dir, consolidated_json_paths):
+    """
+    Generate final combined JSON file containing all shards' model results.
+    
+    Args:
+        output_dir: Base output directory to save the final combined JSON
+        consolidated_json_paths: List of paths to individual shard consolidated JSONs
+        
+    Returns:
+        Path to the generated final combined JSON file
+    """
+    logger.info(f"Generating final combined model results JSON with {len(consolidated_json_paths)} shards")
+    
+    final_combined_data = {
+        "pipeline_info": {
+            "total_shards": len(consolidated_json_paths),
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "description": "Combined model results from all processed shards"
+        }
+    }
+    
+    # Initialize summary counters for clap detection and intro statements
+    first_shard_clap_detected = False
+    last_shard_clap_detected = False
+    intro_statement_detected = False
+    intro_transcript_text = ""
+    
+    # Load and combine all shard data
+    for json_path in consolidated_json_paths:
+        if json_path and os.path.exists(json_path):
+            try:
+                with open(json_path, 'r') as f:
+                    shard_data = json.load(f)
+                
+                shard_number = shard_data.get('shard_info', {}).get('shard_number', 'unknown')
+                shard_key = f"shard_{shard_number}"
+                
+                # Extract clap detection flags for this shard
+                clap_flags = shard_data.get('detection_flags', {})
+                
+                # Create base shard data structure
+                shard_data_structure = {
+                    "view1": shard_data.get('view1', {}),
+                    "view2": shard_data.get('view2', {})
+                }
+                
+                # Only include detection_flags for first and last shards
+                is_first_shard_processed = clap_flags.get('is_first_shard_processed', False)
+                is_last_shard_processed = clap_flags.get('is_last_shard_processed', False)
+                
+                if is_first_shard_processed or is_last_shard_processed:
+                    shard_data_structure["detection_flags"] = clap_flags
+                    shard_type = clap_flags.get('shard_type', 'unknown')
+                    
+                    # Update summary counters
+                    if is_first_shard_processed:
+                        first_shard_clap_detected = clap_flags.get('is_first_shard', False)
+                        intro_statement_detected = clap_flags.get('is_intro_statement_there', False)
+                        intro_transcript_text = clap_flags.get('intro_transcript', '')
+                    
+                    if is_last_shard_processed:
+                        last_shard_clap_detected = clap_flags.get('is_last_shard', False)
+                    
+                    logger.info(f"📊 Including detection_flags for {shard_type} shard {shard_number}")
+                
+                final_combined_data[shard_key] = shard_data_structure
+                
+                logger.info(f"Added shard {shard_number} data to final combined JSON")
+                
+            except Exception as e:
+                logger.error(f"Failed to load shard JSON {json_path}: {e}")
+        else:
+            logger.warning(f"Shard JSON not found or invalid: {json_path}")
+    
+    # Add overall summary for clap detection and intro statements
+    final_combined_data["overall_summary"] = {
+        "clap_detection": {
+            "first_shard_clap_detected": first_shard_clap_detected,
+            "last_shard_clap_detected": last_shard_clap_detected,
+            "both_first_and_last_claps": first_shard_clap_detected and last_shard_clap_detected
+        },
+        "intro_statement": {
+            "intro_statement_detected": intro_statement_detected,
+            "intro_transcript": intro_transcript_text
+        }
+    }
+    
+    # Save final combined JSON
+    final_json_file = os.path.join(output_dir, "final_combined_all_shards_model_results.json")
+    with open(final_json_file, 'w') as f:
+        json.dump(final_combined_data, f, indent=2)
+    
+    logger.info(f"🎉 Final combined model results saved to: {final_json_file}")
+    logger.info(f"📊 Contains results from {len(consolidated_json_paths)} shards with all model outputs")
+    logger.info(f"🔍 OVERALL SUMMARY:")
+    logger.info(f"   🎬 First shard clap detected: {'✅ YES' if first_shard_clap_detected else '❌ NO'}")
+    logger.info(f"   🎬 Last shard clap detected: {'✅ YES' if last_shard_clap_detected else '❌ NO'}")
+    logger.info(f"   🗣️ Intro statement detected: {'✅ YES' if intro_statement_detected else '❌ NO'}")
+    if intro_transcript_text:
+        logger.info(f"   📝 Intro transcript: '{intro_transcript_text}'")
+    
+    return final_json_file
+
 
 def process_time_aligned_shard(
     shard_index,
@@ -638,15 +949,40 @@ def process_time_aligned_shard(
     base_output_dir,
     view1_azure_url,
     view2_azure_url,           # may be None/"" for single-view
-    audio_url
+    audio_url,
+    total_shard_count=None     # Add total shard count for first/last identification
 ):
     """
     Process one time-aligned shard. If `view2_shard_path` is None, this behaves as single-view,
     but still generates the SAME consolidated LS task JSON used in dual-view.
+    
+    Enhanced with first/last shard clap detection.
     """
     shard_output_dir = os.path.join(base_output_dir, f"shard_{shard_index+1}")
     shard_offset_sec = shard_index * 60
     os.makedirs(shard_output_dir, exist_ok=True)
+
+    # --- ENHANCED FIRST/LAST SHARD CLAP DETECTION ---
+    # Determine if this is first or last shard using array indexing logic
+    is_first_shard = (shard_index == 0)  # array[0]
+    is_last_shard = (total_shard_count and shard_index == total_shard_count - 1)  # array[-1]
+    
+    # Initialize clap detection flags
+    clap_detected_in_first_shard = False
+    clap_detected_in_last_shard = False
+
+    if is_first_shard or is_last_shard:
+        shard_type = "first" if is_first_shard else "last"
+        logger.info(f"🔍 CLAP DETECTION for {shard_type} shard {shard_index+1}")
+        
+        # Run clap detection on this shard's audio using existing clap results from normal pipeline
+        # We'll get the clap results from the normal pipeline processing
+        if is_first_shard:
+            logger.info(f"🎬 FIRST SHARD - will check clap detection results")
+        else:  # is_last_shard
+            logger.info(f"🎬 LAST SHARD - will check clap detection results")
+    else:
+        logger.info(f"ℹ️ Shard {shard_index+1} is middle shard - no special clap processing")
 
     # --- View 1 ---
     logger.info(f"Processing view 1 of shard {shard_index+1}")
@@ -665,6 +1001,86 @@ def process_time_aligned_shard(
     else:
         logger.info(f"No view 2 for shard {shard_index+1} — running single-view consolidation")
         view2_results = {}
+
+    # --- EXTRACT CLAP DETECTION RESULTS FOR FIRST/LAST SHARDS ---
+    # Initialize intro statement flag
+    is_intro_statement_there = False
+    intro_transcript = ""
+    
+    if is_first_shard or is_last_shard:
+        # Extract clap detection results from the normal pipeline processing
+        clap_results = view1_results.get('clap', {})
+        clap_count = clap_results.get('clap_count', 0) if clap_results else 0
+        clap_detected = clap_count > 0
+        
+        if is_first_shard:
+            clap_detected_in_first_shard = clap_detected
+            logger.info(f"🎬 FIRST SHARD clap detection: {'✅ DETECTED' if clap_detected else '❌ NOT DETECTED'} ({clap_count} claps)")
+            
+            # --- DETECT INTRO STATEMENT IN FIRST SHARD ---
+            logger.info(f"🎤 ANALYZING FIRST SHARD for intro statement...")
+            
+            # Check audio results from view1 for transcript
+            audio_results = view1_results.get('audio', [])
+            if isinstance(audio_results, list) and audio_results:
+                audio_result = audio_results[0]  # Get first audio result
+                transcript = audio_result.get('transcript', '').strip()
+                
+                if transcript:
+                    intro_transcript = transcript
+                    
+                    # Detect intro statements using common intro phrases and patterns
+                    intro_keywords = [
+                        "i'm going to", "i will", "today we", "welcome", "hello", "hi there",
+                        "let's", "we're going to", "this is", "in this", "i am going to",
+                        "we will", "starting with", "first we", "beginning", "introduction"
+                    ]
+                    
+                    transcript_lower = transcript.lower()
+                    
+                    # Check for intro keywords or if it's a substantial opening statement
+                    has_intro_keywords = any(keyword in transcript_lower for keyword in intro_keywords)
+                    has_meaningful_content = len(transcript.strip()) > 10  # More than just a few words
+                    
+                    is_intro_statement_there = has_intro_keywords or has_meaningful_content
+                    
+                    logger.info(f"🗣️ INTRO STATEMENT: {'✅ DETECTED' if is_intro_statement_there else '❌ NOT DETECTED'}")
+                    logger.info(f"📝 Transcript: '{transcript}'")
+                    
+                    if has_intro_keywords:
+                        matched_keywords = [kw for kw in intro_keywords if kw in transcript_lower]
+                        logger.info(f"🔤 Intro keywords found: {matched_keywords}")
+                else:
+                    logger.info(f"📝 No transcript found in first shard")
+            else:
+                logger.info(f"📝 No audio results found in first shard")
+                
+        else:  # is_last_shard
+            clap_detected_in_last_shard = clap_detected
+            logger.info(f"🎬 LAST SHARD clap detection: {'✅ DETECTED' if clap_detected else '❌ NOT DETECTED'} ({clap_count} claps)")
+
+    # --- CREATE CLAP DETECTION FLAGS ---
+    detection_flags = {
+        "is_first_shard": clap_detected_in_first_shard,
+        "is_last_shard": clap_detected_in_last_shard,
+        "is_intro_statement_there": is_intro_statement_there,
+        "intro_transcript": intro_transcript,
+        "shard_index": shard_index,
+        "shard_type": "first" if is_first_shard else ("last" if is_last_shard else "middle"),
+        "is_first_shard_processed": is_first_shard,
+        "is_last_shard_processed": is_last_shard
+    }
+    
+    # Add flags to view1_results for inclusion in consolidated JSON
+    view1_results['detection_flags'] = detection_flags
+    if view2_results:
+        view2_results['detection_flags'] = detection_flags
+
+    # --- Generate Consolidated Model Results JSON ---
+    logger.info(f"Generating consolidated model results JSON for shard {shard_index+1}")
+    consolidated_json_path = generate_consolidated_model_results_json(
+        shard_output_dir, shard_index+1, view1_results, view2_results, total_shard_count
+    )
 
     # --- Consolidate & Build LS task (same function for single/dual) ---
     logger.info(f"Consolidating results for shard {shard_index+1}")
@@ -687,7 +1103,9 @@ def process_time_aligned_shard(
         "view1_results": view1_results,
         "view2_results": view2_results,
         "consolidated_results": consolidated_results,
-        "label_studio_task": task_json_path
+        "label_studio_task": task_json_path,
+        "consolidated_model_results_json": consolidated_json_path,
+        "detection_flags": detection_flags
     }
 
 
@@ -704,6 +1122,14 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     yolo_output_dir = os.path.join(output_dir, "yolo_output")
     scene_output_dir = os.path.join(output_dir, "scene_output")
     clap_output_dir = os.path.join(output_dir, "clap_output")
+    nsfw_output_dir = os.path.join(output_dir, "nsfw_output")
+    motion_output_dir = os.path.join(output_dir, "motion_output")
+    face_output_dir = os.path.join(output_dir, "face_output")
+    
+    # Create output directories
+    os.makedirs(nsfw_output_dir, exist_ok=True)
+    os.makedirs(motion_output_dir, exist_ok=True)
+    os.makedirs(face_output_dir, exist_ok=True)
 
     # Define the prompt for scene detection
     prompt_path = "config/cosmos_prompt.yaml"
@@ -733,6 +1159,30 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
         'face': face_res,
         'clap': clap_res
     }
+    
+    # Save individual model results to JSON files (following ray_pipeline_testing_old.py pattern)
+    video_name = os.path.splitext(os.path.basename(video_shard_path))[0]
+    
+    # Save NSFW results
+    if nsfw_res and nsfw_res.get("success"):
+        nsfw_file = os.path.join(nsfw_output_dir, f"{video_name}_nsfw_results.json")
+        with open(nsfw_file, 'w') as f:
+            json.dump(nsfw_res, f, indent=2)
+        logger.info(f"NSFW results saved to: {nsfw_file}")
+    
+    # Save Motion Energy results
+    if motion_res and motion_res.get("success"):
+        motion_file = os.path.join(motion_output_dir, f"{video_name}_motion_results.json")
+        with open(motion_file, 'w') as f:
+            json.dump(motion_res, f, indent=2)
+        logger.info(f"Motion energy results saved to: {motion_file}")
+    
+    # Save Face Age Detection results
+    if face_res and face_res.get("success"):
+        face_file = os.path.join(face_output_dir, f"{video_name}_face_results.json")
+        with open(face_file, 'w') as f:
+            json.dump(face_res, f, indent=2)
+        logger.info(f"Face detection results saved to: {face_file}")
     
     # Extract flagged segments from all models
     all_segments = []
@@ -816,61 +1266,6 @@ def generate_consolidated_shard_labelstudio_task(shard_output_dir, view1_azure_u
 
       logger.info(f"Generated consolidated Label Studio task for shard {shard_number} with {len(prediction_entries)} predictions")
       return task_file
-
-def generate_multiview_shard_labelstudio_task(
-    base_output_dir: str,
-    shard_number: int,
-    shard_offset_sec: int,
-    view_urls: dict,
-    audio_url: str,
-    primary_left_url: str,
-    primary_right_url: str,
-    consolidated_results: dict,
-    total_shards: int
-):
-    """
-    Build a single LS task for a shard that includes audio and multiple video views in one request.
-    Adds shard_id and total_shards to the task data for identification.
-    """
-    current_time = datetime.utcnow().isoformat() + "Z"
-
-    # Use the existing prediction consolidator for up to two primary views if available
-    prediction_entries = consolidated_results.get('consolidated_predictions', []) or []
-
-    # Prepare data block with primary left/right plus extra views as additional fields
-    data_block = {
-        "meta": "",
-        "meta.home_identifier": f"Shard_{shard_number}",
-        "meta.recording_datetime": current_time,
-        "meta.domain": "production",
-        "meta.actions": "",
-        "shard_number": str(shard_number),
-        "shard_offset_seconds": str(shard_offset_sec),
-        "segments_detected": str(len(prediction_entries)),
-        "shard_id": str(shard_number),
-        "total_shards": str(total_shards),
-        "video_left": primary_left_url or "",
-        "video_right": primary_right_url or "",
-        "audio": audio_url or "",
-    }
-
-    # Attach additional views as dedicated fields, e.g., video_view_front, video_view_right, etc.
-    for view_name, url in (view_urls or {}).items():
-        data_block[f"video_view_{view_name}"] = url
-
-    task = {
-        "data": data_block,
-        "annotations": [],
-        "predictions": [{"result": prediction_entries}] if prediction_entries else []
-    }
-
-    task_file = os.path.join(base_output_dir, f"multiview_shard_{shard_number}_labelstudio_task.json")
-    with open(task_file, 'w') as f:
-        json.dump(task, f, indent=2)
-    logger.info(
-        f"Generated multi-view Label Studio task for shard {shard_number} with {len(view_urls or {})} views and audio"
-    )
-    return task_file
 
 def create_consolidated_predictions(view1_results, view2_results):
     """
@@ -1346,7 +1741,7 @@ def create_consolidated_summary(label_studio_tasks, output_dir):
         logger.info(f"💾 Summary saved to: {summary_file}")
         
         return consolidated_results
-        
+
     except Exception as e:
         logger.error(f"Failed to create consolidated summary: {e}")
         # Return basic summary even if detailed processing fails
@@ -1357,39 +1752,153 @@ def create_consolidated_summary(label_studio_tasks, output_dir):
             "processing_type": "shard_first_dual_view"
         }
 
-def _process_single_view(*args, **kwargs):
-    """Single-view flow disabled; only dual-view or unwarped multi-view supported."""
-    logger.warning("Single-view flow is disabled; skipping.")
-    return {"status": "unsupported_single_view"}
-def consolidate_time_segment_results_multiview(view_results_by_view: dict, shard_index: int, shard_offset_sec: int):
+def _process_single_view(
+    mp4_path: str,
+    input_audio_path: str,
+    output_dir: str,
+    azure_blob_client=None,
+    azure_container=None,
+    azure_output_prefix=None,
+    azure_account_name: str = None,
+    azure_account_key: str = None
+):
     """
-    Consolidate segments across an arbitrary number of views for a given shard index.
-    Produces merged_flagged_segments using existing dual-view merger (works for N views).
+    Single-view pipeline that reuses the SAME LS task creation & consolidation
+    functions used by the dual-view shard-first flow.
     """
-    all_segments = []
-    for view_name, results in (view_results_by_view or {}).items():
-        for seg in results.get('flagged_segments', []):
-            all_segments.append({**seg, "source_view": view_name})
+    logger.info(f"Processing single-view video: {mp4_path}")
 
-    merged = merge_overlapping_segments_dual_view(all_segments)
-    return {
-        "shard_index": shard_index,
-        "shard_offset_sec": shard_offset_sec,
-        "time_range": f"{shard_offset_sec}-{shard_offset_sec + 60}s",
-        "merged_flagged_segments": merged,
-        "consolidated_predictions": []  # predictions are added in task builder
-    }
+    # --- Shard both video and audio (time-aligned) ---
+    shards_dir = os.path.join(output_dir, "video_shards")
+    shards_audio_dir = os.path.join(output_dir, "audio_shards")
+    video_shards = ray.get(split_video_into_shards.remote(mp4_path, output_dir=shards_dir, duration_sec=60))
+    audio_shards = ray.get(split_audio_into_shards.remote(input_audio_path, output_dir=shards_audio_dir, duration_sec=60))
 
+    logger.info(f"Video split into {len(video_shards)} shards → {shards_dir}")
+    logger.info(f"Audio split into {len(audio_shards)} shards → {shards_audio_dir}")
+
+    # --- Upload shards to Azure (optional, recommended for LS streaming) ---
+    if azure_blob_client and azure_container and azure_output_prefix and azure_account_name and azure_account_key:
+        logger.info("Uploading single-view video shards to Azure Blob Storage...")
+        video_urls = generate_azure_shard_urls(
+            azure_blob_client, azure_container, video_shards,
+            f"{azure_output_prefix}/video_shards",
+            azure_account_name, azure_account_key
+        )
+        audio_urls = generate_azure_shard_urls(
+            azure_blob_client, azure_container, audio_shards,
+            f"{azure_output_prefix}/audio_shards",
+            azure_account_name, azure_account_key
+        )
+    else:
+        logger.warning("Azure client/prefix or account credentials missing — LS URLs will be local and likely won’t stream.")
+        video_urls, audio_urls = {}, {}
+
+    # --- Process time-aligned shards using the SAME per-shard function as dual-view ---
+    label_studio_tasks = []
+    consolidated_json_paths = []
+    min_len = min(len(video_shards), len(audio_shards))
+    if min_len < len(video_shards) or min_len < len(audio_shards):
+        logger.warning("Shard count mismatch (video=%d, audio=%d). Truncating to %d.",
+                       len(video_shards), len(audio_shards), min_len)
+
+    logger.info(f"🎬 Processing {min_len} single-view shards with enhanced first/last shard clap detection")
+    logger.info(f"🎯 First shard: array[0] = shard {1}")
+    logger.info(f"🎯 Last shard: array[-1] = shard {min_len}")
+    
+    for idx in range(min_len):
+        shard_results = process_time_aligned_shard(
+            shard_index=idx,
+            view1_shard_path=video_shards[idx],
+            view2_shard_path=None,  # ← single-view
+            audio_shard_path=audio_shards[idx],
+            base_output_dir=output_dir,
+            view1_azure_url=video_urls.get(idx, video_shards[idx]),
+            view2_azure_url=None,   # ← single-view (kept blank in LS task)
+            audio_url=audio_urls.get(idx, audio_shards[idx]),
+            total_shard_count=min_len  # Pass total shard count for first/last identification
+        )
+        label_studio_tasks.append(shard_results['label_studio_task'])
+        consolidated_json_paths.append(shard_results['consolidated_model_results_json'])
+
+    # Generate final combined JSON with all shards
+    generate_final_combined_model_results_json(output_dir, consolidated_json_paths)
+
+    # --- Import all tasks to Label Studio (SAME function as dual-view) ---
+    import_consolidated_tasks_to_labelstudio(label_studio_tasks)
+
+    # Upload output directory to Azure blob storage
+    if azure_blob_client and azure_container:
+        video_name = os.path.basename(output_dir)
+        upload_result = upload_output_directory_to_blob(
+            output_dir, azure_blob_client, azure_container,
+            "krishna-test/test1/test_activity", video_name
+        )
+        logger.info(f"📤 Upload result: {'✅ Success' if upload_result['success'] else '❌ Failed'}")
+        if not upload_result['success']:
+            logger.error(f"Upload error: {upload_result.get('error', 'Unknown error')}")
+
+    # --- Return consolidated summary (SAME function as dual-view) ---
+    return create_consolidated_summary(label_studio_tasks, output_dir)
 
 
 if __name__ == "__main__":
     # Define the input video and the main output directory
     INPUT_VIDEO = "/dev/shm/cleaning-surfaces-20250819_1325-video.insv_1.insv"
     INPUT_AUDIO = "/home/nvcoe_admin/arian/cleaning-surfaces-20250819_1325-audio.WAV"
-    OUTPUT_DIR = "/dev/shm/outputs/simplified_unified_pipeline_output"
     
+    # Use the same 'out' directory structure as blob_polling.py for consistency
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    output_base_dir = os.path.join(current_dir, "out")
+    
+    # Create video-specific directory with timestamp (same format as blob_polling.py)
+    from datetime import datetime
+    video_name = os.path.splitext(os.path.basename(INPUT_VIDEO))[0]
+    OUTPUT_DIR = os.path.join(output_base_dir, f"video_{video_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+    
+    # Ensure the base output directory exists
+    os.makedirs(output_base_dir, exist_ok=True)
+
     try:
-        results = pipeline_main(INPUT_VIDEO, INPUT_AUDIO, OUTPUT_DIR)
+        # Configure Azure blob client for upload functionality (optional)
+        azure_blob_client = None
+        azure_container = None
+        azure_account_name = None
+        azure_account_key = None
+        
+        # Try to load Azure configuration if available
+        try:
+            import yaml
+            config_path = os.path.join(current_dir, "blobfuse2_config.yaml")
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = yaml.safe_load(f)
+                    azure_config = config.get('azstorage', {})
+                    
+                from azure.storage.blob import BlobServiceClient
+                azure_account_name = azure_config.get('account-name')
+                azure_account_key = azure_config.get('account-key')
+                azure_container = azure_config.get('container')
+                
+                if azure_account_name and azure_account_key:
+                    account_url = f"https://{azure_account_name}.blob.core.windows.net"
+                    azure_blob_client = BlobServiceClient(account_url=account_url, credential=azure_account_key)
+                    logger.info(f"✅ Azure blob client configured for upload")
+                else:
+                    logger.warning("⚠️ Azure credentials missing - output will not be uploaded to blob storage")
+            else:
+                logger.warning(f"⚠️ Azure config file not found: {config_path} - output will not be uploaded")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to configure Azure blob client: {e} - output will not be uploaded")
+        
+        results = pipeline_main(
+            INPUT_VIDEO, INPUT_AUDIO, OUTPUT_DIR,
+            azure_blob_client=azure_blob_client,
+            azure_container=azure_container,
+            azure_output_prefix=f"processed_outputs/{video_name}",
+            azure_account_name=azure_account_name,
+            azure_account_key=azure_account_key
+        )
         
         print(f"\nSimplified Pipeline completed!")
         print(f"Processing Summary:")
