@@ -1,0 +1,44 @@
+<View>
+  <!-- Context header showing shard placement -->
+  <Header value="Shard: $shard_id / $total_shards (offset: $shard_offset_seconds s)"/>
+
+  <!-- Primary videos kept for backward compatibility with predictions targeting to_name=video_left -->
+  <View style="display:flex; gap: 12px;">
+    <Video name="video_left" value="$video_left"/>
+    <Video name="video_right" value="$video_right"/>
+  </View>
+
+  <!-- Additional multi-view videos (rendered read-only unless you bind controls) -->
+  <View style="display:grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 12px;">
+    <Video name="video_view_front" value="$video_view_front"/>
+    <Video name="video_view_right" value="$video_view_right"/>
+    <Video name="video_view_back" value="$video_view_back"/>
+    <Video name="video_view_left" value="$video_view_left"/>
+  </View>
+
+  <!-- Audio track for the same shard -->
+  <Audio name="audio" value="$audio"/>
+
+  <!-- Existing controls (minimal) so predictions to_name=video_left render. 
+       Expand this to full taxonomy/choices the project uses. -->
+  <View style="margin-top: 12px;">
+    <Choices name="lighting" toName="video_left" choice="single" showInline="true">
+      <Choice value="Bright light"/>
+      <Choice value="Low light"/>
+    </Choices>
+    <Choices name="nudity" toName="video_left" choice="multiple" showInline="true">
+      <Choice value="Nudity present"/>
+    </Choices>
+    <Choices name="minors" toName="video_left" choice="multiple" showInline="true">
+      <Choice value="Minor present"/>
+    </Choices>
+    <Choices name="pii" toName="video_left" choice="multiple" showInline="true">
+      <Choice value="Full names"/>
+    </Choices>
+    <Choices name="no_signal_flag" toName="video_left" choice="multiple" showInline="true">
+      <Choice value="No Signal present"/>
+    </Choices>
+    <Taxonomy name="taxonomy_domain_actions" toName="video_left"/> 
+  </View>
+</View>
+
