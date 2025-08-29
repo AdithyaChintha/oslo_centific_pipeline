@@ -29,9 +29,27 @@ from __future__ import annotations
 from typing import Dict, Optional, Sequence, Tuple, List
 from pathlib import Path
 
+import os
 import cv2
 import numpy as np
 from math import tan, atan, radians, degrees
+
+# ------------------------- Optimization -------------------------
+# 1) Enable OpenCV optimizations (IPP/SIMD etc., depends on how OpenCV was built)
+cv2.setUseOptimized(True)
+print("useOptimized:", cv2.useOptimized())  # True means optimizations are on
+
+# 2) Set the number of OpenCV internal threads (affects parallel_for_ ops like remap)
+cv2.setNumThreads(max(1, (os.cpu_count() or 8) - 1))
+print("numThreads:", cv2.getNumThreads())
+
+# (Optional) 3) Enable OpenCL if your OpenCV build supports it
+try:
+    if cv2.ocl.haveOpenCL():
+        cv2.ocl.setUseOpenCL(True)
+        print("useOpenCL:", cv2.ocl.useOpenCL())
+except Exception:
+    pass
 
 # ------------------------- math / geometry helpers -------------------------
 
@@ -456,6 +474,125 @@ def unwarp_equirectangular_views(mp4_path: str,
     cap.release()
     for w in writers.values(): w.release()
     print(f"[ERP] saved {frames} frames to {out_dir}")
+    return outputs
+
+
+import math
+import subprocess
+from pathlib import Path
+from typing import Sequence, Tuple, Optional, Dict
+import shlex
+
+def unwarp_equirectangular_viewsP(
+    mp4_path: str,
+    views: Sequence[Tuple[str, float, float]] = [("front", 0, 0), ("right", 90, 0), ("back", 180, 0), ("left", -90, 0)],
+    out_size: Tuple[int, int] = (1280, 720),
+    v_fov_deg: float = 90.0,
+    out_dir: Optional[str] = None,
+    roll_deg: float = 0.0,
+) -> Dict[str, str]:
+    """
+    Extract perspective views from an equirectangular 360 video using FFmpeg v360
+    (CPU/libx264). Signature & return value match the original OpenCV implementation.
+
+    Key detail: we keep the input as *vertical* FOV (v_fov_deg) and derive the
+    *horizontal* FOV from the output aspect ratio to match your OpenCV mapping.
+    """
+    in_path = Path(mp4_path).resolve()
+    if not in_path.exists():
+        raise RuntimeError(f"Cannot open {mp4_path}")
+
+    out_w, out_h = map(int, out_size)
+
+    # Read source FPS (fallback to 30 if metadata is missing or invalid).
+    cap = cv2.VideoCapture(str(in_path))
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot open {mp4_path}")
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    try:
+        fps_ok = bool(fps) and fps == fps and fps > 1e-6  # filter 0/NaN
+    except Exception:
+        fps_ok = False
+    if not fps_ok:
+        fps = 30.0
+    cap.release()
+
+    # Output directory (same naming as your original function).
+    if out_dir is None:
+        out_dir = str(in_path.with_name(in_path.stem + "_views_erp"))
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+    # === IMPORTANT: derive horizontal FOV from vertical FOV and aspect ratio ===
+    # This matches the geometry in your build_map_erp() path.
+    aspect = out_w / out_h
+    h_fov_deg = math.degrees(2.0 * math.atan(math.tan(math.radians(v_fov_deg) / 2.0) * aspect))
+
+    # Build a single pass graph: one decode -> split N branches -> v360 per branch.
+    n = len(views)
+    split_heads = "".join(f"[v{i}]" for i in range(n))
+    chains = [f"[0:v]split={n}{split_heads}"]
+    for i, (_, yaw, pitch) in enumerate(views):
+        # setsar=1 enforces square pixels so geometry matches OpenCV's assumption.
+        chains.append(
+            f"[v{i}]setsar=1,"
+            f"v360=input=equirect:output=rectilinear:"
+            f"yaw={yaw}:pitch={pitch}:roll={roll_deg}:"
+            f"h_fov={h_fov_deg:.6f}:v_fov={v_fov_deg:.6f}:w={out_w}:h={out_h}"
+            f"[o{i}]"
+        )
+    filter_complex = ";".join(chains)
+
+    # Assemble FFmpeg command (CPU x264, tuned for speed; adjust CRF/preset if needed).
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-y",
+        "-loglevel",
+        "error",
+        "-i",
+        str(in_path),
+        "-filter_complex",
+        filter_complex,
+    ]
+
+    outputs: Dict[str, str] = {}
+    for i, (name, _, _) in enumerate(views):
+        out_path = str(Path(out_dir) / f"{in_path.stem}_{name}_{out_w}x{out_h}.mp4")
+        outputs[name] = out_path
+
+        # Per-output settings: fast CPU encode, fixed output FPS, player-friendly pixel format.
+        per_out = [
+            "-map",
+            f"[o{i}]",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",    # fastest; for higher quality use "veryfast"/"faster" and lower CRF
+            "-crf",
+            "22",           # 18–30: larger -> faster/smaller (softer image)
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            "-r",
+            f"{fps:.3f}",
+            out_path,
+        ]
+        cmd += per_out
+
+    try:
+        subprocess.run(cmd, check=True)
+    except FileNotFoundError as e:
+        raise RuntimeError("FFmpeg not found in PATH. Please install ffmpeg.") from e
+
+    def shell_join(args):
+        try:
+            return shlex.join(args)  # Python 3.8+
+        except AttributeError:
+            return " ".join(shlex.quote(a) for a in args)
+
+    print("[ERP/FFmpeg] command:\n" + shell_join(cmd))
     return outputs
 
 # ------------------------------ TEST runner -------------------------------

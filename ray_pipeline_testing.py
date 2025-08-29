@@ -32,6 +32,9 @@ from ray_jobs.labelstudio_tasks import build_labelstudio_json_for_shard_task, im
 from ray_jobs.video_unwarp_task import erp_unwarp_task
 
 
+# Test unwarp
+from ray_jobs.video_unwarp_task import erp_unwarp_task
+
 logger = get_logger("SimplifiedUnifiedPipeline")
 
 def clear_gpu_memory():
@@ -442,7 +445,7 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
     is_insv_file = input_video_path.lower().endswith('.insv')
     if process_dual_views is None:
         process_dual_views = is_insv_file
-    
+
     # New branch: unwarped multi-view processing for INSV
     if process_unwarped_views and is_insv_file:
         logger.info("🎥 INSV file detected - enabling unwarped view processing")
