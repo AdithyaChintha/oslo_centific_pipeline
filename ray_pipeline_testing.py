@@ -29,6 +29,7 @@ from ray_jobs.nsfw_det_final import process_video_chunks_for_nsfw
 from ray_jobs.motion_energy import compute_motion_energy
 from ray_jobs.face_age_detector import process_video_chunks_for_face_detection
 from ray_jobs.labelstudio_tasks import build_labelstudio_json_for_shard_task, import_to_labelstudio_task
+from ray_jobs.video_unwarp_task import erp_unwarp_task
 
 
 logger = get_logger("SimplifiedUnifiedPipeline")
@@ -411,11 +412,20 @@ def consolidate_dual_view_outputs(all_results, local_outputs_dir, conv_time, loc
 
 
 def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str, 
-                 process_dual_views: bool = None, azure_blob_client=None, azure_container=None, azure_output_prefix=None, azure_account_name: str = None, azure_account_key: str = None):
+                 process_dual_views: bool = None, process_unwarped_views: bool = False,
+                 azure_blob_client=None, azure_container=None, azure_output_prefix=None, azure_account_name: str = None, azure_account_key: str = None):
     """
     Unified Ray pipeline for video analysis with optional dual-view processing for INSV files
     """
-    ray.init()
+    # Initialize Ray with basic guard
+    try:
+        if not ray.is_initialized():
+            ray.init()
+    except RuntimeError as e:
+        if "ray.init twice" in str(e) or "already" in str(e).lower():
+            logger.warning("Ray already initialized, continuing...")
+        else:
+            raise
     
     # Ensure the output directory exists
     os.makedirs(output_dir, exist_ok=True)
@@ -433,7 +443,57 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
     if process_dual_views is None:
         process_dual_views = is_insv_file
     
-    if process_dual_views and is_insv_file:
+    # New branch: unwarped multi-view processing for INSV
+    if process_unwarped_views and is_insv_file:
+        logger.info("🎥 INSV file detected - enabling unwarped view processing")
+
+        # Convert .insv to .mp4 if necessary (use view_1 for unwarp input)
+        if input_video_path.lower().endswith('.insv'):
+            mp4_result_ref = convert_insv_to_dual_mp4.remote(input_video_path)
+            mp4_result = ray.get(mp4_result_ref)
+            if mp4_result.get('success', False):
+                mp4_path = mp4_result['output_view_1']
+                logger.info(f"Using view 1 path for unwarp: {mp4_path}")
+            else:
+                raise RuntimeError(f"Failed to convert INSV file: {mp4_result.get('error', 'Unknown error')}")
+        else:
+            mp4_path = input_video_path
+
+        # Undistort/unwarp the video into multiple perspective views
+        views4_ref = erp_unwarp_task.remote(mp4_path)
+        flat_result = ray.get(views4_ref)  # dict: {view_name: output_path}
+        logger.info(f"Videos undistorted into {len(flat_result)} views under {flat_result}")
+
+        # Split audio once into 60s shards (reused per view by index)
+        audio_shards = ray.get(split_audio_into_shards.remote(
+            input_audio_path,
+            output_dir=os.path.join(output_dir, "audio_shards"),
+            duration_sec=60
+        ))
+
+        # Split each unwarped view into shards and process each shard
+        shards_dir = os.path.join(output_dir, "video_shards")
+        os.makedirs(shards_dir, exist_ok=True)
+        for view_name, view_path in flat_result.items():
+            vdir = os.path.join(shards_dir, view_name)
+            os.makedirs(vdir, exist_ok=True)
+            view_shards = ray.get(split_video_into_shards.remote(view_path, output_dir=vdir, duration_sec=60))
+
+            for i, v_shard in enumerate(view_shards):
+                # Pair audio shard by index (fallback to last if video has more shards)
+                if audio_shards:
+                    a_idx = min(i, len(audio_shards) - 1)
+                    a_shard = audio_shards[a_idx]
+                else:
+                    a_shard = input_audio_path  # fallback
+
+                shard_output_dir = os.path.join(output_dir, f"{view_name}_shard_{i+1}")
+                os.makedirs(shard_output_dir, exist_ok=True)
+                process_single_shard_through_pipeline(v_shard, a_shard, shard_output_dir, i * 60, i)
+
+        return {"status": "completed_unwarped_processing"}
+
+    elif process_dual_views and is_insv_file:
         logger.info("🎥 INSV file detected - enabling shard-first dual-view processing")
         
         # Convert INSV to dual MP4 views
@@ -488,33 +548,9 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
         import_consolidated_tasks_to_labelstudio(label_studio_tasks)
         
         return create_consolidated_summary(label_studio_tasks, output_dir)
-        
     else:
-        # Single view processing (original logic)
-        if is_insv_file:
-            logger.info("🎥 INSV file detected - processing single view only")
-            mp4_result_ref = convert_insv_to_dual_mp4.remote(input_video_path)
-            mp4_result = ray.get(mp4_result_ref)
-            
-            if mp4_result.get('success', False):
-                mp4_path = mp4_result['output_view_1']  # Use the first view for processing
-                logger.info(f"Using view 1 path for processing: {mp4_path}")
-            else:
-                raise RuntimeError(f"Failed to convert INSV file: {mp4_result.get('error', 'Unknown error')}")
-        else:
-            logger.info("🎥 Regular video file - single view processing")
-            mp4_path = input_video_path
-        
-        return _process_single_view(
-                    mp4_path,
-                    input_audio_path,
-                    output_dir,
-                    azure_blob_client,
-                    azure_container,
-                    azure_output_prefix,
-                    azure_account_name,        
-                    azure_account_key          
-                )
+        logger.warning("Non-INSV input or unsupported mode. Only dual-view or unwarped multi-view for INSV are supported.")
+        return {"status": "skipped", "reason": "non_insv_or_unsupported"}
 
 def process_time_aligned_shard(
     shard_index,
