@@ -481,47 +481,89 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
         else:
             audio_shard_urls = {}
 
-        # Split each unwarped view into shards and process each shard
+        # Split each unwarped view into shards and stage per-view shard lists
         shards_dir = os.path.join(output_dir, "video_shards")
         os.makedirs(shards_dir, exist_ok=True)
-        label_studio_tasks = []
+
+        # Map: view_name -> [list of shard paths]
+        view_shards_map = {}
+        # Map: view_name -> {index -> azure url}
+        view_shard_urls_map = {}
+
         for view_name, view_path in flat_result.items():
             vdir = os.path.join(shards_dir, view_name)
             os.makedirs(vdir, exist_ok=True)
-            view_shards = ray.get(split_video_into_shards.remote(view_path, output_dir=vdir, duration_sec=60))
+            v_shards = ray.get(split_video_into_shards.remote(view_path, output_dir=vdir, duration_sec=60))
+            view_shards_map[view_name] = v_shards
 
             # Optionally upload video shards for LS streaming
             if azure_blob_client and azure_container and azure_output_prefix and azure_account_name and azure_account_key:
-                view_shard_urls = generate_azure_shard_urls(
-                    azure_blob_client, azure_container, view_shards,
+                view_shard_urls_map[view_name] = generate_azure_shard_urls(
+                    azure_blob_client, azure_container, v_shards,
                     f"{azure_output_prefix}/unwarped_shards/{view_name}",
                     azure_account_name, azure_account_key
                 )
             else:
-                view_shard_urls = {}
+                view_shard_urls_map[view_name] = {}
 
-            for i, v_shard in enumerate(view_shards):
+        # Determine the number of shards we can align across all views and audio
+        per_view_counts = [len(v) for v in view_shards_map.values()] if view_shards_map else [0]
+        min_len = min(per_view_counts + [len(audio_shards) if audio_shards else 0])
+        if min_len == 0:
+            logger.warning("No aligned shards found across views/audio for unwarped processing")
+            return {"status": "no_shards"}
+
+        label_studio_tasks = []
+        # Process per-shard index across all views together: one LS task per time segment
+        for i in range(min_len):
+            shard_offset_sec = i * 60
+
+            # Build dict of view -> shard path/url for this index
+            view_urls_for_shard = {}
+            view_results_for_shard = {}
+
+            for view_name, v_shards in view_shards_map.items():
+                v_shard = v_shards[i]
+                v_url = view_shard_urls_map.get(view_name, {}).get(i, v_shard)
+                view_urls_for_shard[view_name] = v_url
+
                 # Pair audio shard by index (fallback to last if video has more shards)
-                if audio_shards:
-                    a_idx = min(i, len(audio_shards) - 1)
-                    a_shard = audio_shards[a_idx]
-                else:
-                    a_shard = input_audio_path  # fallback
+                a_idx = min(i, len(audio_shards) - 1) if audio_shards else 0
+                a_shard = audio_shards[a_idx] if audio_shards else input_audio_path
 
-                # Build LS task using existing consolidator for single-view
-                shard_results = process_time_aligned_shard(
-                    shard_index=i,
-                    view1_shard_path=v_shard,
-                    view2_shard_path=None,
-                    audio_shard_path=a_shard,
-                    base_output_dir=output_dir,
-                    view1_azure_url=view_shard_urls.get(i, v_shard),
-                    view2_azure_url=None,
-                    audio_url=audio_shard_urls.get(a_idx, a_shard)
+                # Process this view's shard through the models
+                shard_output_dir = os.path.join(output_dir, f"{view_name}_shard_{i+1}")
+                os.makedirs(shard_output_dir, exist_ok=True)
+                view_results = process_single_shard_through_pipeline(
+                    v_shard, a_shard, shard_output_dir, shard_offset_sec, i
                 )
-                label_studio_tasks.append(shard_results['label_studio_task'])
+                view_results_for_shard[view_name] = view_results
 
-        # Import all generated tasks to Label Studio
+            # Consolidate results across all views for this shard index
+            consolidated_results = consolidate_time_segment_results_multiview(
+                view_results_for_shard, i, shard_offset_sec
+            )
+
+            # Choose up to 2 primary views for left/right for UI, keep all as extra fields
+            view_names_sorted = sorted(view_urls_for_shard.keys())
+            primary_left = view_urls_for_shard.get(view_names_sorted[0], "") if view_names_sorted else ""
+            primary_right = view_urls_for_shard.get(view_names_sorted[1], "") if len(view_names_sorted) > 1 else ""
+
+            # Generate a single LS task containing audio + all view URLs for this shard index
+            task_json_path = generate_multiview_shard_labelstudio_task(
+                base_output_dir=output_dir,
+                shard_number=i+1,
+                shard_offset_sec=shard_offset_sec,
+                view_urls=view_urls_for_shard,
+                audio_url=audio_shard_urls.get(i, audio_shards[i]) if audio_shards else input_audio_path,
+                primary_left_url=primary_left,
+                primary_right_url=primary_right,
+                consolidated_results=consolidated_results,
+                total_shards=min_len
+            )
+            label_studio_tasks.append(task_json_path)
+
+        # Import all generated tasks to Label Studio in one batch
         import_consolidated_tasks_to_labelstudio(label_studio_tasks)
 
         return create_consolidated_summary(label_studio_tasks, output_dir)
@@ -771,6 +813,61 @@ def generate_consolidated_shard_labelstudio_task(shard_output_dir, view1_azure_u
 
       logger.info(f"Generated consolidated Label Studio task for shard {shard_number} with {len(prediction_entries)} predictions")
       return task_file
+
+def generate_multiview_shard_labelstudio_task(
+    base_output_dir: str,
+    shard_number: int,
+    shard_offset_sec: int,
+    view_urls: dict,
+    audio_url: str,
+    primary_left_url: str,
+    primary_right_url: str,
+    consolidated_results: dict,
+    total_shards: int
+):
+    """
+    Build a single LS task for a shard that includes audio and multiple video views in one request.
+    Adds shard_id and total_shards to the task data for identification.
+    """
+    current_time = datetime.utcnow().isoformat() + "Z"
+
+    # Use the existing prediction consolidator for up to two primary views if available
+    prediction_entries = consolidated_results.get('consolidated_predictions', []) or []
+
+    # Prepare data block with primary left/right plus extra views as additional fields
+    data_block = {
+        "meta": "",
+        "meta.home_identifier": f"Shard_{shard_number}",
+        "meta.recording_datetime": current_time,
+        "meta.domain": "production",
+        "meta.actions": "",
+        "shard_number": str(shard_number),
+        "shard_offset_seconds": str(shard_offset_sec),
+        "segments_detected": str(len(prediction_entries)),
+        "shard_id": str(shard_number),
+        "total_shards": str(total_shards),
+        "video_left": primary_left_url or "",
+        "video_right": primary_right_url or "",
+        "audio": audio_url or "",
+    }
+
+    # Attach additional views as dedicated fields, e.g., video_view_front, video_view_right, etc.
+    for view_name, url in (view_urls or {}).items():
+        data_block[f"video_view_{view_name}"] = url
+
+    task = {
+        "data": data_block,
+        "annotations": [],
+        "predictions": [{"result": prediction_entries}] if prediction_entries else []
+    }
+
+    task_file = os.path.join(base_output_dir, f"multiview_shard_{shard_number}_labelstudio_task.json")
+    with open(task_file, 'w') as f:
+        json.dump(task, f, indent=2)
+    logger.info(
+        f"Generated multi-view Label Studio task for shard {shard_number} with {len(view_urls or {})} views and audio"
+    )
+    return task_file
 
 def create_consolidated_predictions(view1_results, view2_results):
     """
@@ -1257,73 +1354,29 @@ def create_consolidated_summary(label_studio_tasks, output_dir):
             "processing_type": "shard_first_dual_view"
         }
 
-def _process_single_view(
-    mp4_path: str,
-    input_audio_path: str,
-    output_dir: str,
-    azure_blob_client=None,
-    azure_container=None,
-    azure_output_prefix=None,
-    azure_account_name: str = None,
-    azure_account_key: str = None
-):
+def _process_single_view(*args, **kwargs):
+    """Single-view flow disabled; only dual-view or unwarped multi-view supported."""
+    logger.warning("Single-view flow is disabled; skipping.")
+    return {"status": "unsupported_single_view"}
+def consolidate_time_segment_results_multiview(view_results_by_view: dict, shard_index: int, shard_offset_sec: int):
     """
-    Single-view pipeline that reuses the SAME LS task creation & consolidation
-    functions used by the dual-view shard-first flow.
+    Consolidate segments across an arbitrary number of views for a given shard index.
+    Produces merged_flagged_segments using existing dual-view merger (works for N views).
     """
-    logger.info(f"Processing single-view video: {mp4_path}")
+    all_segments = []
+    for view_name, results in (view_results_by_view or {}).items():
+        for seg in results.get('flagged_segments', []):
+            all_segments.append({**seg, "source_view": view_name})
 
-    # --- Shard both video and audio (time-aligned) ---
-    shards_dir = os.path.join(output_dir, "video_shards")
-    shards_audio_dir = os.path.join(output_dir, "audio_shards")
-    video_shards = ray.get(split_video_into_shards.remote(mp4_path, output_dir=shards_dir, duration_sec=60))
-    audio_shards = ray.get(split_audio_into_shards.remote(input_audio_path, output_dir=shards_audio_dir, duration_sec=60))
+    merged = merge_overlapping_segments_dual_view(all_segments)
+    return {
+        "shard_index": shard_index,
+        "shard_offset_sec": shard_offset_sec,
+        "time_range": f"{shard_offset_sec}-{shard_offset_sec + 60}s",
+        "merged_flagged_segments": merged,
+        "consolidated_predictions": []  # predictions are added in task builder
+    }
 
-    logger.info(f"Video split into {len(video_shards)} shards → {shards_dir}")
-    logger.info(f"Audio split into {len(audio_shards)} shards → {shards_audio_dir}")
-
-    # --- Upload shards to Azure (optional, recommended for LS streaming) ---
-    if azure_blob_client and azure_container and azure_output_prefix and azure_account_name and azure_account_key:
-        logger.info("Uploading single-view video shards to Azure Blob Storage...")
-        video_urls = generate_azure_shard_urls(
-            azure_blob_client, azure_container, video_shards,
-            f"{azure_output_prefix}/video_shards",
-            azure_account_name, azure_account_key
-        )
-        audio_urls = generate_azure_shard_urls(
-            azure_blob_client, azure_container, audio_shards,
-            f"{azure_output_prefix}/audio_shards",
-            azure_account_name, azure_account_key
-        )
-    else:
-        logger.warning("Azure client/prefix or account credentials missing — LS URLs will be local and likely won’t stream.")
-        video_urls, audio_urls = {}, {}
-
-    # --- Process time-aligned shards using the SAME per-shard function as dual-view ---
-    label_studio_tasks = []
-    min_len = min(len(video_shards), len(audio_shards))
-    if min_len < len(video_shards) or min_len < len(audio_shards):
-        logger.warning("Shard count mismatch (video=%d, audio=%d). Truncating to %d.",
-                       len(video_shards), len(audio_shards), min_len)
-
-    for idx in range(min_len):
-        shard_results = process_time_aligned_shard(
-            shard_index=idx,
-            view1_shard_path=video_shards[idx],
-            view2_shard_path=None,  # ← single-view
-            audio_shard_path=audio_shards[idx],
-            base_output_dir=output_dir,
-            view1_azure_url=video_urls.get(idx, video_shards[idx]),
-            view2_azure_url=None,   # ← single-view (kept blank in LS task)
-            audio_url=audio_urls.get(idx, audio_shards[idx])
-        )
-        label_studio_tasks.append(shard_results['label_studio_task'])
-
-    # --- Import all tasks to Label Studio (SAME function as dual-view) ---
-    import_consolidated_tasks_to_labelstudio(label_studio_tasks)
-
-    # --- Return consolidated summary (SAME function as dual-view) ---
-    return create_consolidated_summary(label_studio_tasks, output_dir)
 
 
 if __name__ == "__main__":
