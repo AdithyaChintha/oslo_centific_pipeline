@@ -472,24 +472,7 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
             except Exception:
                 flat_result = None
                 raise RuntimeError(f"Failed to convert one 360 file: {mp4_result.get('error', 'Unknown error')}")
-           
-
-        # if input_video_path.lower().endswith('.insv'):
-        #     # Try the simpler single-output
-        #     try:
-        #         mp4_result = ray.get(convert_insv_to_mp4.remote(input_video_path))
-        #         mp4_path = mp4_result.get('output_mp4')
-        #         logger.info(f"Using single-output converted mp4 for unwarp: {mp4_path}")
-        #     except Exception:
-        #         mp4_result = None
-        #         raise RuntimeError(f"Failed to convert INSV file: {mp4_result.get('error', 'Unknown error')}")
-        # else:
-        #     mp4_path = input_video_path
-
-        # # Undistort/unwarp the video into multiple perspective views
-        # views4_ref = erp_unwarp_task.remote(mp4_path)
-        # flat_result = ray.get(views4_ref)  # dict: {view_name: output_path}
-        # logger.info(f"Videos undistorted into {len(flat_result)} views under {flat_result}")
+    
 
         # Split audio once into 60s shards (reused per view by index)
         audio_shards = ray.get(split_audio_into_shards.remote(
