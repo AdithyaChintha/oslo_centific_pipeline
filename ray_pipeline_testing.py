@@ -452,11 +452,11 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
 
         # Convert .insv to four.mp4 videos directly (single-output converter)
         
-
+        #viewsoutput_dir=os.path.join(output_dir, "4views"),
         if input_video_path.lower().endswith('.insv'):
             # Try the simpler single-output
             try:
-                mp4_result = ray.get(insv_unwarp_task.remote(input_video_path))
+                mp4_result = ray.get(insv_unwarp_task.remote(input_video_path))#, viewsoutput_dir))
                 flat_result = mp4_result.get('views')
                 logger.info(f"Using two 180 for unwarp:: {len(flat_result)} views under {flat_result}")
             except Exception:

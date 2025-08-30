@@ -99,7 +99,8 @@ def insv_unwarp_task(
     lens_fov_deg: float = 180.0,
     out_size: Tuple[int, int] = (1440, 1440), # erp_w/4
     v_fov_deg: float = 90.0,
-    roll_deg: float = 0.0,
+    h_fov_deg: float = 90.0,
+    roll_deg: float = 180.0,
     views: Optional[Sequence[Tuple[float, str]]] = None,
 ) -> Dict[str, str]:
     """Convert INSV -> ERP -> four perspective views using the local video4_unwarp implementation.
@@ -110,17 +111,26 @@ def insv_unwarp_task(
     opencv_tune_for_worker(num_threads=1)
     try:
         # import here so the worker can receive the working_dir via runtime_env
-        from video_process.video4_unwarp import video4views_unwarp
-        return video4views_unwarp(
+        from video_process.video4_unwarp import video4views_unwarpF
+        # return video4views_unwarp( #Based on openCV slow
+        #     insv_path,
+        #     output_dir=out_dir,
+        #     erp_w=erp_w,
+        #     erp_h=erp_h,
+        #     lens_fov_deg=lens_fov_deg,
+        #     out_size=out_size,
+        #     v_fov_deg=v_fov_deg,
+        #     roll_deg=roll_deg,
+        #     views=views,
+        # )
+
+        return video4views_unwarpF(
             insv_path,
             output_dir=out_dir,
-            erp_w=erp_w,
-            erp_h=erp_h,
-            lens_fov_deg=lens_fov_deg,
             out_size=out_size,
-            v_fov_deg=v_fov_deg,
-            roll_deg=roll_deg,
-            views=views,
+            h_fov=h_fov_deg,
+            v_fov=v_fov_deg,
+            roll=roll_deg,
         )
     except Exception as e:
         return {"__error__": f"insv_unwarp_task failed: {e}"}

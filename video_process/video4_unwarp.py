@@ -353,28 +353,132 @@ def video4views_unwarp(
         return {"success": False, "error": str(e)}
 
 
-# Optional Ray remote wrapper if Ray is available
-try:
-    import ray
+import subprocess
+from pathlib import Path
+import os
 
-    @ray.remote
-    def video4_unwarp_task_remote(insv_path: str, output_dir: str = None):
-        return video4_unwarp_task(insv_path, output_dir)
-except Exception:
-    video4_unwarp_task_remote = None
+def video4views_unwarpF(
+    insv_path: str,
+    output_dir: str = None,
+    out_size: tuple = (1440, 1440),
+    h_fov: int = 90,
+    v_fov: int = 90,
+    roll: int = 0,
+) -> dict:
+    """
+    Convert a dual-stream INSV file into four 90° perspective views
+    using FFmpeg dual-fisheye → rectilinear projection.
+
+    Args:
+        insv_path: path to the input .insv file (with 2 fisheye streams).
+        output_dir: directory for outputs (default = cwd).
+        out_size: (w,h) of output views.
+        h_fov: horizontal FOV for v360 rectilinear.
+        v_fov: vertical FOV.
+        roll: roll correction (deg).
+
+    Returns:
+        dict: { "success": bool,
+                "dual": path to dual_fisheye.mp4,
+                "views": {front, left, right, back},
+                "error": str (if failed)}
+    """
+    try:
+        insv = Path(insv_path)
+        if not insv.exists():
+            return {"success": False, "error": f"Input not found: {insv_path}"}
+
+        out_dir = Path(output_dir) if output_dir else Path.cwd()
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        dual_path = out_dir / "dual_fisheye.mp4"
+        w, h = out_size
+
+        # Step 1: combine two streams into SBS dual_fisheye
+        # 'libx264'（CPU），'h264_nvenc'（NVIDIA），'hevc_nvenc' 
+        cmd_sbs = [
+            "ffmpeg", "-y", "-hide_banner",
+            "-i", str(insv),
+            "-filter_complex",
+            "[0:v:0]scale=-1:ih,fps=30[va];"
+            "[0:v:1]scale=-1:ih,fps=30[vb];"
+            "[va][vb]hstack=inputs=2[sbs]",
+            "-map", "[sbs]",
+            "-c:v", "h264_nvenc", "-crf", "18", "-preset", "veryfast", "-an",
+            str(dual_path)
+        ]
+
+        try:
+            subprocess.run(cmd_sbs, check=True)
+        except subprocess.CalledProcessError as e:
+            # NVENC failed (commonly driver/API mismatch). Retry with libx264 as fallback.
+            try:
+                fallback_cmd = cmd_sbs.copy()
+                # replace codec and keep other flags
+                for i, v in enumerate(fallback_cmd):
+                    if v == 'h264_nvenc':
+                        fallback_cmd[i] = 'libx264'
+                        break
+                subprocess.run(fallback_cmd, check=True)
+            except subprocess.CalledProcessError:
+                # re-raise original for outer handler
+                raise e
+
+        # Step 2: four rectilinear views
+        front = out_dir / f"front_{w}x{h}.mp4"
+        left  = out_dir / f"left_{w}x{h}.mp4"
+        right = out_dir / f"right_{w}x{h}.mp4"
+        back  = out_dir / f"back_{w}x{h}.mp4"
+
+        filter_complex = (
+            f"[0:v]split=2[l][r];"
+            f"[l]crop=iw/2:ih:0:0,split=2[l0][l1];"
+            f"[r]crop=iw/2:ih:iw/2:0,split=2[r0][r1];"
+            f"[l0]v360=input=fisheye:output=rectilinear:"
+            f"h_fov={h_fov}:v_fov={v_fov}:yaw=45:pitch=0:roll={roll}:w={w}:h={h}[front];"
+            f"[l1]v360=input=fisheye:output=rectilinear:"
+            f"h_fov={h_fov}:v_fov={v_fov}:yaw=-45:pitch=0:roll={roll}:w={w}:h={h}[left];"
+            f"[r0]v360=input=fisheye:output=rectilinear:"
+            f"h_fov={h_fov}:v_fov={v_fov}:yaw=-45:pitch=0:roll={roll}:w={w}:h={h}[right];"
+            f"[r1]v360=input=fisheye:output=rectilinear:"
+            f"h_fov={h_fov}:v_fov={v_fov}:yaw=45:pitch=0:roll={roll}:w={w}:h={h}[back]"
+        )
+
+        cmd_views = [
+            "ffmpeg", "-y", "-hide_banner",
+            "-i", str(dual_path),
+            "-filter_complex", filter_complex,
+            "-map", "[front]", str(front),
+            "-map", "[left]",  str(left),
+            "-map", "[right]", str(right),
+            "-map", "[back]",  str(back),
+        ]
+        subprocess.run(cmd_views, check=True)
+
+        return {
+            "success": True,
+            "dual": str(dual_path),
+            "views": {
+                "front": str(front),
+                "left": str(left),
+                "right": str(right),
+                "back": str(back),
+            },
+        }
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 
 
 def main():
-    if not INSV.exists():
-        raise FileNotFoundError(INSV)
-
-    # 1) INSV -> ERP (2:1)
-    erp = make_true_erp_from_insv(INSV)
-
-    # 2) ERP -> four 90° views
-    split_erp_to_views(erp)
-
-
+    result = video4views_unwarpF(
+    "VID_20250809_094836_00_045.insv",
+    output_dir="out_4views",
+    out_size=(1440,1440),
+    h_fov=90, v_fov=90,
+    roll=180)
+    test = 1
 
 if __name__ == "__main__":
     main()
