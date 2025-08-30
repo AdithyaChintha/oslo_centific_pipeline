@@ -18,7 +18,7 @@ from azure.storage.blob import generate_blob_sas, BlobSasPermissions
 from setup.cosmos.setup import setup_cosmos
 from ray_jobs.video_splitter import split_video_into_shards
 from ray_jobs.audio_splitter import split_audio_into_shards
-from ray_jobs.insv_to_mp4 import convert_insv_to_dual_mp4
+from ray_jobs.insv_to_mp4 import convert_insv_to_dual_mp4, convert_insv_to_mp4
 from ray_jobs.scene_det import detect_scenes
 from ray_jobs.run_yolodetect_task import run_yolodetect_on_shard
 from ray_jobs.audio_diarization_pii import process_audio_diarization
@@ -29,11 +29,9 @@ from ray_jobs.nsfw_det_final import process_video_chunks_for_nsfw
 from ray_jobs.motion_energy import compute_motion_energy
 from ray_jobs.face_age_detector import process_video_chunks_for_face_detection
 from ray_jobs.labelstudio_tasks import build_labelstudio_json_for_shard_task, import_to_labelstudio_task
-from ray_jobs.video_unwarp_task import erp_unwarp_task
-
 
 # Test unwarp
-from ray_jobs.video_unwarp_task import erp_unwarp_task
+from ray_jobs.video_unwarp_task import erp_unwarp_task, insv_unwarp_task
 
 logger = get_logger("SimplifiedUnifiedPipeline")
 
@@ -450,22 +448,22 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
     if process_unwarped_views and is_insv_file:
         logger.info("🎥 INSV file detected - enabling unwarped view processing")
 
-        # Convert .insv to .mp4 if necessary (use view_1 for unwarp input)
+        # Convert .insv to four perspective views using a single Ray task, falling back to ERP task for mp4 input
         if input_video_path.lower().endswith('.insv'):
-            mp4_result_ref = convert_insv_to_dual_mp4.remote(input_video_path)
-            mp4_result = ray.get(mp4_result_ref)
-            if mp4_result.get('success', False):
-                mp4_path = mp4_result['output_view_1']
-                logger.info(f"Using view 1 path for unwarp: {mp4_path}")
-            else:
-                raise RuntimeError(f"Failed to convert INSV file: {mp4_result.get('error', 'Unknown error')}")
+            unwarp_ref = insv_unwarp_task.remote(
+                input_video_path,
+                out_dir=os.path.join(output_dir, "unwarped_views")
+            )
+            unwarp_res = ray.get(unwarp_ref)
+            if not unwarp_res.get('success'):
+                raise RuntimeError(f"INSV unwarp failed: {unwarp_res.get('error', 'Unknown error')}")
+            flat_result = unwarp_res.get('views', {})
+            logger.info(f"INSV unwarp produced views: {list(flat_result.keys())}")
         else:
-            mp4_path = input_video_path
-
-        # Undistort/unwarp the video into multiple perspective views
-        views4_ref = erp_unwarp_task.remote(mp4_path)
-        flat_result = ray.get(views4_ref)  # dict: {view_name: output_path}
-        logger.info(f"Videos undistorted into {len(flat_result)} views under {flat_result}")
+            # input is already an mp4 ERP; delegate to erp_unwarp_task
+            views4_ref = erp_unwarp_task.remote(input_video_path)
+            flat_result = ray.get(views4_ref)  # dict: {view_name: output_path}
+            logger.info(f"Videos undistorted into {len(flat_result)} views under {flat_result}")
 
         # Split audio once into 60s shards (reused per view by index)
         audio_shards = ray.get(split_audio_into_shards.remote(
