@@ -281,7 +281,7 @@ def split_erp_to_views(erp_path: Path) -> None:
         ", ".join([f"{erp_path.stem}_{n}_{Wo}x{Ho}.mp4" for n, _, _ in maps]),
     )
 
-def video4_unwarp_task(
+def video4views_unwarp(
     insv_path: str,
     output_dir: str = None,
     erp_w: int = ERP_W,

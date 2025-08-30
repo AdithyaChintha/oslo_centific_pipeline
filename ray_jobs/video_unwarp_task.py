@@ -61,7 +61,6 @@ def opencv_tune_for_worker(num_threads: int = 1, use_opencl: bool = False):
 # ---------------------------------------------------------------------------
 
 
-
 @ray.remote(num_cpus=1, num_gpus=1, max_retries=1)
 def erp_unwarp_task(mp4_path: str,
                     views: Optional[Sequence[Tuple[str, float, float]]] = None,
@@ -97,8 +96,8 @@ def insv_unwarp_task(
     out_dir: Optional[str] = None,
     erp_w: int = 5760,
     erp_h: int = 2880,
-    lens_fov_deg: float = 190.0,
-    out_size: Tuple[int, int] = (1440, 1440),
+    lens_fov_deg: float = 180.0,
+    out_size: Tuple[int, int] = (1440, 1440), # erp_w/4
     v_fov_deg: float = 90.0,
     roll_deg: float = 0.0,
     views: Optional[Sequence[Tuple[float, str]]] = None,
@@ -111,8 +110,8 @@ def insv_unwarp_task(
     opencv_tune_for_worker(num_threads=1)
     try:
         # import here so the worker can receive the working_dir via runtime_env
-        from video_process.video4_unwarp import video4_unwarp_task
-        return video4_unwarp_task(
+        from video_process.video4_unwarp import video4views_unwarp
+        return video4views_unwarp(
             insv_path,
             output_dir=out_dir,
             erp_w=erp_w,
