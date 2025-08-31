@@ -74,7 +74,7 @@ def erp_unwarp_task(mp4_path: str,
     """
     opencv_tune_for_worker(num_threads=1)
     try:
-        from utils.video_unwarp import unwarp_equirectangular_viewsP
+        from video_process.video_unwarp import unwarp_equirectangular_viewsP
         if views is None:
             views = DEFAULT_VIEWS4_ERP
         return unwarp_equirectangular_viewsP(
@@ -156,7 +156,7 @@ def fisheye_unwarp_task(mp4_path: str,
     Returns a dict {view_name: output_path}.
     """
     try:
-        from utils.video_unwarp import unwarp_fisheye_views
+        from video_process.video_unwarp import unwarp_fisheye_views
         return unwarp_fisheye_views(
             mp4_path=mp4_path,
             out_dir=out_dir,
