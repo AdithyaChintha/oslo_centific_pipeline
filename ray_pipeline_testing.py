@@ -1846,7 +1846,6 @@ def generate_consolidated_shard_labelstudio_task(shard_output_dir, view1_azure_u
       logger.info(f"Generated consolidated Label Studio task for shard {shard_number} with {len(prediction_entries)} predictions")
       return task_file
 
-
 def generate_multiview_shard_labelstudio_task(
     base_output_dir: str,
     shard_number: int,
