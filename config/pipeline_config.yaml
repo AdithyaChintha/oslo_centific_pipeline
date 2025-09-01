@@ -1,0 +1,96 @@
+# Pipeline Configuration for Video Processing
+# This file contains configurable paths and settings for the video processing pipeline
+
+# Azure Blob Storage Configuration
+azure_storage:
+  # Input directory configuration
+  input_blob_prefix: "test/input_videos"  # Default blob prefix to search for videos
+  
+  # Output directory configuration  
+  output_blob_prefix: "processed_outputs"  # Base prefix for uploading processed results
+  
+  # Container settings (these can override blobfuse2_config.yaml if needed)
+  # container_name: "instavideo"  # Uncomment to override
+  # account_name: ""              # Uncomment to override
+  # account_key: ""               # Uncomment to override
+
+# Local Directory Configuration
+local_storage:
+  # Temporary download directory (will be cleaned up after processing)
+  temp_download_dir: "/tmp/azure_downloads"
+  
+  # Base output directory for processed results
+  output_base_dir: "./out"
+  
+  # Video list tracking file
+  video_list_file: "./azure_video_list.json"
+  
+  # Processing status file
+  processing_status_file: "./processing_status.json"
+  
+  # Video processing checklist file
+  checklist_file: "./video_processing_checklist.json"
+
+# Continuous Polling Configuration
+polling:
+  # Polling interval in minutes
+  interval_minutes: 5
+  
+  # Maximum number of videos to process in parallel
+  max_parallel_videos: 1
+  
+  # Enable continuous polling mode
+  enabled: true
+
+# Processing Configuration
+processing:
+  # Shard duration in seconds
+  shard_duration_sec: 60
+  
+  # Maximum number of videos to process in one batch (null = no limit)
+  max_videos_per_batch: null
+  
+  # Supported video file extensions
+  video_extensions:
+    - ".insv"
+    - ".mp4" 
+    - ".avi"
+    - ".mov"
+    - ".mkv"
+  
+  # Supported audio file extensions
+  audio_extensions:
+    - ".wav"
+    - ".mp3"
+    - ".m4a"
+    - ".aac"
+
+# Cleanup Configuration
+cleanup:
+  # Whether to clean up temporary download directory after processing
+  cleanup_temp_dir: true
+  
+  # Whether to clean up individual files after each video processing
+  cleanup_files_after_each_video: true
+  
+  # Retention time for video list file (in days, null = never clean)
+  video_list_retention_days: 30
+
+# Label Studio Configuration
+label_studio:
+  # Label Studio server URL
+  server_url: "https://annotations-stg.oneforma2.com/"
+  
+  # API token for Label Studio
+  api_token: "d75a31c7994b96099cfbf7d61e15cff643943853"
+  
+  # Project ID
+  project_id: "5458"
+
+# Logging Configuration
+logging:
+  # Log level (DEBUG, INFO, WARNING, ERROR)
+  level: "INFO"
+  
+  # Log file path (null = no file logging)
+  log_file: "./azure_video_processor.log"

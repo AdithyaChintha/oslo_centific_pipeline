@@ -1,0 +1,57 @@
+{
+  "last_poll": "2025-08-29T13:30:43.069000",
+  "total_videos": 1,
+  "container": "instavideo",
+  "blob_prefix": "test/input_videos",
+  "videos": [
+    {
+      "video_blob_name": "test/input_videos/VID_20250809_094836_00_045.insv",
+      "audio_blob_name": "test/input_videos/VID_20250809_094836_00_045.wav",
+      "video_size_mb": 229.43,
+      "last_modified": "2025-08-26T20:53:46+00:00",
+      "processed": true,
+      "processing_date": "2025-08-29T13:32:51.901313",
+      "output_dir": "/home/nvcoe_admin/testingray/insta360-video-activity-segmentation/out/video_VID_20250809_094836_00_045_20250829_133052",
+      "status": "completed",
+      "results_summary": {
+        "input_file": "INSV dual-view processing",
+        "processing_type": "shard_first_dual_view",
+        "views_analyzed": 2,
+        "total_shards_processed": 1,
+        "successful_shard_tasks": 1,
+        "total_duration_seconds": 120,
+        "consolidated_processing_summary": {
+          "total_shards": 1,
+          "successful_audio": 2,
+          "successful_yolo": 2,
+          "successful_scene": 2,
+          "successful_nsfw": 2,
+          "successful_motion": 2,
+          "successful_face": 2,
+          "successful_clap": 2,
+          "overall_success_rate": "100.0%"
+        },
+        "consolidated_annotation_summary": {
+          "total_label_studio_tasks": 1,
+          "dual_view_tasks_created": 1,
+          "annotation_efficiency": "Each task covers 60 seconds from both camera views",
+          "estimated_annotation_time_per_task": "2-3 minutes",
+          "total_estimated_annotation_time": "2.5 minutes"
+        },
+        "shard_first_benefits": {
+          "tasks_per_minute": 1,
+          "dual_view_consolidation": "Both views processed and consolidated per time segment",
+          "annotation_workload": "Reduced from 2 separate tasks to 1 consolidated tasks",
+          "workload_reduction_percentage": "50.0%"
+        },
+        "label_studio_integration": {
+          "tasks_imported": 1,
+          "task_format": "dual_view_consolidated",
+          "video_left_field": "view_1_shard_url",
+          "video_right_field": "view_2_shard_url",
+          "consolidated_predictions": "AI results from both views merged intelligently"
+        }
+      }
+    }
+  ]
+}
