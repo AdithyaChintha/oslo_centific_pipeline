@@ -859,6 +859,11 @@ def generate_multiview_shard_labelstudio_task(
         "video_left": primary_left_url or "",
         "video_right": primary_right_url or "",
         "audio": audio_url or "",
+        "home_id": "",
+        "start_datetime": "",
+        "end_datetime": "",
+        "total_duration": "",
+        "files_deleted": []
     }
 
     # Attach additional views as dedicated fields, e.g., video_view_front, video_view_right, etc.
