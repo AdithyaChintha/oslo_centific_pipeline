@@ -287,6 +287,7 @@ def main():
                 input_audio_path=local_audio_path,  # Now uses downloaded audio
                 output_dir=local_output_dir,
                 process_dual_views =  True,
+                process_unwarped_views = True,
                 azure_blob_client=blob_service_client,  # Pass Azure client
                 azure_container=output_container,       # Pass container name
                 azure_output_prefix=final_output_prefix,  # Pass output prefix

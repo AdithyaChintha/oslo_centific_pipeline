@@ -22,6 +22,7 @@ from pathlib import Path
 
 import ray
 import cv2
+import subprocess
 
 # ---------------------------------------------------------------------------
 # Utilities
@@ -33,6 +34,8 @@ DEFAULT_VIEWS4_ERP: Sequence[Tuple[str, float, float]] = (
     ("back", 180.0, 0.0),
     ("left", -90.0, 0.0),
 )
+
+V_FOV_DEG = 90.0
 
 
 def _ensure_runtime_env() -> dict:
@@ -57,6 +60,7 @@ def opencv_tune_for_worker(num_threads: int = 1, use_opencl: bool = False):
 # Ray tasks
 # ---------------------------------------------------------------------------
 
+
 @ray.remote(num_cpus=1, num_gpus=1, max_retries=1)
 def erp_unwarp_task(mp4_path: str,
                     views: Optional[Sequence[Tuple[str, float, float]]] = None,
@@ -70,7 +74,7 @@ def erp_unwarp_task(mp4_path: str,
     """
     opencv_tune_for_worker(num_threads=1)
     try:
-        from utils.video_unwarp import unwarp_equirectangular_viewsP
+        from video_process.video_unwarp import unwarp_equirectangular_viewsP
         if views is None:
             views = DEFAULT_VIEWS4_ERP
         return unwarp_equirectangular_viewsP(
@@ -83,6 +87,53 @@ def erp_unwarp_task(mp4_path: str,
         )
     except Exception as e:
         return {"__error__": f"erp_unwarp_task failed: {e}"}
+
+
+
+@ray.remote(num_cpus=1, num_gpus=0, max_retries=1)
+def insv_unwarp_task(
+    insv_path: str,
+    out_dir: Optional[str] = None,
+    erp_w: int = 5760,
+    erp_h: int = 2880,
+    lens_fov_deg: float = 180.0,
+    out_size: Tuple[int, int] = (1440, 1440), # erp_w/4
+    v_fov_deg: float = 90.0,
+    h_fov_deg: float = 90.0,
+    roll_deg: float = 180.0,
+    views: Optional[Sequence[Tuple[float, str]]] = None,
+) -> Dict[str, str]:
+    """Convert INSV -> ERP -> four perspective views using the local video4_unwarp implementation.
+
+    This wrapper imports `video_process.video4_unwarp.video4_unwarp_task` and runs it inside the Ray worker.
+    Returns the same dict produced by that function: {success: bool, erp: str, views: {...}} or an error dict.
+    """
+    opencv_tune_for_worker(num_threads=1)
+    try:
+        # import here so the worker can receive the working_dir via runtime_env
+        from video_process.video4_unwarp import video4views_unwarpF
+        # return video4views_unwarp( #Based on openCV slow
+        #     insv_path,
+        #     output_dir=out_dir,
+        #     erp_w=erp_w,
+        #     erp_h=erp_h,
+        #     lens_fov_deg=lens_fov_deg,
+        #     out_size=out_size,
+        #     v_fov_deg=v_fov_deg,
+        #     roll_deg=roll_deg,
+        #     views=views,
+        # )
+
+        return video4views_unwarpF(
+            insv_path,
+            output_dir=out_dir,
+            out_size=out_size,
+            h_fov=h_fov_deg,
+            v_fov=v_fov_deg,
+            roll=roll_deg,
+        )
+    except Exception as e:
+        return {"__error__": f"insv_unwarp_task failed: {e}"}
 
 
 @ray.remote(num_cpus=1, num_gpus=1, max_retries=1)
@@ -105,7 +156,7 @@ def fisheye_unwarp_task(mp4_path: str,
     Returns a dict {view_name: output_path}.
     """
     try:
-        from utils.video_unwarp import unwarp_fisheye_views
+        from video_process.video_unwarp import unwarp_fisheye_views
         return unwarp_fisheye_views(
             mp4_path=mp4_path,
             out_dir=out_dir,
