@@ -1846,6 +1846,66 @@ def generate_consolidated_shard_labelstudio_task(shard_output_dir, view1_azure_u
       logger.info(f"Generated consolidated Label Studio task for shard {shard_number} with {len(prediction_entries)} predictions")
       return task_file
 
+def generate_multiview_shard_labelstudio_task(
+    base_output_dir: str,
+    shard_number: int,
+    shard_offset_sec: int,
+    view_urls: dict,
+    audio_url: str,
+    primary_left_url: str,
+    primary_right_url: str,
+    consolidated_results: dict,
+    total_shards: int
+):
+    """
+    Build a single LS task for a shard that includes audio and multiple video views in one request.
+    Adds shard_id and total_shards to the task data for identification.
+    """
+    current_time = datetime.utcnow().isoformat() + "Z"
+
+    # Use the existing prediction consolidator for up to two primary views if available
+    prediction_entries = consolidated_results.get('consolidated_predictions', []) or []
+
+    # Prepare data block with primary left/right plus extra views as additional fields
+    data_block = {
+        "meta": "",
+        "meta.home_identifier": f"Shard_{shard_number}",
+        "meta.recording_datetime": current_time,
+        "meta.domain": "production",
+        "meta.actions": "",
+        "shard_number": str(shard_number),
+        "shard_offset_seconds": str(shard_offset_sec),
+        "segments_detected": str(len(prediction_entries)),
+        "shard_id": str(shard_number),
+        "total_shards": str(total_shards),
+        "video_left": primary_left_url or "",
+        "video_right": primary_right_url or "",
+        "audio": audio_url or "",
+        "home_id": "",
+        "start_datetime": "",
+        "end_datetime": "",
+        "total_duration": "",
+        "files_deleted": []
+    }
+
+    # Attach additional views as dedicated fields, e.g., video_view_front, video_view_right, etc.
+    for view_name, url in (view_urls or {}).items():
+        data_block[f"video_view_{view_name}"] = url
+
+    task = {
+        "data": data_block,
+        "annotations": [],
+        "predictions": [{"result": prediction_entries}] if prediction_entries else []
+    }
+
+    task_file = os.path.join(base_output_dir, f"multiview_shard_{shard_number}_labelstudio_task.json")
+    with open(task_file, 'w') as f:
+        json.dump(task, f, indent=2)
+    logger.info(
+        f"Generated multi-view Label Studio task for shard {shard_number} with {len(view_urls or {})} views and audio"
+    )
+    return task_file
+
 def create_consolidated_predictions(view1_results, view2_results):
     """
     Create consolidated AI predictions from both views for Label Studio task generation.

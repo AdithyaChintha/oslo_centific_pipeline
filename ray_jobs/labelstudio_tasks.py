@@ -235,11 +235,17 @@ def build_labelstudio_json_for_shard_task(shard_output_dir: str, shard_video_url
             "meta.recording_datetime": current_time,
             "meta.domain": "production",
             "meta.actions": "",
+            "home_id": "",
+            "start_datetime": "",
+            "end_datetime": "",
+            "total_duration": "",
+            "files_deleted": [],
             # Additional metadata (these won't show in UI but good for context)
             "shard_number": str(shard_number),
             "shard_offset_seconds": str(shard_offset_sec), 
             "segments_detected": str(len(result_entries))
         },
+        "annotations":[],
         "predictions": [
             {
                 "result": result_entries
