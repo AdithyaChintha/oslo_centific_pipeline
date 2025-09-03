@@ -684,6 +684,283 @@ def build_labelstudio_tasks_from_consolidated(
     )
     return out_path
 
+def assign_views_to_labelstudio_positions(view_results, view_azure_urls):
+    """
+    Assign all available views to Label Studio 4-view positions: 
+    video_top, video_left, video_right, video_bottom.
+    
+    Args:
+        view_results: Dict of {view_name: view_result}
+        view_azure_urls: Dict of {view_name: azure_url}
+    
+    Returns:
+        Dict with view assignments for all 4 positions
+    """
+    available_views = list(view_results.keys())
+    
+    # Initialize positions
+    positions = {
+        'top': None,
+        'left': None, 
+        'right': None,
+        'bottom': None
+    }
+    
+    # Smart assignment based on view names and available views
+    assignment_rules = {
+        'top': ['front', 'forward', 'top', 'view1', 'view_1'],
+        'left': ['left', 'side_left', 'view2', 'view_2'],
+        'right': ['right', 'side_right', 'view3', 'view_3'], 
+        'bottom': ['back', 'rear', 'bottom', 'view4', 'view_4']
+    }
+    
+    # First pass: Assign based on naming patterns
+    used_views = set()
+    for position, keywords in assignment_rules.items():
+        for view_name in available_views:
+            if view_name in used_views:
+                continue
+            view_lower = view_name.lower()
+            if any(keyword in view_lower for keyword in keywords):
+                positions[position] = {
+                    'view': view_name,
+                    'url': view_azure_urls.get(view_name, ""),
+                    'result': view_results.get(view_name, {})
+                }
+                used_views.add(view_name)
+                break
+    
+    # Second pass: Fill remaining positions with available views
+    remaining_views = [v for v in available_views if v not in used_views]
+    empty_positions = [pos for pos, assignment in positions.items() if assignment is None]
+    
+    for i, position in enumerate(empty_positions):
+        if i < len(remaining_views):
+            view_name = remaining_views[i]
+            positions[position] = {
+                'view': view_name,
+                'url': view_azure_urls.get(view_name, ""),
+                'result': view_results.get(view_name, {})
+            }
+    
+    # Log the assignments
+    logger.info(f"📊 View-to-position assignments:")
+    for position, assignment in positions.items():
+        view_name = assignment['view'] if assignment else 'None'
+        logger.info(f"   {position}: {view_name}")
+    
+    return positions
+
+def generate_multiview_4view_labelstudio_task(shard_output_dir, assigned_views, 
+                                            consolidated_results, shard_number, shard_offset_sec, 
+                                            audio_url, total_shards=None, video_name=None, all_view_urls=None):
+    """
+    Generate Label Studio task with 4-view display: video_top, video_left, video_right, video_bottom.
+    Follows the format from complete-tast.txt for 4-view UI support.
+    
+    Args:
+        shard_output_dir: Output directory for this shard
+        assigned_views: Dict with view assignments for all 4 positions (top, left, right, bottom)
+        consolidated_results: Consolidated results from all views
+        shard_number: Current shard number
+        shard_offset_sec: Time offset in seconds
+        audio_url: Audio file URL
+        total_shards: Total number of shards
+        video_name: Original video name
+        all_view_urls: Dict of all view URLs for metadata
+        
+    Returns:
+        Path to generated Label Studio task JSON file
+    """
+    current_time = datetime.utcnow().isoformat() + "Z"
+    
+    # Get prediction entries and assign to 4-view positions
+    raw_predictions = consolidated_results.get('consolidated_predictions_for_ls', [])
+    # prediction_entries = assign_predictions_to_4view_positions(raw_predictions, assigned_views)
+    
+    # Extract URLs from assigned views, using fallbacks if positions are empty
+    video_top = assigned_views.get('top', {}).get('url', '') if assigned_views.get('top') else ''
+    video_left = assigned_views.get('left', {}).get('url', '') if assigned_views.get('left') else ''
+    video_right = assigned_views.get('right', {}).get('url', '') if assigned_views.get('right') else ''
+    video_bottom = assigned_views.get('bottom', {}).get('url', '') if assigned_views.get('bottom') else ''
+    
+    # Create task with 4-view display format
+
+    task = {
+        "data": {
+            # Core 4-view video URLs for Label Studio UI
+            "video_top": video_top,
+            "video_left": video_left,
+            "video_right": video_right,
+            "video_bottom": video_bottom,
+            "audio": audio_url,
+            
+            # Metadata (following complete-tast.txt structure)
+            "meta": "",  # Required empty meta field
+            "meta.home_identifier": f"Shard_{shard_number}",
+            "meta.recording_datetime": current_time,
+            "meta.domain": "production", 
+            "meta.actions": "",
+            
+            # Multi-view specific metadata
+            "shard_number": str(shard_number),
+            "shard_id": shard_number,
+            "total_shards": total_shards,
+            "video_name": video_name,
+            "timestamp": current_time,
+            "processing_type": "multi_view_4view_equal",
+            "shard_offset_seconds": str(shard_offset_sec),
+            "segments_detected": str(len(raw_predictions)),
+            "total_views_processed": consolidated_results.get('total_views', 0),
+            "successful_views": consolidated_results.get('cross_view_analysis', {}).get('successful_views', 0),
+            "home_id": "",
+            "start_datetime": "",
+            "end_datetime": "",
+            "total_duration": "",
+            "files_deleted": [],
+
+        },
+        "predictions": [{
+            "model_version": "multi_view_4view_v1.0",
+            "result": raw_predictions
+        }] if raw_predictions else []
+    }
+    
+
+    # Save Label Studio task
+    task_file_path = os.path.join(shard_output_dir, f"shard_{shard_number}_labelstudio_task.json")
+    with open(task_file_path, 'w') as f:
+        json.dump(task, f, indent=2)
+    
+    logger.info(f"📋 Generated 4-view Label Studio task: {task_file_path}")
+    return task_file_path
+
+def import_consolidated_tasks_to_labelstudio(task_file_paths, pipeline_config=None):
+    """
+    Import consolidated Label Studio tasks to Label Studio platform.
+    
+    Args:
+        task_file_paths: List of paths to consolidated task JSON files
+        pipeline_config: Pipeline configuration dict (optional, will load default if None)
+        
+    Returns:
+        dict: Import results with success/failure status
+    """
+    if not task_file_paths:
+        logger.warning("No task files provided for Label Studio import")
+        return {"success": False, "error": "No tasks to import"}
+    
+    # Filter out None values and verify files exist
+    valid_task_files = []
+    for task_file in task_file_paths:
+        if task_file and os.path.exists(task_file):
+            valid_task_files.append(task_file)
+        else:
+            logger.warning(f"Task file not found or invalid: {task_file}")
+    
+    if not valid_task_files:
+        logger.error("No valid task files found for import")
+        return {"success": False, "error": "No valid task files found"}
+    
+    # Load Label Studio configuration
+    if pipeline_config is None:
+        try:
+            pipeline_config = _load_pipeline_config()
+        except Exception as e:
+            logger.warning(f"⚠️ Could not load pipeline config for Label Studio settings: {e}")
+            pipeline_config = {}
+    
+    # Get Label Studio settings from config
+    label_studio_config = pipeline_config.get('label_studio', {})
+    server_url = label_studio_config.get('server_url', 'https://annotations-stg.oneforma2.com/')
+    api_token = label_studio_config.get('api_token', 'd75a31c7994b96099cfbf7d61e15cff643943853')
+    project_id = label_studio_config.get('project_id', '5458')
+    
+    logger.info(f"📤 Importing {len(valid_task_files)} consolidated tasks to Label Studio...")
+    logger.info(f"   Server: {server_url}")
+    logger.info(f"   Project ID: {project_id}")
+    
+    # Use existing Label Studio import functionality
+    try:
+        # Import using the existing import_to_labelstudio_task function
+        import_result_ref = import_to_labelstudio_task.remote(
+            valid_task_files,
+            server_url,
+            api_token,
+            project_id
+        )
+        
+        import_result = ray.get(import_result_ref)
+        
+        if import_result.get("success"):
+            logger.info(f"✅ Successfully imported {len(valid_task_files)} consolidated tasks to Label Studio")
+            return {
+                "success": True,
+                "imported_tasks": len(valid_task_files),
+                "result": import_result.get('result')
+            }
+        else:
+            logger.error(f"❌ Failed to import consolidated tasks: {import_result.get('error')}")
+            return {
+                "success": False,
+                "error": import_result.get('error')
+            }
+            
+    except Exception as e:
+        logger.error(f"Exception during consolidated task import: {e}")
+        return {"success": False, "error": str(e)}
+
+def generate_consolidated_shard_labelstudio_task(shard_output_dir, view1_azure_url, view2_azure_url, 
+                                                 consolidated_results, shard_number, shard_offset_sec, audio_url, total_shards=None, video_name=None):
+      """
+      Generate single Label Studio task with both view URLs and consolidated AI predictions
+      """
+      current_time = datetime.utcnow().isoformat() + "Z"
+
+      # Get prediction entries from consolidated results (already in correct format)
+      prediction_entries = consolidated_results['consolidated_predictions']
+
+      # Create task with both view URLs (matching annotation_json.json format)
+      task = {
+          "data": {
+                "meta": "",  # Required empty meta field
+                # Flattened metadata keys at root level to match UI template expectations
+                "meta.home_identifier": f"Shard_{shard_number}",
+                "meta.recording_datetime": current_time,
+                "meta.domain": "production",
+                "meta.actions": "",
+                # Additional metadata (these won't show in UI but good for context)
+                "shard_number": str(shard_number),
+                "shard_id": shard_number,
+                "total_shards": total_shards,
+                "video_name": video_name,
+                "timestamp": current_time,
+                "processing_type": "label_studio_task",
+                "shard_offset_seconds": str(shard_offset_sec), 
+                "segments_detected": str(len(prediction_entries)),
+                "video_top":"",
+                "video_bottom":"",
+                "video_left": view1_azure_url,
+                "video_right": view2_azure_url,
+                "audio": audio_url,
+                "home_id": "",
+                "start_datetime": "",
+                "end_datetime": "",
+                "total_duration": "",
+                "files_deleted": [],
+          },
+          
+          "annotations": [],  # Empty for new tasks
+          "predictions": [{"result": prediction_entries}] if prediction_entries else []
+      }
+
+      # Save consolidated task
+      task_file = os.path.join(shard_output_dir, f"consolidated_shard_{shard_number}_labelstudio_task.json")
+      with open(task_file, 'w') as f:
+          json.dump(task, f, indent=2)
+
+      logger.info(f"Generated consolidated Label Studio task for shard {shard_number} with {len(prediction_entries)} predictions")
+      return task_file
 
 if __name__ == "__main__":
     import argparse

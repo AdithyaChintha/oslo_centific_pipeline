@@ -14,7 +14,10 @@ def get_logger(name: str = "ray_pipeline", level: int = logging.INFO) -> logging
     """
     logger = logging.getLogger(name)
     logger.setLevel(level)
-
+    # logger = logging.getLogger("AzurePipelineWrapper")
+    logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.ERROR)  # Hide HTTP request/response details
+    logging.getLogger("azure.storage.blob").setLevel(logging.WARNING)  # Show warnings and errors only
+    logging.getLogger("azure.core").setLevel(logging.WARNING)  # General Azure core logging
     if not logger.handlers:
         handler = logging.StreamHandler(sys.stdout)
         formatter = logging.Formatter(

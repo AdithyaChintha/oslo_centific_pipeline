@@ -33,7 +33,8 @@ from ray_jobs.clap_detector import detect_claps_in_media
 from ray_jobs.nsfw_det_final import process_video_chunks_for_nsfw
 from ray_jobs.motion_energy import compute_motion_energy
 from ray_jobs.face_age_detector import process_video_chunks_for_face_detection
-from ray_jobs.labelstudio_tasks import build_labelstudio_json_for_shard_task, import_to_labelstudio_task
+from ray_jobs.labelstudio_tasks import assign_views_to_labelstudio_positions, generate_multiview_4view_labelstudio_task, generate_consolidated_shard_labelstudio_task, import_consolidated_tasks_to_labelstudio
+   
 from ray_jobs.video_unwarp_task import erp_unwarp_task
 
 
@@ -1035,7 +1036,7 @@ def consolidate_dual_view_outputs(all_results, local_outputs_dir, conv_time, loc
 
 def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str, 
                  process_dual_views: bool = None, process_unwarped_views: bool = False,
-                 azure_blob_client=None, azure_container=None, azure_output_prefix=None, azure_account_name: str = None, azure_account_key: str = None):
+                 azure_blob_client=None, azure_container=None, azure_output_prefix=None, azure_account_name: str = None, azure_account_key: str = None, pipeline_config = None):
     """
     Unified Ray pipeline for video analysis with optional dual-view processing for INSV files
     """
@@ -1147,70 +1148,58 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
 
         # Process each shard index across all views
         label_studio_tasks = []
-        for shard_idx in range(min_shards):
-            shard_offset_sec = shard_idx * 60
-            
-            # Build dict of view -> shard URL for this index
-            view_urls_for_shard = {}
-            view_results_for_shard = {}
+        consolidated_json_paths = []
 
+        logger.info(f"🎬 Processing {min_shards} unwarped shards with {len(view_shards)} views using equal processing")
+        logger.info(f"🎯 All views will be processed equally: {list(view_shards.keys())}")
+
+        for shard_idx in range(min_shards):
+            # Prepare view shard paths and URLs for this shard
+            shard_view_paths = {}
+            shard_view_urls = {}
+            
             for view_name in view_shards:
                 if shard_idx < len(view_shards[view_name]):
-                    v_shard = view_shards[view_name][shard_idx]
-                    v_url = view_shard_urls[view_name].get(shard_idx, v_shard)
-                    view_urls_for_shard[view_name] = v_url
-
-                    # Pair audio shard by index
-                    a_shard = audio_shards[shard_idx] if shard_idx < len(audio_shards) else input_audio_path
-
-                    # Process this view's shard through the models
-                    shard_output_dir = os.path.join(output_dir, f"{view_name}_shard_{shard_idx+1}")
-                    os.makedirs(shard_output_dir, exist_ok=True)
-                    view_results = process_single_shard_through_pipeline(
-                        v_shard, a_shard, shard_output_dir, shard_offset_sec, shard_idx
-                    )
-                    view_results_for_shard[view_name] = view_results
-
-            if not view_urls_for_shard:
+                    shard_view_paths[view_name] = view_shards[view_name][shard_idx]
+                    shard_view_urls[view_name] = view_shard_urls[view_name].get(shard_idx, shard_view_paths[view_name])
+            
+            if not shard_view_paths:
                 logger.warning(f"No video shards found for shard index {shard_idx}, skipping")
                 continue
-
-            # For simplified processing, just use the results from first view for now
-            # TODO: Add proper multi-view consolidation like in dub.py
-            first_view_results = list(view_results_for_shard.values())[0] if view_results_for_shard else {}
             
-            # Choose up to 2 primary views for left/right for UI
-            view_names_sorted = sorted(view_urls_for_shard.keys())
-            primary_left = view_urls_for_shard.get(view_names_sorted[0], "") if view_names_sorted else ""
-            primary_right = view_urls_for_shard.get(view_names_sorted[1], "") if len(view_names_sorted) > 1 else ""
-
-            # Generate Label Studio task for this shard
-            task_json_path = generate_consolidated_shard_labelstudio_task(
-                os.path.join(output_dir, f"shard_{shard_idx+1}"),
-                primary_left,
-                primary_right,
-                first_view_results,
-                shard_idx + 1,
-                shard_offset_sec,
-                audio_urls.get(shard_idx, audio_shards[shard_idx]) if shard_idx < len(audio_shards) else "",
-                min_shards,  # total_shards
-                video_name   # video_name
+            # Get audio for this shard
+            audio_shard = audio_shards[shard_idx] if shard_idx < len(audio_shards) else input_audio_path
+            audio_url = audio_urls.get(shard_idx, audio_shard)
+            
+            # Process all views equally using new multi-view function
+            shard_results = process_time_aligned_shard_multiview(
+                shard_index=shard_idx,
+                view_shard_paths=shard_view_paths,
+                audio_shard_path=audio_shard,
+                base_output_dir=output_dir,
+                view_azure_urls=shard_view_urls,
+                audio_url=audio_url,
+                total_shard_count=min_shards,
+                video_name=video_name
             )
             
-            if task_json_path:
-                label_studio_tasks.append(task_json_path)
-                
-                # Merge model results into labelstudio task right after creation
-                try:
-                    shard_dir = os.path.join(output_dir, f"shard_{shard_idx+1}")
-                    merge_model_results_into_labelstudio_task(shard_dir, shard_idx + 1)
-                    logger.info(f"📋 Enhanced shard {shard_idx + 1} labelstudio task with model results")
-                except Exception as e:
-                    logger.error(f"❌ Failed to enhance shard {shard_idx + 1} labelstudio task: {e}")
-        
-        # Import all generated tasks to Label Studio in one batch
-        import_consolidated_tasks_to_labelstudio(label_studio_tasks)   
+            label_studio_tasks.append(shard_results['label_studio_task'])
+            consolidated_json_paths.append(shard_results['consolidated_model_results_json'])
+            
+            logger.info(f"✅ Completed multi-view processing for shard {shard_idx + 1}: {shard_results['total_views_processed']} views, {shard_results['successful_views']} successful")
 
+        # Add missing final processing steps  
+        generate_final_combined_model_results_json(output_dir, consolidated_json_paths)
+        import_consolidated_tasks_to_labelstudio(label_studio_tasks,pipeline_config)
+        if azure_blob_client and azure_container:
+            video_name_for_upload = os.path.basename(output_dir)
+            upload_result = upload_output_directory_to_blob(
+                output_dir, azure_blob_client, azure_container,
+                azure_output_prefix, video_name_for_upload
+            )
+            logger.info(f"📤 Multi-view upload result: {'✅ Success' if upload_result['success'] else '❌ Failed'}")
+            if not upload_result['success']:
+                logger.error(f"Upload error: {upload_result.get('error', 'Unknown error')}")
         return create_consolidated_summary(label_studio_tasks, output_dir)
         
     elif process_dual_views and is_insv_file:
@@ -1285,14 +1274,14 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
         generate_final_combined_model_results_json(output_dir, consolidated_json_paths)
         
         # Import consolidated tasks to Label Studio
-        import_consolidated_tasks_to_labelstudio(label_studio_tasks)
+        import_consolidated_tasks_to_labelstudio(label_studio_tasks,pipeline_config)
         
         # Upload output directory to Azure blob storage
         if azure_blob_client and azure_container:
             video_name = os.path.basename(output_dir)
             upload_result = upload_output_directory_to_blob(
                 output_dir, azure_blob_client, azure_container,
-                "krishna-test/test1/test_activity", video_name
+                azure_output_prefix, video_name
             )
             logger.info(f"📤 Upload result: {'✅ Success' if upload_result['success'] else '❌ Failed'}")
             if not upload_result['success']:
@@ -1324,7 +1313,8 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
                     azure_container,
                     azure_output_prefix,
                     azure_account_name,        
-                    azure_account_key          
+                    azure_account_key,
+                    pipeline_config          
                 )
 
 def generate_consolidated_model_results_json(shard_output_dir, shard_number, view1_results, view2_results, total_shards=None, video_name=None):
@@ -1505,6 +1495,672 @@ def generate_final_combined_model_results_json(output_dir, consolidated_json_pat
     
     return final_json_file
 
+def consolidate_multiview_time_segment_results(view_results, shard_index, shard_offset_sec):
+    """
+    Consolidate results from multiple views (4+) for a single time segment.
+    All views are treated equally in the consolidation process.
+    
+    Args:
+        view_results: Dict of {view_name: view_result}
+        shard_index: Current shard index
+        shard_offset_sec: Time offset in seconds
+    
+    Returns:
+        Dict with consolidated multi-view results
+    """
+    consolidated = {
+        "shard_index": shard_index,
+        "shard_offset_sec": shard_offset_sec,
+        "time_range": f"{shard_offset_sec}-{shard_offset_sec + 60}s",
+        "processing_type": "multi_view_equal_processing",
+        "total_views": len(view_results),
+        "view_results": view_results,
+        "consolidated_predictions_for_ls": {},
+        "merged_flagged_segments": [],
+        "cross_view_analysis": {}
+    }
+    
+    # --- CONSOLIDATE FLAGGED SEGMENTS ACROSS ALL VIEWS ---
+    all_segments = []
+    
+    for view_name, view_result in view_results.items():
+        if view_result.get('success', True) and view_result.get('flagged_segments'):
+            # Tag each segment with its source view
+            view_segments = [
+                dict(seg, **{"source_view": view_name}) 
+                for seg in view_result.get('flagged_segments', [])
+            ]
+            all_segments.extend(view_segments)
+    
+    # Use existing merge function but with tolerance for multiple views
+    consolidated['merged_flagged_segments'] = merge_overlapping_segments(all_segments, tol=1.0)
+    
+    # --- CONSOLIDATED PREDICTIONS ---
+    consolidated['consolidated_predictions_for_ls'] = create_multiview_consolidated_predictions(view_results)
+    
+    logger.info(f"✅ Consolidated {len(all_segments)} segments from {len(view_results)} views into {len(consolidated['merged_flagged_segments'])} merged segments")
+    
+    return consolidated
+
+def create_multiview_consolidated_predictions(view_results):
+    """
+    Build ONLY compliance predictions (PII, NSFW, Minors) in the same shape as the
+    manual `annotations.result` from complete-task.txt. All other model outputs (scene,
+    taxonomy, lighting, motion, yolo, clap, etc.) are intentionally omitted.
+
+    Expected label config (based on complete-task.txt):
+      - PII (audio):
+          * val_pii_audio (choices Yes/No)    -> to_name="audio_main"
+          * pii_type_audio (choices [...])    -> to_name="audio_main"
+          * audio_labels_pii (labels spans)   -> to_name="audio_main", labels=["PII Issue"]
+      - NSFW (video):
+          * val_nudity_video (choices Yes/No) -> to_name="video_left" (or the view you prefer)
+          * nudity_start_minute (number)
+          * nudity_start_second (number)
+          * nudity_end_minute (number)
+          * nudity_end_second (number)
+      - Minors (video):
+          * val_minors_video (choices Yes/No) -> to_name="video_left"
+          * minors_start_minute (number)
+          * minors_start_second (number)
+          * minors_end_minute (number)
+          * minors_end_second (number)
+      - Optional comments (textarea):
+          * compliance_video_comment  -> to_name="md_home_id"
+          * compliance_audio_comment  -> to_name="md_home_id"
+    """
+    def _mk_id(prefix):
+        # short stable-ish ids; LS doesn't require UUIDs, only uniqueness in the list
+        import random, string
+        return f"{prefix}_{''.join(random.choices(string.ascii_letters + string.digits, k=6))}"
+
+    predictions = []
+
+    # -----------------------------
+    # 1) PII (Audio-only)
+    # -----------------------------
+    pii_spans = []        # list of (start_sec, end_sec)
+    pii_types = set()     # label choices for pii_type_audio (e.g., "Addresses", "Full names"...)
+
+    # Consolidate across all views (audio is shared but many pipelines attach under each view)
+    for view_name, view_result in view_results.items():
+        if not view_result.get("success", True):
+            continue
+        audio_list = view_result.get("audio") or []
+        if not isinstance(audio_list, list) or not audio_list:
+            continue
+        audio_res = audio_list[0]
+        for pii in (audio_res.get("pii_detections") or []):
+            try:
+                s = float(pii.get("start_time", 0))
+                e = float(pii.get("end_time", 0))
+            except Exception:
+                continue
+            if e > s:
+                pii_spans.append((s, e))
+            # Try to extract a human category for the choice list
+            # Common keys: 'type', 'pii_type', 'category', 'label'
+            for k in ("pii_type", "type", "category", "label"):
+                if pii.get(k):
+                    pii_types.add(str(pii[k]))
+                    break
+
+    # Normalize/Map some common pii types to your project's choice set from the example
+    # Example showed: "Addresses", "Financial or Account Numbers", "Full names"
+    def _normalize_pii_type(t):
+        t_low = t.lower()
+        if "address" in t_low:
+            return "Addresses"
+        if "financial" in t_low or "account" in t_low or "credit" in t_low or "card" in t_low or "ssn" in t_low:
+            return "Financial or Account Numbers"
+        if "name" in t_low or "fullname" in t_low or "full name" in t_low:
+            return "Full names"
+        return None
+
+    mapped_types = []
+    for t in pii_types:
+        mt = _normalize_pii_type(t)
+        if mt:
+            mapped_types.append(mt)
+
+    if pii_spans:
+        # Presence
+        predictions.append({
+            "id": _mk_id("pii_present"),
+            "type": "choices",
+            "value": {"choices": ["Yes"]},
+            "model_version": "auto_preannotator_v1",
+            "from_name": "val_pii_audio",
+            "to_name": "audio_main"
+        })
+
+        # Types (if any recognized; if not, default to "Full names" as a safe fallback)
+        if not mapped_types:
+            mapped_types = ["Full names"]
+        predictions.append({
+            "id": _mk_id("pii_types"),
+            "type": "choices",
+            "value": {"choices": sorted(set(mapped_types))},
+            "model_version": "auto_preannotator_v1",
+            "from_name": "pii_type_audio",
+            "to_name": "audio_main"
+        })
+
+        # Spans (multiple)
+        # Label name must exist in your config; example uses "PII Issue"
+        for s, e in sorted(pii_spans, key=lambda x: x[0]):
+            predictions.append({
+                "id": _mk_id("pii_span"),
+                "type": "labels",
+                "value": {
+                    "start": float(s),
+                    "end": float(e),
+                    "labels": ["PII Issue"],
+                    "channel": 0
+                },
+                "model_version": "auto_preannotator_v1",
+                "from_name": "audio_labels_pii",
+                "to_name": "audio_main"
+            })
+    else:
+        # Explicitly mark "No" if you want negatives emitted; otherwise omit these three
+        predictions.append({
+            "id": _mk_id("pii_present"),
+            "type": "choices",
+            "value": {"choices": ["No"]},
+            "model_version": "auto_preannotator_v1",
+            "from_name": "val_pii_audio",
+            "to_name": "audio_main"
+        })
+
+    # -----------------------------
+    # 2) NSFW (Video)
+    # -----------------------------
+    nsfw_segments = []   # list of dicts with start_time/end_time
+    for view_name, view_result in view_results.items():
+        if not view_result.get("success", True):
+            continue
+        nsfw = view_result.get("nsfw") or {}
+        if nsfw.get("success") and nsfw.get("total_nsfw_detections", 0) > 0:
+            for seg in nsfw.get("flagged_segments", []) or []:
+                s = float(seg.get("start_time", 0))
+                e = float(seg.get("end_time", 0))
+                if e > s:
+                    nsfw_segments.append((s, e))
+
+    if nsfw_segments:
+        nsfw_segments.sort(key=lambda x: x[0])
+        s, e = nsfw_segments[0]
+        s_min, s_sec = int(s // 60), int(s % 60)
+        e_min, e_sec = int(e // 60), int(e % 60)
+
+        predictions.append({
+            "id": _mk_id("nudity_yes"),
+            "type": "choices",
+            "value": {"choices": ["Yes"]},
+            "model_version": "auto_preannotator_v1",
+            "from_name": "val_nudity_video",
+            "to_name": "video_left"
+        })
+        predictions.extend([
+            {
+                "id": _mk_id("nudity_smin"),
+                "type": "number",
+                "value": {"number": s_min},
+                "model_version": "auto_preannotator_v1",
+                "from_name": "nudity_start_minute",
+                "to_name": "video_left"
+            },
+            {
+                "id": _mk_id("nudity_ssec"),
+                "type": "number",
+                "value": {"number": s_sec},
+                "model_version": "auto_preannotator_v1",
+                "from_name": "nudity_start_second",
+                "to_name": "video_left"
+            },
+            {
+                "id": _mk_id("nudity_emin"),
+                "type": "number",
+                "value": {"number": e_min},
+                "model_version": "auto_preannotator_v1",
+                "from_name": "nudity_end_minute",
+                "to_name": "video_left"
+            },
+            {
+                "id": _mk_id("nudity_esec"),
+                "type": "number",
+                "value": {"number": e_sec},
+                "model_version": "auto_preannotator_v1",
+                "from_name": "nudity_end_second",
+                "to_name": "video_left"
+            }
+        ])
+    else:
+        predictions.append({
+            "id": _mk_id("nudity_no"),
+            "type": "choices",
+            "value": {"choices": ["No"]},
+            "model_version": "auto_preannotator_v1",
+            "from_name": "val_nudity_video",
+            "to_name": "video_left"
+        })
+
+    # -----------------------------
+    # 3) Minors (Video)
+    # -----------------------------
+    minor_segments = []
+    for view_name, view_result in view_results.items():
+        if not view_result.get("success", True):
+            continue
+        face = view_result.get("face") or {}
+        if not face.get("success"):
+            continue
+        for seg in face.get("flagged_segments", []) or []:
+            desc = str(seg.get("description", "")).lower()
+            ftype = str(seg.get("flag_type", "")).lower()
+            if "minor" in desc or "minor" in ftype:
+                s = float(seg.get("start_time", 0))
+                e = float(seg.get("end_time", 0))
+                if e > s:
+                    minor_segments.append((s, e))
+
+    if minor_segments:
+        minor_segments.sort(key=lambda x: x[0])
+        s, e = minor_segments[0]
+        s_min, s_sec = int(s // 60), int(s % 60)
+        e_min, e_sec = int(e // 60), int(e % 60)
+
+        predictions.append({
+            "id": _mk_id("minors_yes"),
+            "type": "choices",
+            "value": {"choices": ["Yes"]},
+            "model_version": "auto_preannotator_v1",
+            "from_name": "val_minors_video",
+            "to_name": "video_left"
+        })
+        predictions.extend([
+            {
+                "id": _mk_id("minors_smin"),
+                "type": "number",
+                "value": {"number": s_min},
+                "model_version": "auto_preannotator_v1",
+                "from_name": "minors_start_minute",
+                "to_name": "video_left"
+            },
+            {
+                "id": _mk_id("minors_ssec"),
+                "type": "number",
+                "value": {"number": s_sec},
+                "model_version": "auto_preannotator_v1",
+                "from_name": "minors_start_second",
+                "to_name": "video_left"
+            },
+            {
+                "id": _mk_id("minors_emin"),
+                "type": "number",
+                "value": {"number": e_min},
+                "model_version": "auto_preannotator_v1",
+                "from_name": "minors_end_minute",
+                "to_name": "video_left"
+            },
+            {
+                "id": _mk_id("minors_esec"),
+                "type": "number",
+                "value": {"number": e_sec},
+                "model_version": "auto_preannotator_v1",
+                "from_name": "minors_end_second",
+                "to_name": "video_left"
+            }
+        ])
+    else:
+        predictions.append({
+            "id": _mk_id("minors_no"),
+            "type": "choices",
+            "value": {"choices": ["No"]},
+            "model_version": "auto_preannotator_v1",
+            "from_name": "val_minors_video",
+            "to_name": "video_left"
+        })
+
+    # -----------------------------
+    # 4) Optional: auto-fill comment textareas like the example
+    # -----------------------------
+    # If both NSFW and minors true, mirror example comment "nsfw and minor"; if PII true, comment "PII"
+    nsfw_yes = any(p.get("from_name") == "val_nudity_video" and "Yes" in p["value"]["choices"] for p in predictions if p["type"] == "choices")
+    minors_yes = any(p.get("from_name") == "val_minors_video" and "Yes" in p["value"]["choices"] for p in predictions if p["type"] == "choices")
+    pii_yes = any(p.get("from_name") == "val_pii_audio" and "Yes" in p["value"]["choices"] for p in predictions if p["type"] == "choices")
+
+    if nsfw_yes or minors_yes:
+        txt = "nsfw and minor" if (nsfw_yes and minors_yes) else ("nsfw" if nsfw_yes else "minor")
+        predictions.append({
+            "id": _mk_id("comment_video"),
+            "type": "textarea",
+            "value": {"text": [txt]},
+            "model_version": "auto_preannotator_v1",
+            "from_name": "compliance_video_comment",
+            "to_name": "md_home_id"
+        })
+
+    if pii_yes:
+        predictions.append({
+            "id": _mk_id("comment_audio"),
+            "type": "textarea",
+            "value": {"text": ["PII"]},
+            "model_version": "auto_preannotator_v1",
+            "from_name": "compliance_audio_comment",
+            "to_name": "md_home_id"
+        })
+
+    # Done — ONLY PII/NSFW/Minors predictions are returned.
+    return predictions
+
+def generate_multiview_consolidated_model_results_json(shard_output_dir, shard_number, view_results, total_shards=None, video_name=None):
+    """
+    Generate consolidated JSON file with all views as top-level keys.
+    
+    Args:
+        shard_output_dir: Directory to save the consolidated JSON
+        shard_number: Shard number for filename
+        view_results: Dict of {view_name: view_result} for all views
+        total_shards: Total number of shards
+        video_name: Name of the video being processed
+        
+    Returns:
+        Path to the generated consolidated JSON file
+    """
+    # Extract detection flags from any successful view
+    detection_flags = {}
+    for view_result in view_results.values():
+        if view_result.get('success', True) and view_result.get('detection_flags'):
+            detection_flags = view_result['detection_flags']
+            break
+    
+    # If no detection flags found, create default
+    if not detection_flags:
+        detection_flags = {
+            "is_first_shard": False,
+            "is_last_shard": False,
+            "is_intro_statement_there": False,
+            "intro_transcript": "",
+            "shard_index": shard_number - 1,
+            "shard_type": "middle",
+            "is_first_shard_processed": False,
+            "is_last_shard_processed": False,
+            "total_views_processed": len(view_results),
+            "processing_type": "multi_view_equal_processing"
+        }
+    
+    consolidated_data = {
+        "shard_info": {
+            "shard_number": shard_number,
+            "shard_id": shard_number,
+            "total_shards": total_shards,
+            "video_name": video_name,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "processing_type": "multi_view_unwarped_equal",
+            "total_views_processed": len(view_results),
+            "successful_views": len([v for v in view_results.values() if v.get('success', True)])
+        },
+        "detection_flags": detection_flags,
+        "view_results": {}
+    }
+    
+    # Add all view results
+    for view_name, view_result in view_results.items():
+        consolidated_data["view_results"][view_name] = {
+            "success": view_result.get('success', True),
+            "audio": view_result.get('audio', {}),
+            "yolo": view_result.get('yolo', {}),
+            "scene": view_result.get('scene', {}),
+            "nsfw": view_result.get('nsfw', {}),
+            "motion": view_result.get('motion', {}),
+            "face": view_result.get('face', {}),
+            "clap": view_result.get('clap', {}),
+            "flagged_segments": view_result.get('flagged_segments', [])
+        }
+    
+    # Save consolidated JSON
+    consolidated_json_path = os.path.join(shard_output_dir, f"shard_{shard_number}_consolidated_model_results.json")
+    with open(consolidated_json_path, 'w') as f:
+        json.dump(consolidated_data, f, indent=2)
+    
+    logger.info(f"💾 Saved multi-view consolidated results: {consolidated_json_path}")
+    return consolidated_json_path
+
+
+def process_time_aligned_shard_multiview(
+    shard_index,
+    view_shard_paths,          # Dict: {view_name: shard_path}
+    audio_shard_path,
+    base_output_dir,
+    view_azure_urls,           # Dict: {view_name: azure_url}
+    audio_url,
+    total_shard_count=None,
+    video_name=None
+):
+    """
+    Process one time-aligned shard across multiple views (4+).
+    All views are processed equally and consolidated intelligently.
+    
+    Enhanced with first/last shard clap detection and comprehensive multi-view analysis.
+    
+    Args:
+        shard_index: Index of current shard
+        view_shard_paths: Dict of {view_name: shard_path} for all views
+        audio_shard_path: Path to audio shard
+        base_output_dir: Base output directory
+        view_azure_urls: Dict of {view_name: azure_url} for all views
+        audio_url: Audio Azure URL
+        total_shard_count: Total shards for first/last detection
+        video_name: Video name for metadata
+    
+    Returns:
+        Dict with consolidated multi-view results
+    """
+    shard_output_dir = os.path.join(base_output_dir, f"shard_{shard_index+1}")
+    shard_offset_sec = shard_index * 60
+    os.makedirs(shard_output_dir, exist_ok=True)
+
+    logger.info(f"🎬 Processing shard {shard_index+1} with {len(view_shard_paths)} views: {list(view_shard_paths.keys())}")
+
+    # --- ENHANCED FIRST/LAST SHARD CLAP DETECTION (REUSE EXISTING LOGIC) ---
+    is_first_shard = (shard_index == 0)
+    is_last_shard = (total_shard_count and shard_index == total_shard_count - 1)
+    
+    clap_detected_in_first_shard = False
+    clap_detected_in_last_shard = False
+
+    if is_first_shard or is_last_shard:
+        shard_type = "first" if is_first_shard else "last"
+        logger.info(f"🔍 CLAP DETECTION for {shard_type} shard {shard_index+1}")
+        
+        if is_first_shard:
+            logger.info(f"🎬 FIRST SHARD - will check clap detection results from all views")
+        else:
+            logger.info(f"🎬 LAST SHARD - will check clap detection results from all views")
+    else:
+        logger.info(f"ℹ️ Shard {shard_index+1} is middle shard - no special clap processing")
+
+    # --- PROCESS ALL VIEWS EQUALLY ---
+    view_results = {}
+    
+    for view_name, view_shard_path in view_shard_paths.items():
+        if not view_shard_path or not os.path.exists(view_shard_path):
+            logger.warning(f"⚠️ View {view_name} shard not found: {view_shard_path}")
+            continue
+            
+        logger.info(f"Processing {view_name} of shard {shard_index+1}")
+        view_output_dir = os.path.join(shard_output_dir, f"{view_name}")
+        os.makedirs(view_output_dir, exist_ok=True)
+        
+        try:
+            # Process each view through the full pipeline
+            view_result = process_single_shard_through_pipeline(
+                view_shard_path, audio_shard_path, view_output_dir, shard_offset_sec, shard_index
+            )
+            view_results[view_name] = view_result
+            logger.info(f"✅ Successfully processed {view_name} for shard {shard_index+1}")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to process {view_name} for shard {shard_index+1}: {e}")
+            view_results[view_name] = {"error": str(e), "success": False}
+
+    if not view_results:
+        raise RuntimeError(f"No views successfully processed for shard {shard_index+1}")
+
+    logger.info(f"✅ Successfully processed {len(view_results)} views for shard {shard_index+1}")
+
+    # --- ENHANCED CLAP DETECTION ANALYSIS ACROSS ALL VIEWS ---
+    is_intro_statement_there = False
+    intro_transcript = ""
+    
+    if is_first_shard or is_last_shard:
+        # Analyze clap detection results from all views
+        clap_detections = []
+        all_transcripts = []
+        
+        for view_name, view_result in view_results.items():
+            if view_result.get('success', True):  # Only process successful views
+                clap_results = view_result.get('clap', {})
+                if clap_results.get('success'):
+                    clap_count = clap_results.get('clap_count', 0)
+                    clap_detections.append({
+                        'view': view_name,
+                        'clap_count': clap_count,
+                        'clap_detected': clap_count > 0
+                    })
+                
+                # Collect transcripts from all views
+                audio_results = view_result.get('audio', [])
+                if isinstance(audio_results, list) and audio_results:
+                    audio_result = audio_results[0]
+                    transcript = audio_result.get('transcript', '').strip()
+                    if transcript:
+                        all_transcripts.append({
+                            'view': view_name,
+                            'transcript': transcript
+                        })
+        
+        # Aggregate clap detection across views
+        total_claps = sum(detection['clap_count'] for detection in clap_detections)
+        views_with_claps = [d['view'] for d in clap_detections if d['clap_detected']]
+        clap_detected = total_claps > 0
+        
+        if is_first_shard:
+            clap_detected_in_first_shard = clap_detected
+            logger.info(f"🎬 FIRST SHARD multi-view clap detection:")
+            logger.info(f"   Total claps across all views: {total_claps}")
+            logger.info(f"   Views with claps: {views_with_claps}")
+            logger.info(f"   Overall detection: {'✅ DETECTED' if clap_detected else '❌ NOT DETECTED'}")
+            
+            # --- MULTI-VIEW INTRO STATEMENT DETECTION ---
+            logger.info(f"🎤 ANALYZING FIRST SHARD for intro statement across {len(all_transcripts)} views...")
+            
+            if all_transcripts:
+                # Find the longest transcript (likely the best quality)
+                best_transcript = max(all_transcripts, key=lambda x: len(x['transcript']))
+                intro_transcript = best_transcript['transcript']
+                
+                # Intro detection logic
+                intro_keywords = [
+                    "i'm going to", "i will", "today we", "welcome", "hello", "hi there",
+                    "let's", "we're going to", "this is", "in this", "i am going to",
+                    "we will", "starting with", "first we", "beginning", "introduction"
+                ]
+                
+                transcript_lower = intro_transcript.lower()
+                has_intro_keywords = any(keyword in transcript_lower for keyword in intro_keywords)
+                has_meaningful_content = len(intro_transcript.strip()) > 10
+                
+                is_intro_statement_there = has_intro_keywords or has_meaningful_content
+                
+                logger.info(f"🗣️ INTRO STATEMENT: {'✅ DETECTED' if is_intro_statement_there else '❌ NOT DETECTED'}")
+                logger.info(f"📝 Best transcript from {best_transcript['view']}: '{intro_transcript}'")
+                
+                if has_intro_keywords:
+                    matched_keywords = [kw for kw in intro_keywords if kw in transcript_lower]
+                    logger.info(f"🔤 Intro keywords found: {matched_keywords}")
+                    
+                # Log all transcripts for analysis
+                for transcript_data in all_transcripts:
+                    logger.info(f"📝 {transcript_data['view']}: '{transcript_data['transcript']}'")
+            else:
+                logger.info(f"📝 No transcripts found across any views in first shard")
+                
+        else:  # is_last_shard
+            clap_detected_in_last_shard = clap_detected
+            logger.info(f"🎬 LAST SHARD multi-view clap detection:")
+            logger.info(f"   Total claps across all views: {total_claps}")
+            logger.info(f"   Views with claps: {views_with_claps}")
+            logger.info(f"   Overall detection: {'✅ DETECTED' if clap_detected else '❌ NOT DETECTED'}")
+
+    # --- CREATE ENHANCED DETECTION FLAGS ---
+    detection_flags = {
+        "is_first_shard": clap_detected_in_first_shard,
+        "is_last_shard": clap_detected_in_last_shard,
+        "is_intro_statement_there": is_intro_statement_there,
+        "intro_transcript": intro_transcript,
+        "shard_index": shard_index,
+        "shard_type": "first" if is_first_shard else ("last" if is_last_shard else "middle"),
+        "is_first_shard_processed": is_first_shard,
+        "is_last_shard_processed": is_last_shard,
+        "total_views_processed": len(view_results),
+        "successful_views": len([v for v in view_results.values() if v.get('success', True)]),
+        "processing_type": "multi_view_equal_processing"
+    }
+    
+    # Add detection flags to all view results
+    for view_name, view_result in view_results.items():
+        if view_result.get('success', True):
+            view_result['detection_flags'] = detection_flags
+
+    # --- GENERATE MULTI-VIEW CONSOLIDATED MODEL RESULTS JSON ---
+    logger.info(f"Generating multi-view consolidated model results JSON for shard {shard_index+1}")
+    consolidated_json_path = generate_multiview_consolidated_model_results_json(
+        shard_output_dir, shard_index+1, view_results, total_shard_count, video_name
+    )
+
+    # --- CONSOLIDATE ALL VIEWS ---
+    logger.info(f"Consolidating results from {len(view_results)} views for shard {shard_index+1}")
+    consolidated_results = consolidate_multiview_time_segment_results(
+        view_results, shard_index, shard_offset_sec
+    )
+
+    # --- ASSIGN ALL 4 VIEWS TO LABEL STUDIO UI POSITIONS ---
+    # Assign all views to specific positions: video_top, video_left, video_right, video_bottom
+    assigned_views = assign_views_to_labelstudio_positions(view_results, view_azure_urls)
+    
+    logger.info(f"🎯 Assigned views for Label Studio 4-view display:")
+    logger.info(f"   Top: {assigned_views.get('top', {}).get('view', 'None')}")
+    logger.info(f"   Left: {assigned_views.get('left', {}).get('view', 'None')}")
+    logger.info(f"   Right: {assigned_views.get('right', {}).get('view', 'None')}")
+    logger.info(f"   Bottom: {assigned_views.get('bottom', {}).get('view', 'None')}")
+
+    # --- GENERATE ENHANCED 4-VIEW LABEL STUDIO TASK ---
+    task_json_path = generate_multiview_4view_labelstudio_task(
+        shard_output_dir,
+        assigned_views,
+        consolidated_results,
+        shard_index+1,
+        shard_offset_sec,
+        audio_url,
+        total_shard_count,
+        video_name,
+        all_view_urls=view_azure_urls  # Pass all view URLs for metadata
+    )
+    
+    return {
+        "shard_index": shard_index,
+        "view_results": view_results,
+        "consolidated_results": consolidated_results,
+        "detection_flags": detection_flags,
+        "label_studio_task": task_json_path,
+        "consolidated_model_results_json": consolidated_json_path,
+        "total_views_processed": len(view_results),
+        "successful_views": len([v for v in view_results.values() if v.get('success', True)]),
+        "assigned_views": assigned_views
+    }
 
 def process_time_aligned_shard(
     shard_index,
@@ -1803,117 +2459,6 @@ def consolidate_time_segment_results(view1_results, view2_results, shard_index, 
     consolidated['merged_flagged_segments'] = merge_overlapping_segments_dual_view(all_segments)
     consolidated['consolidated_predictions'] = create_consolidated_predictions(view1_results, view2_results)
     return consolidated
-
-
-def generate_consolidated_shard_labelstudio_task(shard_output_dir, view1_azure_url, view2_azure_url, 
-                                                 consolidated_results, shard_number, shard_offset_sec, audio_url, total_shards=None, video_name=None):
-      """
-      Generate single Label Studio task with both view URLs and consolidated AI predictions
-      """
-      current_time = datetime.utcnow().isoformat() + "Z"
-
-      # Get prediction entries from consolidated results (already in correct format)
-      prediction_entries = consolidated_results['consolidated_predictions']
-
-      # Create task with both view URLs (matching annotation_json.json format)
-      task = {
-          "data": {
-                "meta": "",  # Required empty meta field
-                # Flattened metadata keys at root level to match UI template expectations
-                "meta.home_identifier": f"Shard_{shard_number}",
-                "meta.recording_datetime": current_time,
-                "meta.domain": "production",
-                "meta.actions": "",
-                # Additional metadata (these won't show in UI but good for context)
-                "shard_number": str(shard_number),
-                "shard_id": shard_number,
-                "total_shards": total_shards,
-                "video_name": video_name,
-                "timestamp": current_time,
-                "processing_type": "label_studio_task",
-                "shard_offset_seconds": str(shard_offset_sec), 
-                "segments_detected": str(len(prediction_entries)),
-                "video_left": view1_azure_url,
-                "video_right": view2_azure_url,
-                "audio": audio_url,
-                "home_id": "",
-                "start_datetime": "",
-                "end_datetime": "",
-                "total_duration": "",
-                "files_deleted": [],
-          },
-          
-          "annotations": [],  # Empty for new tasks
-          "predictions": [{"result": prediction_entries}] if prediction_entries else []
-      }
-
-      # Save consolidated task
-      task_file = os.path.join(shard_output_dir, f"consolidated_shard_{shard_number}_labelstudio_task.json")
-      with open(task_file, 'w') as f:
-          json.dump(task, f, indent=2)
-
-      logger.info(f"Generated consolidated Label Studio task for shard {shard_number} with {len(prediction_entries)} predictions")
-      return task_file
-
-def generate_multiview_shard_labelstudio_task(
-    base_output_dir: str,
-    shard_number: int,
-    shard_offset_sec: int,
-    view_urls: dict,
-    audio_url: str,
-    primary_left_url: str,
-    primary_right_url: str,
-    consolidated_results: dict,
-    total_shards: int
-):
-    """
-    Build a single LS task for a shard that includes audio and multiple video views in one request.
-    Adds shard_id and total_shards to the task data for identification.
-    """
-    current_time = datetime.utcnow().isoformat() + "Z"
-
-    # Use the existing prediction consolidator for up to two primary views if available
-    prediction_entries = consolidated_results.get('consolidated_predictions', []) or []
-
-    # Prepare data block with primary left/right plus extra views as additional fields
-    data_block = {
-        "meta": "",
-        "meta.home_identifier": f"Shard_{shard_number}",
-        "meta.recording_datetime": current_time,
-        "meta.domain": "production",
-        "meta.actions": "",
-        "shard_number": str(shard_number),
-        "shard_offset_seconds": str(shard_offset_sec),
-        "segments_detected": str(len(prediction_entries)),
-        "shard_id": str(shard_number),
-        "total_shards": str(total_shards),
-        "video_left": primary_left_url or "",
-        "video_right": primary_right_url or "",
-        "audio": audio_url or "",
-        "home_id": "",
-        "start_datetime": "",
-        "end_datetime": "",
-        "total_duration": "",
-        "files_deleted": []
-    }
-
-    # Attach additional views as dedicated fields, e.g., video_view_front, video_view_right, etc.
-    for view_name, url in (view_urls or {}).items():
-        data_block[f"video_view_{view_name}"] = url
-
-    task = {
-        "data": data_block,
-        "annotations": [],
-        "predictions": [{"result": prediction_entries}] if prediction_entries else []
-    }
-
-    task_file = os.path.join(base_output_dir, f"multiview_shard_{shard_number}_labelstudio_task.json")
-    with open(task_file, 'w') as f:
-        json.dump(task, f, indent=2)
-    logger.info(
-        f"Generated multi-view Label Studio task for shard {shard_number} with {len(view_urls or {})} views and audio"
-    )
-    return task_file
 
 def create_consolidated_predictions(view1_results, view2_results):
     """
@@ -2259,80 +2804,7 @@ def create_consolidated_predictions(view1_results, view2_results):
     
     return predictions
 
-def import_consolidated_tasks_to_labelstudio(task_file_paths, pipeline_config=None):
-    """
-    Import consolidated Label Studio tasks to Label Studio platform.
-    
-    Args:
-        task_file_paths: List of paths to consolidated task JSON files
-        pipeline_config: Pipeline configuration dict (optional, will load default if None)
-        
-    Returns:
-        dict: Import results with success/failure status
-    """
-    if not task_file_paths:
-        logger.warning("No task files provided for Label Studio import")
-        return {"success": False, "error": "No tasks to import"}
-    
-    # Filter out None values and verify files exist
-    valid_task_files = []
-    for task_file in task_file_paths:
-        if task_file and os.path.exists(task_file):
-            valid_task_files.append(task_file)
-        else:
-            logger.warning(f"Task file not found or invalid: {task_file}")
-    
-    if not valid_task_files:
-        logger.error("No valid task files found for import")
-        return {"success": False, "error": "No valid task files found"}
-    
-    # Load Label Studio configuration
-    if pipeline_config is None:
-        try:
-            pipeline_config = _load_pipeline_config()
-        except Exception as e:
-            logger.warning(f"⚠️ Could not load pipeline config for Label Studio settings: {e}")
-            pipeline_config = {}
-    
-    # Get Label Studio settings from config
-    label_studio_config = pipeline_config.get('label_studio', {})
-    server_url = label_studio_config.get('server_url', 'https://annotations-stg.oneforma2.com/')
-    api_token = label_studio_config.get('api_token', 'd75a31c7994b96099cfbf7d61e15cff643943853')
-    project_id = label_studio_config.get('project_id', '5458')
-    
-    logger.info(f"📤 Importing {len(valid_task_files)} consolidated tasks to Label Studio...")
-    logger.info(f"   Server: {server_url}")
-    logger.info(f"   Project ID: {project_id}")
-    
-    # Use existing Label Studio import functionality
-    try:
-        # Import using the existing import_to_labelstudio_task function
-        import_result_ref = import_to_labelstudio_task.remote(
-            valid_task_files,
-            server_url,
-            api_token,
-            project_id
-        )
-        
-        import_result = ray.get(import_result_ref)
-        
-        if import_result.get("success"):
-            logger.info(f"✅ Successfully imported {len(valid_task_files)} consolidated tasks to Label Studio")
-            return {
-                "success": True,
-                "imported_tasks": len(valid_task_files),
-                "result": import_result.get('result')
-            }
-        else:
-            logger.error(f"❌ Failed to import consolidated tasks: {import_result.get('error')}")
-            return {
-                "success": False,
-                "error": import_result.get('error')
-            }
-            
-    except Exception as e:
-        logger.error(f"Exception during consolidated task import: {e}")
-        return {"success": False, "error": str(e)}
+
 
 def create_consolidated_summary(label_studio_tasks, output_dir):
     """
@@ -2425,7 +2897,8 @@ def _process_single_view(
     azure_container=None,
     azure_output_prefix=None,
     azure_account_name: str = None,
-    azure_account_key: str = None
+    azure_account_key: str = None,
+    pipeline_config: dict = None
 ):
     """
     Single-view pipeline that reuses the SAME LS task creation & consolidation
@@ -2499,14 +2972,14 @@ def _process_single_view(
     generate_final_combined_model_results_json(output_dir, consolidated_json_paths)
 
     # --- Import all tasks to Label Studio (SAME function as dual-view) ---
-    import_consolidated_tasks_to_labelstudio(label_studio_tasks)
+    import_consolidated_tasks_to_labelstudio(label_studio_tasks, pipeline_config)
 
     # Upload output directory to Azure blob storage
     if azure_blob_client and azure_container:
         video_name = os.path.basename(output_dir)
         upload_result = upload_output_directory_to_blob(
             output_dir, azure_blob_client, azure_container,
-            "krishna-test/test1/test_activity", video_name
+            azure_output_prefix, video_name
         )
         logger.info(f"📤 Upload result: {'✅ Success' if upload_result['success'] else '❌ Failed'}")
         if not upload_result['success']:
@@ -2982,12 +3455,13 @@ def continuous_blob_polling_and_pipeline_task(azure_config_path: str = "blobfuse
                                 input_audio_path=audio_path,
                                 output_dir=video_output_dir,
                                 process_dual_views=None,  # Auto-detect
-                                process_unwarped_views=False,
+                                process_unwarped_views=True,
                                 azure_blob_client=blob_service_client,
                                 azure_container=container_name,
                                 azure_output_prefix=f"{output_prefix}/{video_name}",
                                 azure_account_name=account_name,
-                                azure_account_key=account_key
+                                azure_account_key=account_key,
+                                pipeline_config = pipeline_config
                             )
                             
                             processing_time = time.time() - start_time
