@@ -33,7 +33,8 @@ from ray_jobs.clap_detector import detect_claps_in_media
 from ray_jobs.nsfw_det_final import process_video_chunks_for_nsfw
 from ray_jobs.motion_energy import compute_motion_energy
 from ray_jobs.face_age_detector import process_video_chunks_for_face_detection
-from ray_jobs.labelstudio_tasks import build_labelstudio_json_for_shard_task, import_to_labelstudio_task
+from ray_jobs.labelstudio_tasks import assign_views_to_labelstudio_positions, generate_multiview_4view_labelstudio_task, generate_consolidated_shard_labelstudio_task, import_consolidated_tasks_to_labelstudio
+   
 from ray_jobs.video_unwarp_task import erp_unwarp_task
 
 
@@ -1033,7 +1034,7 @@ def consolidate_dual_view_outputs(all_results, local_outputs_dir, conv_time, loc
 
 def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str, 
                  process_dual_views: bool = None, process_unwarped_views: bool = False,
-                 azure_blob_client=None, azure_container=None, azure_output_prefix=None, azure_account_name: str = None, azure_account_key: str = None):
+                 azure_blob_client=None, azure_container=None, azure_output_prefix=None, azure_account_name: str = None, azure_account_key: str = None, pipeline_config = None):
     """
     Unified Ray pipeline for video analysis with optional dual-view processing for INSV files
     """
@@ -1187,7 +1188,7 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
 
         # Add missing final processing steps  
         generate_final_combined_model_results_json(output_dir, consolidated_json_paths)
-        import_consolidated_tasks_to_labelstudio(label_studio_tasks)
+        import_consolidated_tasks_to_labelstudio(label_studio_tasks,pipeline_config)
         if azure_blob_client and azure_container:
             video_name_for_upload = os.path.basename(output_dir)
             upload_result = upload_output_directory_to_blob(
@@ -1271,7 +1272,7 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
         generate_final_combined_model_results_json(output_dir, consolidated_json_paths)
         
         # Import consolidated tasks to Label Studio
-        import_consolidated_tasks_to_labelstudio(label_studio_tasks)
+        import_consolidated_tasks_to_labelstudio(label_studio_tasks,pipeline_config)
         
         # Upload output directory to Azure blob storage
         if azure_blob_client and azure_container:
@@ -1310,7 +1311,8 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
                     azure_container,
                     azure_output_prefix,
                     azure_account_name,        
-                    azure_account_key          
+                    azure_account_key,
+                    pipeline_config          
                 )
 
 def generate_consolidated_model_results_json(shard_output_dir, shard_number, view1_results, view2_results, total_shards=None, video_name=None):
@@ -1850,72 +1852,7 @@ def create_multiview_consolidated_predictions(view_results):
 
     # Done — ONLY PII/NSFW/Minors predictions are returned.
     return predictions
-def assign_views_to_labelstudio_positions(view_results, view_azure_urls):
-    """
-    Assign all available views to Label Studio 4-view positions: 
-    video_top, video_left, video_right, video_bottom.
-    
-    Args:
-        view_results: Dict of {view_name: view_result}
-        view_azure_urls: Dict of {view_name: azure_url}
-    
-    Returns:
-        Dict with view assignments for all 4 positions
-    """
-    available_views = list(view_results.keys())
-    
-    # Initialize positions
-    positions = {
-        'top': None,
-        'left': None, 
-        'right': None,
-        'bottom': None
-    }
-    
-    # Smart assignment based on view names and available views
-    assignment_rules = {
-        'top': ['front', 'forward', 'top', 'view1', 'view_1'],
-        'left': ['left', 'side_left', 'view2', 'view_2'],
-        'right': ['right', 'side_right', 'view3', 'view_3'], 
-        'bottom': ['back', 'rear', 'bottom', 'view4', 'view_4']
-    }
-    
-    # First pass: Assign based on naming patterns
-    used_views = set()
-    for position, keywords in assignment_rules.items():
-        for view_name in available_views:
-            if view_name in used_views:
-                continue
-            view_lower = view_name.lower()
-            if any(keyword in view_lower for keyword in keywords):
-                positions[position] = {
-                    'view': view_name,
-                    'url': view_azure_urls.get(view_name, ""),
-                    'result': view_results.get(view_name, {})
-                }
-                used_views.add(view_name)
-                break
-    
-    # Second pass: Fill remaining positions with available views
-    remaining_views = [v for v in available_views if v not in used_views]
-    empty_positions = [pos for pos, assignment in positions.items() if assignment is None]
-    
-    for i, position in enumerate(empty_positions):
-        if i < len(remaining_views):
-            view_name = remaining_views[i]
-            positions[position] = {
-                'view': view_name,
-                'url': view_azure_urls.get(view_name, ""),
-                'result': view_results.get(view_name, {})
-            }
-    
-    # Log the assignments
-    logger.info(f"📊 View-to-position assignments:")
-    for position, assignment in positions.items():
-        view_name = assignment['view'] if assignment else 'None'
-        logger.info(f"   {position}: {view_name}")
-    
-    return positions
+
 def generate_multiview_consolidated_model_results_json(shard_output_dir, shard_number, view_results, total_shards=None, video_name=None):
     """
     Generate consolidated JSON file with all views as top-level keys.
@@ -1988,89 +1925,7 @@ def generate_multiview_consolidated_model_results_json(shard_output_dir, shard_n
     
     logger.info(f"💾 Saved multi-view consolidated results: {consolidated_json_path}")
     return consolidated_json_path
-def generate_multiview_4view_labelstudio_task(shard_output_dir, assigned_views, 
-                                            consolidated_results, shard_number, shard_offset_sec, 
-                                            audio_url, total_shards=None, video_name=None, all_view_urls=None):
-    """
-    Generate Label Studio task with 4-view display: video_top, video_left, video_right, video_bottom.
-    Follows the format from complete-tast.txt for 4-view UI support.
-    
-    Args:
-        shard_output_dir: Output directory for this shard
-        assigned_views: Dict with view assignments for all 4 positions (top, left, right, bottom)
-        consolidated_results: Consolidated results from all views
-        shard_number: Current shard number
-        shard_offset_sec: Time offset in seconds
-        audio_url: Audio file URL
-        total_shards: Total number of shards
-        video_name: Original video name
-        all_view_urls: Dict of all view URLs for metadata
-        
-    Returns:
-        Path to generated Label Studio task JSON file
-    """
-    current_time = datetime.utcnow().isoformat() + "Z"
-    
-    # Get prediction entries and assign to 4-view positions
-    raw_predictions = consolidated_results.get('consolidated_predictions_for_ls', [])
-    # prediction_entries = assign_predictions_to_4view_positions(raw_predictions, assigned_views)
-    
-    # Extract URLs from assigned views, using fallbacks if positions are empty
-    video_top = assigned_views.get('top', {}).get('url', '') if assigned_views.get('top') else ''
-    video_left = assigned_views.get('left', {}).get('url', '') if assigned_views.get('left') else ''
-    video_right = assigned_views.get('right', {}).get('url', '') if assigned_views.get('right') else ''
-    video_bottom = assigned_views.get('bottom', {}).get('url', '') if assigned_views.get('bottom') else ''
-    
-    # Create task with 4-view display format
 
-    task = {
-        "data": {
-            # Core 4-view video URLs for Label Studio UI
-            "video_top": video_top,
-            "video_left": video_left,
-            "video_right": video_right,
-            "video_bottom": video_bottom,
-            "audio": audio_url,
-            
-            # Metadata (following complete-tast.txt structure)
-            "meta": "",  # Required empty meta field
-            "meta.home_identifier": f"Shard_{shard_number}",
-            "meta.recording_datetime": current_time,
-            "meta.domain": "production", 
-            "meta.actions": "",
-            
-            # Multi-view specific metadata
-            "shard_number": str(shard_number),
-            "shard_id": shard_number,
-            "total_shards": total_shards,
-            "video_name": video_name,
-            "timestamp": current_time,
-            "processing_type": "multi_view_4view_equal",
-            "shard_offset_seconds": str(shard_offset_sec),
-            "segments_detected": str(len(raw_predictions)),
-            "total_views_processed": consolidated_results.get('total_views', 0),
-            "successful_views": consolidated_results.get('cross_view_analysis', {}).get('successful_views', 0),
-            "home_id": "",
-            "start_datetime": "",
-            "end_datetime": "",
-            "total_duration": "",
-            "files_deleted": [],
-
-        },
-        "predictions": [{
-            "model_version": "multi_view_4view_v1.0",
-            "result": raw_predictions
-        }] if raw_predictions else []
-    }
-    
-
-    # Save Label Studio task
-    task_file_path = os.path.join(shard_output_dir, f"shard_{shard_number}_labelstudio_task.json")
-    with open(task_file_path, 'w') as f:
-        json.dump(task, f, indent=2)
-    
-    logger.info(f"📋 Generated 4-view Label Studio task: {task_file_path}")
-    return task_file_path
 
 def process_time_aligned_shard_multiview(
     shard_index,
@@ -2596,120 +2451,6 @@ def consolidate_time_segment_results(view1_results, view2_results, shard_index, 
     consolidated['consolidated_predictions'] = create_consolidated_predictions(view1_results, view2_results)
     return consolidated
 
-
-def generate_consolidated_shard_labelstudio_task(shard_output_dir, view1_azure_url, view2_azure_url, 
-                                                 consolidated_results, shard_number, shard_offset_sec, audio_url, total_shards=None, video_name=None):
-      """
-      Generate single Label Studio task with both view URLs and consolidated AI predictions
-      """
-      current_time = datetime.utcnow().isoformat() + "Z"
-
-      # Get prediction entries from consolidated results (already in correct format)
-      prediction_entries = consolidated_results['consolidated_predictions']
-
-      # Create task with both view URLs (matching annotation_json.json format)
-      task = {
-          "data": {
-                "meta": "",  # Required empty meta field
-                # Flattened metadata keys at root level to match UI template expectations
-                "meta.home_identifier": f"Shard_{shard_number}",
-                "meta.recording_datetime": current_time,
-                "meta.domain": "production",
-                "meta.actions": "",
-                # Additional metadata (these won't show in UI but good for context)
-                "shard_number": str(shard_number),
-                "shard_id": shard_number,
-                "total_shards": total_shards,
-                "video_name": video_name,
-                "timestamp": current_time,
-                "processing_type": "label_studio_task",
-                "shard_offset_seconds": str(shard_offset_sec), 
-                "segments_detected": str(len(prediction_entries)),
-                "video_top":"",
-                "video_bottom":"",
-                "video_left": view1_azure_url,
-                "video_right": view2_azure_url,
-                "audio": audio_url,
-                "home_id": "",
-                "start_datetime": "",
-                "end_datetime": "",
-                "total_duration": "",
-                "files_deleted": [],
-          },
-          
-          "annotations": [],  # Empty for new tasks
-          "predictions": [{"result": prediction_entries}] if prediction_entries else []
-      }
-
-      # Save consolidated task
-      task_file = os.path.join(shard_output_dir, f"consolidated_shard_{shard_number}_labelstudio_task.json")
-      with open(task_file, 'w') as f:
-          json.dump(task, f, indent=2)
-
-      logger.info(f"Generated consolidated Label Studio task for shard {shard_number} with {len(prediction_entries)} predictions")
-      return task_file
-
-def generate_multiview_shard_labelstudio_task(
-    base_output_dir: str,
-    shard_number: int,
-    shard_offset_sec: int,
-    view_urls: dict,
-    audio_url: str,
-    primary_left_url: str,
-    primary_right_url: str,
-    consolidated_results: dict,
-    total_shards: int
-):
-    """
-    Build a single LS task for a shard that includes audio and multiple video views in one request.
-    Adds shard_id and total_shards to the task data for identification.
-    """
-    current_time = datetime.utcnow().isoformat() + "Z"
-
-    # Use the existing prediction consolidator for up to two primary views if available
-    prediction_entries = consolidated_results.get('consolidated_predictions', []) or []
-
-    # Prepare data block with primary left/right plus extra views as additional fields
-    
-    data_block = {
-        "meta": "",
-        "meta.home_identifier": f"Shard_{shard_number}",
-        "meta.recording_datetime": current_time,
-        "meta.domain": "production",
-        "meta.actions": "",
-        "shard_number": str(shard_number),
-        "shard_offset_seconds": str(shard_offset_sec),
-        "segments_detected": str(len(prediction_entries)),
-        "shard_id": str(shard_number),
-        "total_shards": str(total_shards),
-        "video_left": primary_left_url or "",
-        "video_right": primary_right_url or "",
-        "audio": audio_url or "",
-        "home_id": "",
-        "start_datetime": "",
-        "end_datetime": "",
-        "total_duration": "",
-        "files_deleted": []
-    }
-
-    # Attach additional views as dedicated fields, e.g., video_view_front, video_view_right, etc.
-    for view_name, url in (view_urls or {}).items():
-        data_block[f"video_view_{view_name}"] = url
-
-    task = {
-        "data": data_block,
-        "annotations": [],
-        "predictions": [{"result": prediction_entries}] if prediction_entries else []
-    }
-
-    task_file = os.path.join(base_output_dir, f"multiview_shard_{shard_number}_labelstudio_task.json")
-    with open(task_file, 'w') as f:
-        json.dump(task, f, indent=2)
-    logger.info(
-        f"Generated multi-view Label Studio task for shard {shard_number} with {len(view_urls or {})} views and audio"
-    )
-    return task_file
-
 def create_consolidated_predictions(view1_results, view2_results):
     """
     Create consolidated AI predictions from both views for Label Studio task generation.
@@ -3054,80 +2795,7 @@ def create_consolidated_predictions(view1_results, view2_results):
     
     return predictions
 
-def import_consolidated_tasks_to_labelstudio(task_file_paths, pipeline_config=None):
-    """
-    Import consolidated Label Studio tasks to Label Studio platform.
-    
-    Args:
-        task_file_paths: List of paths to consolidated task JSON files
-        pipeline_config: Pipeline configuration dict (optional, will load default if None)
-        
-    Returns:
-        dict: Import results with success/failure status
-    """
-    if not task_file_paths:
-        logger.warning("No task files provided for Label Studio import")
-        return {"success": False, "error": "No tasks to import"}
-    
-    # Filter out None values and verify files exist
-    valid_task_files = []
-    for task_file in task_file_paths:
-        if task_file and os.path.exists(task_file):
-            valid_task_files.append(task_file)
-        else:
-            logger.warning(f"Task file not found or invalid: {task_file}")
-    
-    if not valid_task_files:
-        logger.error("No valid task files found for import")
-        return {"success": False, "error": "No valid task files found"}
-    
-    # Load Label Studio configuration
-    if pipeline_config is None:
-        try:
-            pipeline_config = _load_pipeline_config()
-        except Exception as e:
-            logger.warning(f"⚠️ Could not load pipeline config for Label Studio settings: {e}")
-            pipeline_config = {}
-    
-    # Get Label Studio settings from config
-    label_studio_config = pipeline_config.get('label_studio', {})
-    server_url = label_studio_config.get('server_url', 'https://annotations-stg.oneforma2.com/')
-    api_token = label_studio_config.get('api_token', 'd75a31c7994b96099cfbf7d61e15cff643943853')
-    project_id = label_studio_config.get('project_id', '5458')
-    
-    logger.info(f"📤 Importing {len(valid_task_files)} consolidated tasks to Label Studio...")
-    logger.info(f"   Server: {server_url}")
-    logger.info(f"   Project ID: {project_id}")
-    
-    # Use existing Label Studio import functionality
-    try:
-        # Import using the existing import_to_labelstudio_task function
-        import_result_ref = import_to_labelstudio_task.remote(
-            valid_task_files,
-            server_url,
-            api_token,
-            project_id
-        )
-        
-        import_result = ray.get(import_result_ref)
-        
-        if import_result.get("success"):
-            logger.info(f"✅ Successfully imported {len(valid_task_files)} consolidated tasks to Label Studio")
-            return {
-                "success": True,
-                "imported_tasks": len(valid_task_files),
-                "result": import_result.get('result')
-            }
-        else:
-            logger.error(f"❌ Failed to import consolidated tasks: {import_result.get('error')}")
-            return {
-                "success": False,
-                "error": import_result.get('error')
-            }
-            
-    except Exception as e:
-        logger.error(f"Exception during consolidated task import: {e}")
-        return {"success": False, "error": str(e)}
+
 
 def create_consolidated_summary(label_studio_tasks, output_dir):
     """
@@ -3220,7 +2888,8 @@ def _process_single_view(
     azure_container=None,
     azure_output_prefix=None,
     azure_account_name: str = None,
-    azure_account_key: str = None
+    azure_account_key: str = None,
+    pipeline_config: dict = None
 ):
     """
     Single-view pipeline that reuses the SAME LS task creation & consolidation
@@ -3294,7 +2963,7 @@ def _process_single_view(
     generate_final_combined_model_results_json(output_dir, consolidated_json_paths)
 
     # --- Import all tasks to Label Studio (SAME function as dual-view) ---
-    import_consolidated_tasks_to_labelstudio(label_studio_tasks)
+    import_consolidated_tasks_to_labelstudio(label_studio_tasks, pipeline_config)
 
     # Upload output directory to Azure blob storage
     if azure_blob_client and azure_container:
@@ -3782,7 +3451,8 @@ def continuous_blob_polling_and_pipeline_task(azure_config_path: str = "blobfuse
                                 azure_container=container_name,
                                 azure_output_prefix=f"{output_prefix}/{video_name}",
                                 azure_account_name=account_name,
-                                azure_account_key=account_key
+                                azure_account_key=account_key,
+                                pipeline_config = pipeline_config
                             )
                             
                             processing_time = time.time() - start_time
