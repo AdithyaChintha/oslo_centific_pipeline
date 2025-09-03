@@ -39,6 +39,8 @@ from ray_jobs.video_unwarp_task import erp_unwarp_task
 
 # Test unwarp
 from ray_jobs.video_unwarp_task import insv_unwarp_task
+# Test lighting
+from ray_jobs.video_lighting_task import lighting_by_second_task
 
 logger = get_logger("SimplifiedUnifiedPipeline")
 
@@ -1699,11 +1701,14 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     nsfw_output_dir = os.path.join(output_dir, "nsfw_output")
     motion_output_dir = os.path.join(output_dir, "motion_output")
     face_output_dir = os.path.join(output_dir, "face_output")
-    
+
+    lighting_output_dir = os.path.join(output_dir, "lighting_output")
+
     # Create output directories
     os.makedirs(nsfw_output_dir, exist_ok=True)
     os.makedirs(motion_output_dir, exist_ok=True)
     os.makedirs(face_output_dir, exist_ok=True)
+    os.makedirs(lighting_output_dir, exist_ok=True)
 
     # Define the prompt for scene detection
     prompt_path = "config/cosmos_prompt.yaml"
@@ -1719,8 +1724,11 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     face_ref  = process_video_chunks_for_face_detection.remote([video_shard_path], config=None, frame_interval=30, save_frames=False, chunk_duration_sec=60)
     clap_ref  = detect_claps_in_media.remote(audio_shard_path, clap_output_dir, threshold_bias=6000, lowcut=200, highcut=3200)
 
-    (audio_res, yolo_res, scene_res, nsfw_res, motion_res, face_res, clap_res) = ray.get(
-        [audio_ref, yolo_ref, scene_ref, nsfw_ref, motion_ref, face_ref, clap_ref]
+    # Testing lighting
+    lighting_ref = lighting_by_second_task.remote(video_shard_path, output_dir = lighting_output_dir)
+
+    (audio_res, yolo_res, scene_res, nsfw_res, motion_res, face_res, clap_res, lighting_res) = ray.get(
+        [audio_ref, yolo_ref, scene_ref, nsfw_ref, motion_ref, face_ref, clap_ref, lighting_ref]
     )
     
     # Store results from Ray tasks
@@ -1731,7 +1739,8 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
         'nsfw': nsfw_res,
         'motion': motion_res,
         'face': face_res,
-        'clap': clap_res
+        'clap': clap_res,
+        'lighting': lighting_res
     }
     
     # Save individual model results to JSON files (following ray_pipeline_testing_old.py pattern)
@@ -1757,7 +1766,7 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
         with open(face_file, 'w') as f:
             json.dump(face_res, f, indent=2)
         logger.info(f"Face detection results saved to: {face_file}")
-    
+
     # Extract flagged segments from all models
     all_segments = []
     for task_type, task_result in results.items():
