@@ -27,14 +27,13 @@ def detect_blur_and_black_segments(video_path: str, blur_thresh=100.0, black_thr
 
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
+            # Blur detection using Laplacian variance
+            lap_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+            blur_scores.append(lap_var)
+
             # Black screen detection using mean intensity
             mean_intensity = np.mean(gray)
             black_scores.append(mean_intensity)
-
-            # Blur detection using Laplacian variance
-            if mean_intensity > black_thresh:
-                lap_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-                blur_scores.append(lap_var)
 
         if len(blur_scores) > 0:
             avg_blur = np.mean(blur_scores)
