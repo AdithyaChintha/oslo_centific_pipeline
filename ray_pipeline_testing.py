@@ -50,6 +50,8 @@ from ray_jobs.video_unwarp_task import erp_unwarp_task
 from ray_jobs.video_unwarp_task import insv_unwarp_task
 
 logger = get_logger("SimplifiedUnifiedPipeline")
+# Global shutdown flag for graceful stopping
+_shutdown_requested = False
 
 # =============================================================================
 # BATCH PROCESSING FUNCTIONS (Added from backup file)
@@ -3026,8 +3028,6 @@ def process_shard_labelstudio_enhancement(shard_output_dir: str, total_shards: i
 # CONTINUOUS POLLING & CHECKLIST MANAGEMENT
 # ===============================================
 
-# Global shutdown flag for graceful stopping
-_shutdown_requested = False
 
 def _signal_handler(signum, frame):
     """Handle shutdown signals gracefully"""
@@ -3038,256 +3038,247 @@ def _signal_handler(signum, frame):
 
 
 
-@ray.remote
-def continuous_blob_polling_and_pipeline_task(azure_config_path: str = "blobfuse2_config.yaml",
-                                             pipeline_config_path: str = "config/pipeline_config.yaml"):
-    """
-    Continuous polling task that checks Azure blob storage for new videos every N minutes
-    and processes them through the pipeline, maintaining a checklist of progress.
-    """
-    global _shutdown_requested
+# @ray.remote
+# def continuous_blob_polling_and_pipeline_task(azure_config_path: str = "blobfuse2_config.yaml",
+#                                              pipeline_config_path: str = "config/pipeline_config.yaml"):
+#     """
+#     Continuous polling task that checks Azure blob storage for new videos every N minutes
+#     and processes them through the pipeline, maintaining a checklist of progress.
+#     """
+#     global _shutdown_requested
     
-    try:
-        logger.info("🚀 Starting Continuous Blob Polling & Pipeline Task")
+#     try:
+#         logger.info("🚀 Starting Continuous Blob Polling & Pipeline Task")
         
-        # Load configurations
-        pipeline_config = load_pipeline_config(pipeline_config_path)
-        azure_config = load_azure_config(azure_config_path)
-        polling_interval_minutes = pipeline_config.get('polling', {}).get('interval_minutes', 5)
+#         # Load configurations
+#         pipeline_config = load_pipeline_config(pipeline_config_path)
+#         azure_config = load_azure_config(azure_config_path)
+#         polling_interval_minutes = pipeline_config.get('polling', {}).get('interval_minutes', 5)
         
-        logger.info(f"⏰ Polling interval: {polling_interval_minutes} minutes")
+#         logger.info(f"⏰ Polling interval: {polling_interval_minutes} minutes")
         
-        # Setup Azure client
-        blob_service_client = create_azure_blob_client(azure_config)
+#         # Setup Azure client
+#         blob_service_client = create_azure_blob_client(azure_config)
         
-        # Extract Azure storage config - handle both direct and nested structures
-        if 'azstorage' in azure_config:
-            # Nested structure from blobfuse2_config.yaml
-            az_config = azure_config['azstorage']
-        else:
-            # Direct structure
-            az_config = azure_config
+#         # Extract Azure storage config - handle both direct and nested structures
+#         if 'azstorage' in azure_config:
+#             # Nested structure from blobfuse2_config.yaml
+#             az_config = azure_config['azstorage']
+#         else:
+#             # Direct structure
+#             az_config = azure_config
             
-        container_name = az_config['container']
-        account_name = az_config['account-name']
-        account_key = az_config['account-key']
+#         container_name = az_config['container']
+#         account_name = az_config['account-name']
+#         account_key = az_config['account-key']
         
-        # Setup directories and files
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        local_download_dir = pipeline_config['local_storage']['temp_download_dir']
-        output_base_dir = os.path.join(current_dir, pipeline_config['local_storage']['output_base_dir'].lstrip('./'))
-        checklist_path = os.path.join(current_dir, pipeline_config['local_storage'].get('checklist_file', './video_checklist.json'))
-        blob_prefix = pipeline_config['azure_storage']['input_blob_prefix']
-        output_prefix = pipeline_config['azure_storage']['output_blob_prefix']
+#         # Setup directories and files
+#         current_dir = os.path.dirname(os.path.abspath(__file__))
+#         local_download_dir = pipeline_config['local_storage']['temp_download_dir']
+#         output_base_dir = os.path.join(current_dir, pipeline_config['local_storage']['output_base_dir'].lstrip('./'))
+#         checklist_path = os.path.join(current_dir, pipeline_config['local_storage'].get('checklist_file', './video_checklist.json'))
+#         blob_prefix = pipeline_config['azure_storage']['input_blob_prefix']
+#         output_prefix = pipeline_config['azure_storage']['output_blob_prefix']
         
-        # Load checklist
-        checklist = load_video_checklist(checklist_path)
+#         # Load checklist
+#         checklist = load_video_checklist(checklist_path)
         
-        # Statistics
-        total_processed = 0
-        successful_processed = 0
-        failed_processed = 0
+#         # Statistics
+#         total_processed = 0
+#         successful_processed = 0
+#         failed_processed = 0
         
-        logger.info("✅ Continuous polling initialized successfully")
+#         logger.info("✅ Continuous polling initialized successfully")
         
-        # Get detailed statistics
-        stats = get_checklist_statistics(checklist)
-        logger.info(f"📋 Checklist Statistics:")
-        logger.info(f"   Total videos: {stats['total_videos']}")
-        logger.info(f"   Completed: {stats['completed_videos']}")
-        logger.info(f"   Failed: {stats['failed_videos']}")
-        logger.info(f"   Pending: {stats['pending_videos']}")
-        logger.info(f"   Processing: {stats['processing_videos']}")
-        logger.info(f"   Discovered: {stats['discovered_videos']}")
-        if stats['status_breakdown']:
-            logger.info(f"   Status breakdown: {stats['status_breakdown']}")
+#         # Get detailed statistics
+#         stats = get_checklist_statistics(checklist)
+#         logger.info(f"📋 Checklist Statistics:")
+#         logger.info(f"   Total videos: {stats['total_videos']}")
+#         logger.info(f"   Completed: {stats['completed_videos']}")
+#         logger.info(f"   Failed: {stats['failed_videos']}")
+#         logger.info(f"   Pending: {stats['pending_videos']}")
+#         logger.info(f"   Processing: {stats['processing_videos']}")
+#         logger.info(f"   Discovered: {stats['discovered_videos']}")
+#         if stats['status_breakdown']:
+#             logger.info(f"   Status breakdown: {stats['status_breakdown']}")
         
-        # Store video blob info for retries
-        video_blob_info_cache = {}
+#         # Store video blob info for retries
+#         video_blob_info_cache = {}
         
-        # Main polling loop
-        while not _shutdown_requested:
-            try:
-                logger.info(f"\n{'='*60}")
-                logger.info(f"🔄 Polling cycle started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+#         # Main polling loop
+#         while not _shutdown_requested:
+#             try:
+#                 logger.info(f"\n{'='*60}")
+#                 logger.info(f"🔄 Polling cycle started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                 
-                # 1. Poll for new videos
-                new_videos = poll_azure_videos(blob_service_client, container_name, blob_prefix, checklist, pipeline_config)
+#                 # 1. Poll for new videos
+#                 new_videos = poll_azure_videos(blob_service_client, container_name, blob_prefix, checklist, pipeline_config)
                 
-                # Update cache with new video info
-                for video_info in new_videos:
-                    video_blob_info_cache[video_info["video_name"]] = video_info
+#                 # Update cache with new video info
+#                 for video_info in new_videos:
+#                     video_blob_info_cache[video_info["video_name"]] = video_info
                 
-                # Save checklist after polling to ensure new videos are recorded
-                if new_videos:
-                    save_video_checklist(checklist_path, checklist)
+#                 # Save checklist after polling to ensure new videos are recorded
+#                 if new_videos:
+#                     save_video_checklist(checklist_path, checklist)
                 
-                # 2. Check for and reset stuck videos
-                stuck_count = reset_stuck_videos(checklist, max_processing_hours=2)
-                if stuck_count > 0:
-                    logger.info(f"🔄 Reset {stuck_count} stuck videos back to pending status")
-                    save_video_checklist(checklist_path, checklist)
+#                 # 2. Check for and reset stuck videos
+#                 stuck_count = reset_stuck_videos(checklist, max_processing_hours=2)
+#                 if stuck_count > 0:
+#                     logger.info(f"🔄 Reset {stuck_count} stuck videos back to pending status")
+#                     save_video_checklist(checklist_path, checklist)
                 
-                # 3. Get pending videos (new + previously failed + reset stuck videos)
-                pending_videos = get_pending_videos(checklist)
+#                 # 3. Get pending videos (new + previously failed + reset stuck videos)
+#                 pending_videos = get_pending_videos(checklist)
                 
-                if pending_videos:
-                    logger.info(f"📋 Found {len(pending_videos)} videos to process")
+#                 if pending_videos:
+#                     logger.info(f"📋 Found {len(pending_videos)} videos to process")
                     
-                    # 4. Process pending videos one by one
-                    for video_name in pending_videos:
-                        if _shutdown_requested:
-                            break
+#                     # 4. Process pending videos one by one
+#                     for video_name in pending_videos:
+#                         if _shutdown_requested:
+#                             break
                             
-                        video_info = checklist["videos"][video_name]
+#                         video_info = checklist["videos"][video_name]
                         
-                        try:
-                            logger.info(f"\n🎬 Processing video: {video_name}")
-                            update_video_status(checklist, video_name, "processing", attempts=video_info.get("attempts", 0) + 1)
-                            save_video_checklist(checklist_path, checklist)
+#                         try:
+#                             logger.info(f"\n🎬 Processing video: {video_name}")
+#                             update_video_status(checklist, video_name, "processing", attempts=video_info.get("attempts", 0) + 1)
+#                             save_video_checklist(checklist_path, checklist)
                             
-                            # Get video blob info from cache
-                            video_blob_info = video_blob_info_cache.get(video_name)
+#                             # Get video blob info from cache
+#                             video_blob_info = video_blob_info_cache.get(video_name)
                             
-                            if not video_blob_info:
-                                logger.warning(f"⚠️ No blob info cached for {video_name} - skipping")
-                                continue
+#                             if not video_blob_info:
+#                                 logger.warning(f"⚠️ No blob info cached for {video_name} - skipping")
+#                                 continue
                             
-                            # Download video and audio
-                            start_time = time.time()
-                            download_result = download_video_audio_pair(
-                                blob_service_client, container_name,
-                                video_blob_info,
-                                local_download_dir
-                            )
-                            video_path = download_result["video_path"]
-                            audio_path = download_result["audio_path"]
+#                             # Download video and audio
+#                             start_time = time.time()
+#                             download_result = download_video_audio_pair(
+#                                 blob_service_client, container_name,
+#                                 video_blob_info,
+#                                 local_download_dir
+#                             )
+#                             video_path = download_result["video_path"]
+#                             audio_path = download_result["audio_path"]
                             
-                            if not video_path or not audio_path:
-                                raise Exception("Failed to download video/audio files")
+#                             if not video_path or not audio_path:
+#                                 raise Exception("Failed to download video/audio files")
                             
-                            # Setup output directory
-                            video_output_dir = os.path.join(output_base_dir, f"video_{video_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+#                             # Setup output directory
+#                             video_output_dir = os.path.join(output_base_dir, f"video_{video_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
                             
-                            # Process through pipeline
-                            logger.info(f"🔄 Running pipeline for {video_name}")
-                            pipeline_results = pipeline_main(
-                                input_video_path=video_path,
-                                input_audio_path=audio_path,
-                                output_dir=video_output_dir,
-                                process_dual_views=None,  # Auto-detect
-                                process_unwarped_views=True,
-                                azure_blob_client=blob_service_client,
-                                azure_container=container_name,
-                                azure_output_prefix=f"{output_prefix}/{video_name}",
-                                azure_account_name=account_name,
-                                azure_account_key=account_key,
-                                pipeline_config = pipeline_config
-                            )
+#                             # Process through pipeline
+#                             logger.info(f"🔄 Running pipeline for {video_name}")
+#                             pipeline_results = pipeline_main(
+#                                 input_video_path=video_path,
+#                                 input_audio_path=audio_path,
+#                                 output_dir=video_output_dir,
+#                                 process_dual_views=None,  # Auto-detect
+#                                 process_unwarped_views=True,
+#                                 azure_blob_client=blob_service_client,
+#                                 azure_container=container_name,
+#                                 azure_output_prefix=f"{output_prefix}/{video_name}",
+#                                 azure_account_name=account_name,
+#                                 azure_account_key=account_key,
+#                                 pipeline_config = pipeline_config
+#                             )
                             
-                            processing_time = time.time() - start_time
+#                             processing_time = time.time() - start_time
                             
-                            # Check if pipeline actually succeeded
-                            if pipeline_results and pipeline_results.get("successful_shard_tasks", 0) > 0:
-                            # Update success status
-                                update_video_status(checklist, video_name, "completed",
-                                               output_dir=video_output_dir,
-                                               processing_time=f"{processing_time:.2f}s",
-                                               completed_at=datetime.now().isoformat())
-                            else:
-                                # Pipeline failed - mark as failed
-                                error_msg = "Pipeline failed - no successful shard tasks"
-                                update_video_status(checklist, video_name, "failed",
-                                                   error=error_msg,
-                                                   processing_time=f"{processing_time:.2f}s")
-                                raise Exception(error_msg)
+#                             # Check if pipeline actually succeeded
+#                             if pipeline_results and pipeline_results.get("successful_shard_tasks", 0) > 0:
+#                             # Update success status
+#                                 update_video_status(checklist, video_name, "completed",
+#                                                output_dir=video_output_dir,
+#                                                processing_time=f"{processing_time:.2f}s",
+#                                                completed_at=datetime.now().isoformat())
+#                             else:
+#                                 # Pipeline failed - mark as failed
+#                                 error_msg = "Pipeline failed - no successful shard tasks"
+#                                 update_video_status(checklist, video_name, "failed",
+#                                                    error=error_msg,
+#                                                    processing_time=f"{processing_time:.2f}s")
+#                                 raise Exception(error_msg)
                             
-                            successful_processed += 1
-                            total_processed += 1
+#                             successful_processed += 1
+#                             total_processed += 1
                             
-                            logger.info(f"✅ Successfully processed {video_name} in {processing_time:.2f}s")
+#                             logger.info(f"✅ Successfully processed {video_name} in {processing_time:.2f}s")
                             
-                            # Cleanup downloaded files
-                            if pipeline_config['cleanup']['cleanup_files_after_each_video']:
-                                try:
-                                    os.remove(video_path)
-                                    os.remove(audio_path)
-                                    logger.info(f"🗑️ Cleaned up downloaded files for {video_name}")
-                                except Exception as e:
-                                    logger.warning(f"⚠️ Failed to cleanup files: {e}")
+#                             # Cleanup downloaded files
+#                             if pipeline_config['cleanup']['cleanup_files_after_each_video']:
+#                                 try:
+#                                     os.remove(video_path)
+#                                     os.remove(audio_path)
+#                                     logger.info(f"🗑️ Cleaned up downloaded files for {video_name}")
+#                                 except Exception as e:
+#                                     logger.warning(f"⚠️ Failed to cleanup files: {e}")
                             
-                        except Exception as e:
-                            error_msg = str(e)
+#                         except Exception as e:
+#                             error_msg = str(e)
                             
-                            # Check for CUDA out of memory errors
-                            if "CUDA_ERROR_OUT_OF_MEMORY" in error_msg or "out of memory" in error_msg.lower():
-                                error_msg = f"CUDA out of memory error: {error_msg}"
-                                logger.error(f"❌ CUDA memory error for {video_name}: {error_msg}")
-                            else:
-                                logger.error(f"❌ Failed to process {video_name}: {error_msg}")
+#                             # Check for CUDA out of memory errors
+#                             if "CUDA_ERROR_OUT_OF_MEMORY" in error_msg or "out of memory" in error_msg.lower():
+#                                 error_msg = f"CUDA out of memory error: {error_msg}"
+#                                 logger.error(f"❌ CUDA memory error for {video_name}: {error_msg}")
+#                             else:
+#                                 logger.error(f"❌ Failed to process {video_name}: {error_msg}")
                             
-                            update_video_status(checklist, video_name, "failed", error=error_msg)
-                            failed_processed += 1
-                            total_processed += 1
+#                             update_video_status(checklist, video_name, "failed", error=error_msg)
+#                             failed_processed += 1
+#                             total_processed += 1
                         
-                        # Save checklist after each video
-                        save_video_checklist(checklist_path, checklist)
+#                         # Save checklist after each video
+#                         save_video_checklist(checklist_path, checklist)
                 
-                else:
-                    # Get current statistics for logging
-                    stats = get_checklist_statistics(checklist)
-                    logger.info("✅ No pending videos to process")
-                    logger.info(f"📊 Current status: {stats['completed_videos']} completed, {stats['failed_videos']} failed, {stats['processing_videos']} processing")
+#                 else:
+#                     # Get current statistics for logging
+#                     stats = get_checklist_statistics(checklist)
+#                     logger.info("✅ No pending videos to process")
+#                     logger.info(f"📊 Current status: {stats['completed_videos']} completed, {stats['failed_videos']} failed, {stats['processing_videos']} processing")
                 
-                # 5. Wait for next polling cycle
-                if not _shutdown_requested:
-                    logger.info(f"⏰ Waiting {polling_interval_minutes} minutes until next poll...")
-                    for i in range(polling_interval_minutes * 60):  # Convert minutes to seconds
-                        if _shutdown_requested:
-                            break
-                        time.sleep(1)
+#                 # 5. Wait for next polling cycle
+#                 if not _shutdown_requested:
+#                     logger.info(f"⏰ Waiting {polling_interval_minutes} minutes until next poll...")
+#                     for i in range(polling_interval_minutes * 60):  # Convert minutes to seconds
+#                         if _shutdown_requested:
+#                             break
+#                         time.sleep(1)
                 
-            except Exception as e:
-                logger.error(f"❌ Error in polling cycle: {e}")
-                time.sleep(30)  # Wait 30 seconds before retrying
+#             except Exception as e:
+#                 logger.error(f"❌ Error in polling cycle: {e}")
+#                 time.sleep(30)  # Wait 30 seconds before retrying
         
-        # Final cleanup
-        if pipeline_config['cleanup']['cleanup_temp_dir'] and os.path.exists(local_download_dir):
-            try:
-                shutil.rmtree(local_download_dir)
-                logger.info(f"🗑️ Cleaned up temp directory: {local_download_dir}")
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to cleanup temp directory: {e}")
+#         # Final cleanup
+#         if pipeline_config['cleanup']['cleanup_temp_dir'] and os.path.exists(local_download_dir):
+#             try:
+#                 shutil.rmtree(local_download_dir)
+#                 logger.info(f"🗑️ Cleaned up temp directory: {local_download_dir}")
+#             except Exception as e:
+#                 logger.warning(f"⚠️ Failed to cleanup temp directory: {e}")
         
-        logger.info("🏁 Continuous polling stopped gracefully")
+#         logger.info("🏁 Continuous polling stopped gracefully")
         
-        return {
-            "success": True,
-            "total_processed": total_processed,
-            "successful_processed": successful_processed,
-            "failed_processed": failed_processed,
-            "checklist_path": checklist_path,
-            "final_stats": {
-                "total_videos": checklist["total_videos"],
-                "completed_videos": checklist["completed_videos"],
-                "failed_videos": checklist["failed_videos"]
-            }
-        }
+#         return {
+#             "success": True,
+#             "total_processed": total_processed,
+#             "successful_processed": successful_processed,
+#             "failed_processed": failed_processed,
+#             "checklist_path": checklist_path,
+#             "final_stats": {
+#                 "total_videos": checklist["total_videos"],
+#                 "completed_videos": checklist["completed_videos"],
+#                 "failed_videos": checklist["failed_videos"]
+#             }
+#         }
         
-    except Exception as e:
-        logger.error(f"❌ Continuous polling task failed: {e}")
-        return {"success": False, "error": str(e)}
+#     except Exception as e:
+#         logger.error(f"❌ Continuous polling task failed: {e}")
+#         return {"success": False, "error": str(e)}
 
-# =============================================================================
-# MISSING FUNCTIONS TO COMPLETE END-TO-END FUNCTIONALITY
-# =============================================================================
 
-# =============================================================================
-# END OF MISSING FUNCTIONS
-# =============================================================================
-
-# Global variables for signal handling
-_shutdown_requested = False
 
 if __name__ == "__main__":
     import argparse
