@@ -16,6 +16,15 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 from typing import List, Dict, Optional
 from utils.logger import get_logger
+from utils.blob_utils import (
+    load_azure_config, create_azure_blob_client, load_video_checklist, 
+    update_video_status, save_video_checklist, get_pending_videos, get_checklist_statistics,
+    detect_stuck_videos, reset_stuck_videos,
+    poll_azure_videos_with_checklist, poll_azure_videos, find_corresponding_audio,
+    download_video_audio_pair, download_video_audio_pair_simple, cleanup_downloaded_files,
+    generate_azure_shard_urls, upload_output_directory_to_blob, load_pipeline_config,
+    save_video_list_progress
+)
 from azure.storage.blob import generate_blob_sas, BlobSasPermissions, BlobServiceClient
 from azure.core.exceptions import ResourceNotFoundError
 
@@ -37,13 +46,145 @@ from ray_jobs.labelstudio_tasks import assign_views_to_labelstudio_positions, ge
    
 from ray_jobs.video_unwarp_task import erp_unwarp_task
 
-
 # Test unwarp
 from ray_jobs.video_unwarp_task import insv_unwarp_task
-# Test lighting
-from ray_jobs.video_lighting_task import lighting_by_second_task
 
 logger = get_logger("SimplifiedUnifiedPipeline")
+
+# =============================================================================
+# BATCH PROCESSING FUNCTIONS (Added from backup file)
+# =============================================================================
+@ray.remote
+def download_video_batch_task(blob_service_client: BlobServiceClient, container_name: str,
+                             video_batch: List[Dict], local_download_dir: str, task_id: str) -> List[Dict]:
+    """
+    Ray remote task to download a batch of video-audio pairs in parallel.
+    Each task runs on a separate CPU core.
+    
+    Args:
+        blob_service_client: Azure blob service client
+        container_name: Azure container name
+        video_batch: List of video info dictionaries with blob names
+        local_download_dir: Local directory to download files
+        task_id: Unique identifier for this download task
+    
+    Returns:
+        List of download results with paths and status
+    """
+    try:
+        # Enhanced debugging with Ray task information
+        import ray
+        ray_worker_id = ray.get_runtime_context().get_worker_id()
+        ray_node_id = ray.get_runtime_context().get_node_id()
+        
+        logger.info(f"�� RAY TASK {task_id} STARTED")
+        logger.info(f"   📍 Worker ID: {ray_worker_id}")
+        logger.info(f"   🖥️  Node ID: {ray_node_id}")
+        logger.info(f"   �� Batch size: {len(video_batch)} videos")
+        logger.info(f"   📁 Download dir: {local_download_dir}")
+        logger.info(f"   �� Videos to download: {[v.get('video_name', 'unknown') for v in video_batch]}")
+        
+        os.makedirs(local_download_dir, exist_ok=True)
+        
+        download_results = []
+        
+        for idx, video_info in enumerate(video_batch, 1):
+            try:
+                video_name = video_info.get('video_name', 'unknown')
+                video_blob = video_info['video_blob_name']
+                audio_blob = video_info['audio_blob_name']
+                
+                logger.info(f"⬇️ RAY TASK {task_id} - Downloading video {idx}/{len(video_batch)}: {video_name}")
+                logger.info(f"   �� Video blob: {video_blob}")
+                logger.info(f"   �� Audio blob: {audio_blob}")
+                
+                # Fix potential double extension issue
+                video_local_filename = os.path.basename(video_blob)
+                if video_local_filename.endswith('.insv.insv'):
+                    video_local_filename = video_local_filename[:-5]  # Remove extra .insv
+                
+                audio_local_filename = os.path.basename(audio_blob)
+                if audio_local_filename.endswith('.wav.wav'):
+                    audio_local_filename = audio_local_filename[:-4]  # Remove extra .wav
+                
+                video_local_path = os.path.join(local_download_dir, video_local_filename)
+                audio_local_path = os.path.join(local_download_dir, audio_local_filename)
+                
+                # Download video
+                start_time = time.time()
+                container_client = blob_service_client.get_container_client(container_name)
+                
+                logger.info(f"   ⬇️ RAY TASK {task_id} - Downloading video to: {video_local_path}")
+                with open(video_local_path, "wb") as f:
+                    blob_client = container_client.get_blob_client(video_blob)
+                    download_stream = blob_client.download_blob()
+                    f.write(download_stream.readall())
+                
+                video_download_time = time.time() - start_time
+                video_size = os.path.getsize(video_local_path) / (1024*1024)  # MB
+                
+                # Download audio
+                start_time = time.time()
+                logger.info(f"   ⬇️ RAY TASK {task_id} - Downloading audio to: {audio_local_path}")
+                with open(audio_local_path, "wb") as f:
+                    blob_client = container_client.get_blob_client(audio_blob)
+                    download_stream = blob_client.download_blob()
+                    f.write(download_stream.readall())
+                
+                audio_download_time = time.time() - start_time
+                audio_size = os.path.getsize(audio_local_path) / (1024*1024)  # MB
+                
+                download_results.append({
+                    'video_name': video_name,
+                    'video_path': video_local_path,
+                    'audio_path': audio_local_path,
+                    'video_info': video_info,
+                    'success': True,
+                    'error': None,
+                    'task_id': task_id,
+                    'download_stats': {
+                        'video_size_mb': round(video_size, 2),
+                        'audio_size_mb': round(audio_size, 2),
+                        'video_download_time': round(video_download_time, 2),
+                        'audio_download_time': round(audio_download_time, 2)
+                    }
+                })
+                
+                logger.info(f"✅ RAY TASK {task_id} - Successfully downloaded {video_name}")
+                logger.info(f"   �� Video: {video_size:.1f}MB in {video_download_time:.1f}s")
+                logger.info(f"   �� Audio: {audio_size:.1f}MB in {audio_download_time:.1f}s")
+                
+            except Exception as e:
+                video_name = video_info.get('video_name', 'unknown')
+                logger.error(f"❌ RAY TASK {task_id} - Error downloading {video_name}: {e}")
+                download_results.append({
+                    'video_name': video_name,
+                    'video_path': None,
+                    'audio_path': None,
+                    'video_info': video_info,
+                    'success': False,
+                    'error': str(e),
+                    'task_id': task_id
+                })
+        
+        successful_downloads = len([r for r in download_results if r['success']])
+        total_download_time = sum([r.get('download_stats', {}).get('video_download_time', 0) + 
+                                  r.get('download_stats', {}).get('audio_download_time', 0) 
+                                  for r in download_results if r['success']])
+        
+        logger.info(f"�� RAY TASK {task_id} COMPLETED: {successful_downloads}/{len(video_batch)} successful")
+        logger.info(f"   ⏱️ Total download time: {total_download_time:.1f}s")
+        logger.info(f"   🖥️ Worker: {ray_worker_id}")
+        
+        return download_results
+        
+    except Exception as e:
+        logger.error(f"❌ RAY TASK {task_id} FAILED: {e}")
+        return []
+
+# =============================================================================
+# END OF BATCH PROCESSING FUNCTIONS
+# =============================================================================
 
 @ray.remote
 def integrated_blob_polling_and_pipeline_task(
@@ -53,14 +194,15 @@ def integrated_blob_polling_and_pipeline_task(
     max_videos: Optional[int] = None,
     force_refresh: bool = False,
     process_dual_views: bool = None,
-    process_unwarped_views: bool = False
+    process_unwarped_views: bool = False,
+    batch_size: int = 3  # New parameter for batch processing
 ):
     """
-    Integrated Ray task that handles both blob polling and pipeline processing.
+    Integrated Ray task that handles both blob polling and pipeline processing with batch processing.
     
     This task performs two sequential loops:
-    1. BLOB POLLING LOOP: Find videos and download corresponding audio files
-    2. MAIN PIPELINE LOOP: Process video+audio pairs one by one
+    1. BLOB POLLING LOOP: Find videos and download corresponding audio files in batches
+    2. MAIN PIPELINE LOOP: Process video+audio pairs in batches sequentially
     
     Args:
         config_path: Path to Azure configuration file
@@ -69,34 +211,64 @@ def integrated_blob_polling_and_pipeline_task(
         force_refresh: Force refresh video list
         process_dual_views: Enable dual view processing
         process_unwarped_views: Enable unwarped view processing
+        batch_size: Number of videos to process in each batch (default: 3)
         
     Returns:
         dict: Processing results summary
     """
-    logger.info("🚀 Starting Integrated Blob Polling and Pipeline Task")
+    logger.info("🚀 Starting Integrated Blob Polling and Pipeline Task with Batch Processing")
     logger.info("=" * 80)
+    logger.info(f"📦 Batch Size: {batch_size} videos per batch")
     
     # Initialize configuration and Azure client
     try:
         # Load pipeline configuration
-        pipeline_config = _load_pipeline_config(pipeline_config_path)
+        pipeline_config = load_pipeline_config(pipeline_config_path)
+        
+        # Setup current directory first
+        current_dir = os.path.dirname(os.path.abspath(__file__))
         
         # Load Azure configuration
-        azure_config = _load_azure_config(azure_config_path)
-        blob_service_client = _create_azure_blob_client(azure_config)
-        container_name = azure_config['container']
-        account_name = azure_config['account-name']
-        account_key = azure_config['account-key']
+        logger.info(f"🔍 Loading Azure config from: {azure_config_path}")
+        logger.info(f"🔍 File exists: {os.path.exists(azure_config_path)}")
+        
+        # Resolve absolute path if needed
+        if not os.path.isabs(azure_config_path):
+            azure_config_path = os.path.join(current_dir, azure_config_path)
+            logger.info(f"🔍 Resolved Azure config path: {azure_config_path}")
+            logger.info(f"🔍 Resolved file exists: {os.path.exists(azure_config_path)}")
+        
+        azure_config = load_azure_config(azure_config_path)
+        logger.info(f"🔍 Azure config loaded: {list(azure_config.keys())}")
+        blob_service_client = create_azure_blob_client(azure_config)
+        
+        # Extract Azure storage config - handle both direct and nested structures
+        if 'azstorage' in azure_config:
+            # Nested structure from blobfuse2_config.yaml
+            az_config = azure_config['azstorage']
+        else:
+            # Direct structure
+            az_config = azure_config
+            
+        container_name = az_config['container']
+        account_name = az_config['account-name']
+        account_key = az_config['account-key']
         
         # Setup directories from pipeline config
-        current_dir = os.path.dirname(os.path.abspath(__file__))
         local_download_dir = pipeline_config['local_storage']['temp_download_dir']
         output_base_dir = os.path.join(current_dir, pipeline_config['local_storage']['output_base_dir'].lstrip('./'))
         video_list_file = os.path.join(current_dir, pipeline_config['local_storage']['video_list_file'].lstrip('./'))
         
+        # Get checklist file path
+        checklist_path = pipeline_config['local_storage'].get('checklist_file', './video_checklist.json')
+        checklist_path = os.path.join(current_dir, checklist_path.lstrip('./'))
+        
         # Use blob_prefix from config if not provided
         if blob_prefix is None:
             blob_prefix = pipeline_config['azure_storage']['input_blob_prefix']
+        
+        # Get batch size from config if available
+        batch_size = pipeline_config.get('processing', {}).get('max_videos_per_batch', batch_size)
         
         os.makedirs(local_download_dir, exist_ok=True)
         os.makedirs(output_base_dir, exist_ok=True)
@@ -104,6 +276,7 @@ def integrated_blob_polling_and_pipeline_task(
         logger.info(f"✅ Configuration loaded successfully")
         logger.info(f"   Container: {container_name}")
         logger.info(f"   Blob prefix: {blob_prefix}")
+        logger.info(f"   Batch Size: {batch_size}")
         logger.info(f"   Download dir: {local_download_dir}")
         logger.info(f"   Output dir: {output_base_dir}")
         
@@ -112,171 +285,356 @@ def integrated_blob_polling_and_pipeline_task(
         return {"success": False, "error": f"Configuration error: {e}"}
     
     # =============================================================================
-    # LOOP 1: BLOB POLLING - Find videos and download corresponding audio files
+    # CONTINUOUS BATCH PROCESSING WITH POLLING
     # =============================================================================
     logger.info("\n" + "="*80)
-    logger.info("🔍 LOOP 1: BLOB POLLING - Discovering and downloading video+audio pairs")
+    logger.info("🔄 CONTINUOUS BATCH PROCESSING WITH POLLING")
     logger.info("="*80)
     
-    downloaded_file_pairs = []
+    # Get polling interval from config
+    polling_interval_minutes = pipeline_config.get('polling', {}).get('interval_minutes', 5)
+    logger.info(f"⏰ Polling interval: {polling_interval_minutes} minutes")
     
-    try:
-        # Poll Azure for videos
-        logger.info(f"🔍 Polling Azure Blob Storage for videos with prefix: {blob_prefix}")
-        videos = _poll_azure_videos(
-            blob_service_client, container_name, blob_prefix, 
-            video_list_file, force_refresh
-        )
-        
-        if not videos:
-            logger.warning("⚠️ No videos found in Azure Blob Storage")
-            return {"success": True, "message": "No videos to process", "videos_processed": 0}
-        
-        # Filter for unprocessed videos
-        pending_videos = [v for v in videos if not v.get('processed', False)]
-        if max_videos:
-            pending_videos = pending_videos[:max_videos]
-        
-        logger.info(f"📋 Found {len(pending_videos)} videos to download and process")
-        
-        # Download video+audio pairs
-        for i, video_info in enumerate(pending_videos, 1):
-            video_blob = video_info['video_blob_name']
-            audio_blob = video_info['audio_blob_name']
-            
-            logger.info(f"\n📥 Downloading pair {i}/{len(pending_videos)}: {video_blob}")
-            
-            try:
-                # Download video and audio files
-                downloaded_files = _download_video_audio_pair(
-                    blob_service_client, container_name, video_info, local_download_dir
-                )
-                
-                if downloaded_files['video_path']:
-                    downloaded_file_pairs.append({
-                        'video_info': video_info,
-                        'video_path': downloaded_files['video_path'],
-                        'audio_path': downloaded_files['audio_path'],
-                        'download_index': i
-                    })
-                    logger.info(f"✅ Downloaded pair {i}: Video + Audio ready for processing")
-                else:
-                    logger.error(f"❌ Failed to download pair {i}: {video_blob}")
-                    
-            except Exception as e:
-                logger.error(f"❌ Error downloading pair {i} ({video_blob}): {e}")
-                continue
-        
-        logger.info(f"\n📊 LOOP 1 COMPLETE: Downloaded {len(downloaded_file_pairs)} video+audio pairs")
-        
-    except Exception as e:
-        logger.error(f"❌ LOOP 1 FAILED: Blob polling error: {e}")
-        return {"success": False, "error": f"Blob polling failed: {e}"}
-    
-    # =============================================================================
-    # LOOP 2: MAIN PIPELINE - Process video+audio pairs one by one
-    # =============================================================================
-    logger.info("\n" + "="*80)
-    logger.info("🎬 LOOP 2: MAIN PIPELINE - Processing video+audio pairs sequentially")
-    logger.info("="*80)
+    # Load or create persistent checklist
+    checklist = load_video_checklist(checklist_path)
+    logger.info(f"📋 Loaded checklist: {checklist['total_videos']} total, {checklist['completed_videos']} completed, {checklist['failed_videos']} failed")
     
     processing_results = []
     successful_count = 0
     failed_count = 0
+    total_processed = 0
     
     try:
-        for pair_data in downloaded_file_pairs:
-            video_info = pair_data['video_info']
-            video_path = pair_data['video_path']
-            audio_path = pair_data['audio_path']
-            pair_index = pair_data['download_index']
+        while True:  # Continuous processing loop
+            logger.info(f"\n{'='*60}")
+            logger.info(f"🔄 Polling cycle started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             
-            video_blob = video_info['video_blob_name']
-            video_name = os.path.splitext(os.path.basename(video_blob))[0]
+            # Poll Azure for all videos and update checklist
+            all_videos = poll_azure_videos_with_checklist(
+                blob_service_client, container_name, blob_prefix, 
+                checklist, pipeline_config
+            )
             
-            logger.info(f"\n🎬 Processing pair {pair_index}/{len(downloaded_file_pairs)}: {video_name}")
-            logger.info("-" * 60)
+            if not all_videos:
+                logger.info("✅ No videos found in Azure Blob Storage")
+                logger.info(f"⏳ Waiting {polling_interval_minutes} minutes before next poll...")
+                time.sleep(polling_interval_minutes * 60)
+                continue
             
-            try:
-                # Create output directory for this video
-                video_output_dir = os.path.join(
-                    output_base_dir, 
-                    f"video_{video_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                )
-                os.makedirs(video_output_dir, exist_ok=True)
-                
-                # Run the main pipeline
-                logger.info(f"🚀 Starting pipeline processing for {video_name}")
-                
-                # Get output prefix from config
-                output_prefix = pipeline_config['azure_storage']['output_blob_prefix']
-                
-                pipeline_results = pipeline_main(
-                    input_video_path=video_path,
-                    input_audio_path=audio_path,
-                    output_dir=video_output_dir,
-                    process_dual_views=None,  # Let pipeline_main auto-detect for INSV files
-                    process_unwarped_views=process_unwarped_views,
-                    azure_blob_client=blob_service_client,
-                    azure_container=container_name,
-                    azure_output_prefix=f"{output_prefix}/{video_name}",
-                    azure_account_name=account_name,
-                    azure_account_key=account_key
-                )
-                
-                # Update video info with success
-                video_info.update({
-                    "processed": True,
-                    "processing_date": datetime.now().isoformat(),
-                    "output_dir": video_output_dir,
-                    "status": "completed",
-                    "results_summary": pipeline_results
-                })
-                
-                processing_results.append({
-                    "video_name": video_name,
-                    "status": "success",
-                    "output_dir": video_output_dir,
-                    "results": pipeline_results
-                })
-                
-                successful_count += 1
-                logger.info(f"✅ Pipeline completed successfully for {video_name}")
-                logger.info(f"📁 Results saved to: {video_output_dir}")
-                
-            except Exception as e:
-                logger.error(f"❌ Pipeline failed for {video_name}: {e}")
-                
-                # Update video info with failure
-                video_info.update({
-                    "processed": False,
-                    "processing_date": datetime.now().isoformat(),
-                    "status": "failed",
-                    "error": str(e)
-                })
-                
-                processing_results.append({
-                    "video_name": video_name,
-                    "status": "failed",
-                    "error": str(e)
-                })
-                
-                failed_count += 1
+            # Get all videos from checklist and filter for unprocessed ones
+            all_video_names = list(checklist["videos"].keys())
+            pending_videos = []
             
-            finally:
-                # Clean up downloaded files for this pair
-                _cleanup_downloaded_files([video_path, audio_path])
-                
-                # Save progress after each video
-                _save_video_list_progress(video_list_file, videos)
-                
-                logger.info(f"📊 Progress: {successful_count} successful, {failed_count} failed")
+            for video_name in all_video_names:
+                video_info = checklist["videos"][video_name]
+                if video_info.get("status") not in ["completed", "processing"]:
+                    # Get the video info from the discovered videos
+                    for v in all_videos:
+                        if v.get("video_name") == video_name:
+                            pending_videos.append(v)
+                            break
+            
+            if max_videos:
+                pending_videos = pending_videos[:max_videos]
+            
+            logger.info(f"📋 Found {len(pending_videos)} unprocessed videos out of {len(all_video_names)} total videos")
+            
+            if not pending_videos:
+                logger.info("✅ All videos have been processed")
+                logger.info(f"⏳ Waiting {polling_interval_minutes} minutes before next poll...")
+                time.sleep(polling_interval_minutes * 60)
+                continue
         
-        logger.info(f"\n📊 LOOP 2 COMPLETE: Processed {len(downloaded_file_pairs)} video pairs")
+            # Process videos in batches
+            total_batches = (len(pending_videos) + batch_size - 1) // batch_size  # Ceiling division
+        
+            for batch_num in range(total_batches):
+                start_idx = batch_num * batch_size
+                end_idx = min(start_idx + batch_size, len(pending_videos))
+                current_batch = pending_videos[start_idx:end_idx]
+            
+                logger.info(f"\n📦 Processing BATCH {batch_num + 1}/{total_batches}")
+                logger.info(f"📊 Batch contains {len(current_batch)} videos")
+                logger.info("-" * 60)
+            
+                # Download and process current batch
+                batch_video_pairs = []
+            
+                # Get parallel download batch size from config
+                download_batch_size = pipeline_config.get('processing', {}).get('max_videos_per_batch', 3)
+                logger.info(f"📦 Using max_videos_per_batch: {download_batch_size} for parallel download in batch {batch_num + 1}")
+                logger.info(f"   🎯 This will create {len(current_batch)} parallel Ray tasks for downloading (one per video)")
+                logger.info(f"   💡 Expected behavior: All {len(current_batch)} videos download simultaneously, then process sequentially")
+                
+                # Create one Ray task per video for true parallel downloading
+                download_tasks = []
+                task_info = []
+                logger.info(f"🚀 LAUNCHING {len(current_batch)} PARALLEL RAY TASKS for batch {batch_num + 1}")
+                logger.info("🎯 PARALLEL DOWNLOAD PHASE STARTING - Each video gets its own Ray task!")
+                logger.info("=" * 80)
+                
+                for video_idx, video_info in enumerate(current_batch):
+                    # Create separate download directory for each video
+                    video_download_dir = os.path.join(local_download_dir, f"batch_{batch_num}_video_{video_idx}")
+                    task_id = f"BATCH_{batch_num + 1}_VIDEO_{video_idx + 1}"
+                    
+                    logger.info(f"🎯 LAUNCHING RAY TASK {task_id}")
+                    logger.info(f"   📦 Video: {video_info.get('video_name', 'unknown')}")
+                    logger.info(f"   📁 Download directory: {video_download_dir}")
+                    logger.info(f"   🖥️ Will run on separate CPU core")
+                    
+                    # Create a single-video batch for this task
+                    single_video_batch = [video_info]
+                    
+                    task_ref = download_video_batch_task.remote(
+                        blob_service_client, container_name, single_video_batch, video_download_dir, task_id
+                    )
+                    download_tasks.append(task_ref)
+                    task_info.append({
+                        'task_id': task_id,
+                        'video_idx': video_idx,
+                        'video_name': video_info.get('video_name', 'unknown'),
+                        'task_ref': task_ref
+                    })
+                
+                logger.info("=" * 80)
+                logger.info(f"⏳ WAITING for {len(download_tasks)} parallel Ray tasks to complete...")
+                logger.info("🚀 PARALLEL DOWNLOAD PHASE STARTED - All tasks running simultaneously!")
+                
+                # Display task status while waiting
+                for task in task_info:
+                    logger.info(f"   📍 {task['task_id']}: {task['video_name']}")
+                
+                # Wait for all downloads to complete
+                try:
+                    logger.info(f"⏳ WAITING for {len(download_tasks)} Ray tasks to finish downloading...")
+                    logger.info("💡 This is where the parallel downloading happens - all videos download simultaneously!")
+                    download_results_list = ray.get(download_tasks)
+                    
+                    logger.info("=" * 80)
+                    logger.info(f"✅ ALL PARALLEL DOWNLOADS COMPLETED for batch {batch_num + 1}")
+                    logger.info("🎯 PARALLEL DOWNLOAD PHASE COMPLETE - Now switching to sequential processing!")
+                    logger.info("=" * 80)
+                    
+                    # Display detailed results from each task
+                    total_successful = 0
+                    total_failed = 0
+                    for i, (download_results, task) in enumerate(zip(download_results_list, task_info)):
+                        successful = len([r for r in download_results if r['success']])
+                        failed = len([r for r in download_results if not r['success']])
+                        total_successful += successful
+                        total_failed += failed
+                        
+                        logger.info(f"📊 {task['task_id']} RESULTS: {successful}/{len(download_results)} successful")
+                        for result in download_results:
+                            if result['success']:
+                                stats = result.get('download_stats', {})
+                                logger.info(f"   ✅ {result['video_name']}: {stats.get('video_size_mb', '?')}MB video + {stats.get('audio_size_mb', '?')}MB audio")
+                            else:
+                                logger.error(f"   ❌ {result['video_name']}: {result['error']}")
+                    
+                    logger.info(f"📊 BATCH {batch_num + 1} DOWNLOAD SUMMARY: {total_successful} successful, {total_failed} failed")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Parallel download failed for batch {batch_num + 1}: {e}")
+                    continue
+                
+                # Process download results and add to batch_video_pairs
+                download_pair_index = 1
+                logger.info(f"\n📋 PROCESSING DOWNLOAD RESULTS for batch {batch_num + 1}")
+                
+                # Store cleanup directories for later
+                batch_cleanup_dirs = []
+                
+                for download_results in download_results_list:
+                    for download_result in download_results:
+                        if download_result['success']:
+                            # Verify files exist before adding to processing queue
+                            video_path = download_result['video_path']
+                            audio_path = download_result['audio_path']
+                            
+                            if os.path.exists(video_path) and os.path.exists(audio_path):
+                                batch_video_pairs.append({
+                                    'video_info': download_result['video_info'],
+                                    'video_path': video_path,
+                                    'audio_path': audio_path,
+                                    'download_index': download_pair_index,
+                                    'download_stats': download_result.get('download_stats', {}),
+                                    'source_task_id': download_result.get('task_id', 'unknown')
+                                })
+                                logger.info(f"✅ Downloaded pair {download_pair_index}: {download_result['video_name']} ready for processing (from {download_result.get('task_id', 'unknown')})")
+                                logger.info(f"   📁 Video: {video_path}")
+                                logger.info(f"   📁 Audio: {audio_path}")
+                                download_pair_index += 1
+                            else:
+                                logger.error(f"❌ Downloaded files missing for {download_result['video_name']}: video={os.path.exists(video_path)}, audio={os.path.exists(audio_path)}")
+                        else:
+                            logger.error(f"❌ Failed to download pair: {download_result['video_name']} - {download_result['error']} (from {download_result.get('task_id', 'unknown')})")
+                
+                # Store cleanup directories for later
+                for video_idx in range(len(current_batch)):
+                    video_download_dir = os.path.join(local_download_dir, f"batch_{batch_num}_video_{video_idx}")
+                    if os.path.exists(video_download_dir):
+                        batch_cleanup_dirs.append(video_download_dir)
+                
+                logger.info(f"\n📊 BATCH {batch_num + 1}/{total_batches} DOWNLOAD COMPLETE: Downloaded {len(batch_video_pairs)} video+audio pairs")
+                logger.info(f"🎯 All downloads completed successfully! Now starting sequential processing...")
+                
+                # =============================================================================
+                # SEQUENTIAL PROCESSING PHASE - Process all downloaded videos one by one
+                # =============================================================================
+                logger.info(f"\n🎬 STARTING SEQUENTIAL PROCESSING for batch {batch_num + 1}")
+                logger.info(f"📦 Processing {len(batch_video_pairs)} videos sequentially...")
+                logger.info("=" * 60)
+                
+                # Process current batch sequentially (after all downloads are complete)
+                for pair_data in batch_video_pairs:
+                    video_info = pair_data['video_info']
+                    video_path = pair_data['video_path']
+                    audio_path = pair_data['audio_path']
+                    pair_index = pair_data['download_index']
+                    
+                    video_blob = video_info['video_blob_name']
+                    video_name = os.path.splitext(os.path.basename(video_blob))[0]
+                    
+                    logger.info(f"\n🎬 Processing pair {pair_index}/{len(batch_video_pairs)}: {video_name}")
+                    logger.info("-" * 60)
+                    
+                    try:
+                        # Update checklist status to processing
+                        update_video_status(checklist, video_name, "processing")
+                        
+                        # Create output directory for this video
+                        video_output_dir = os.path.join(
+                            output_base_dir, 
+                            f"video_{video_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                        )
+                        os.makedirs(video_output_dir, exist_ok=True)
+                        
+                        # Run the main pipeline
+                        logger.info(f"🚀 Starting pipeline processing for {video_name}")
+                        
+                        # Get output prefix from config
+                        output_prefix = pipeline_config['azure_storage']['output_blob_prefix']
+                        
+                        pipeline_results = pipeline_main(
+                            input_video_path=video_path,
+                            input_audio_path=audio_path,
+                            output_dir=video_output_dir,
+                            process_dual_views=False,  # Let pipeline_main auto-detect for INSV files
+                            process_unwarped_views=True,
+                            azure_blob_client=blob_service_client,
+                            azure_container=container_name,
+                            azure_output_prefix=f"{output_prefix}/{video_name}",
+                            azure_account_name=account_name,
+                            azure_account_key=account_key,
+                            pipeline_config=pipeline_config
+                        )
+                        
+                        # Check if pipeline actually succeeded
+                        if pipeline_results and pipeline_results.get("successful_shard_tasks", 0) > 0:
+                            # Update video info with success
+                            video_info.update({
+                                "processed": True,
+                                "processing_date": datetime.now().isoformat(),
+                                "output_dir": video_output_dir,
+                                "status": "completed",
+                                "results_summary": pipeline_results
+                            })
+                        
+                            # Update checklist status
+                            update_video_status(checklist, video_name, "completed", 
+                                               output_dir=video_output_dir,
+                                               results_summary=pipeline_results)
+                        else:
+                            # Pipeline failed - mark as failed
+                            error_msg = "Pipeline failed - no successful shard tasks"
+                            video_info.update({
+                                "processed": False,
+                                "processing_date": datetime.now().isoformat(),
+                                "status": "failed",
+                                "error": error_msg
+                            })
+                            update_video_status(checklist, video_name, "failed", error=error_msg)
+                            raise Exception(error_msg)
+                        
+                        processing_results.append({
+                            "video_name": video_name,
+                            "status": "success",
+                            "output_dir": video_output_dir,
+                            "results": pipeline_results
+                        })
+                        
+                        successful_count += 1
+                        total_processed += 1
+                        logger.info(f"✅ Pipeline completed successfully for {video_name}")
+                        logger.info(f"📁 Results saved to: {video_output_dir}")
+                        
+                    except Exception as e:
+                        error_msg = str(e)
+                        
+                        # Check for CUDA out of memory errors
+                        if "CUDA_ERROR_OUT_OF_MEMORY" in error_msg or "out of memory" in error_msg.lower():
+                            error_msg = f"CUDA out of memory error: {error_msg}"
+                            logger.error(f"❌ CUDA memory error for {video_name}: {error_msg}")
+                        else:
+                            logger.error(f"❌ Pipeline failed for {video_name}: {error_msg}")
+                        
+                        # Update video info with failure
+                        video_info.update({
+                            "processed": False,
+                            "processing_date": datetime.now().isoformat(),
+                            "status": "failed",
+                            "error": error_msg
+                        })
+                        
+                        # Update checklist status
+                        update_video_status(checklist, video_name, "failed", error=error_msg)
+                        
+                        processing_results.append({
+                            "video_name": video_name,
+                            "status": "failed",
+                            "error": str(e)
+                        })
+                        
+                        failed_count += 1
+                        total_processed += 1
+                    
+                    finally:
+                        # Clean up downloaded files for this pair
+                        cleanup_downloaded_files([video_path, audio_path])
+                        
+                        # Save checklist after each video
+                        save_video_checklist(checklist_path, checklist)
+                        
+                        logger.info(f"📊 Progress: {successful_count} successful, {failed_count} failed")
+                
+                # Cleanup batch download directories after processing is complete
+                logger.info(f"🗑️ Cleaning up {len(batch_cleanup_dirs)} batch download directories")
+                for chunk_download_dir in batch_cleanup_dirs:
+                    try:
+                        shutil.rmtree(chunk_download_dir)
+                        logger.info(f"🗑️ Cleaned up batch download directory: {chunk_download_dir}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to cleanup batch directory {chunk_download_dir}: {e}")
+                
+                # Batch completion summary
+                logger.info(f"\n📦 BATCH {batch_num + 1}/{total_batches} COMPLETE")
+                logger.info(f"📊 Batch Results: {len([r for r in processing_results[-len(batch_video_pairs):] if r['status'] == 'success'])} successful, {len([r for r in processing_results[-len(batch_video_pairs):] if r['status'] == 'failed'])} failed")
+                
+                # Wait between batches (except after the last batch)
+                if batch_num < total_batches - 1:
+                    logger.info("⏳ Waiting 10 seconds before starting next batch...")
+                    time.sleep(10)
+        
+        # After processing all batches, wait for next polling cycle
+        logger.info(f"\n📊 CYCLE COMPLETE: Processed {total_processed} total videos")
+        logger.info(f"⏳ Waiting {polling_interval_minutes} minutes before next polling cycle...")
+        time.sleep(polling_interval_minutes * 60)
         
     except Exception as e:
-        logger.error(f"❌ LOOP 2 FAILED: Pipeline processing error: {e}")
-        return {"success": False, "error": f"Pipeline processing failed: {e}"}
+        logger.error(f"❌ CONTINUOUS PROCESSING FAILED: {e}")
+        return {"success": False, "error": f"Continuous processing failed: {e}"}
     
     # =============================================================================
     # FINAL RESULTS
@@ -287,9 +645,11 @@ def integrated_blob_polling_and_pipeline_task(
     
     final_results = {
         "success": True,
-        "task_type": "integrated_blob_polling_and_pipeline",
+        "task_type": "integrated_blob_polling_and_pipeline_with_batching",
+        "batch_size": batch_size,
+        "total_batches": total_batches,
         "videos_discovered": len(pending_videos),
-        "pairs_downloaded": len(downloaded_file_pairs),
+        "pairs_downloaded": len(batch_video_pairs),
         "videos_processed": successful_count + failed_count,
         "successful_count": successful_count,
         "failed_count": failed_count,
@@ -302,269 +662,13 @@ def integrated_blob_polling_and_pipeline_task(
     logger.info(f"📊 Final Results:")
     logger.info(f"   Videos Discovered: {final_results['videos_discovered']}")
     logger.info(f"   Pairs Downloaded: {final_results['pairs_downloaded']}")
+    logger.info(f"   Total Batches: {final_results['total_batches']}")
     logger.info(f"   Videos Processed: {final_results['videos_processed']}")
     logger.info(f"   Successful: {final_results['successful_count']}")
     logger.info(f"   Failed: {final_results['failed_count']}")
     logger.info(f"   Completion Rate: {final_results['completion_rate']}")
-    logger.info(f"   Output Directory: {final_results['output_base_dir']}")
-    
-    # =============================================================================
-    # CLEANUP PHASE
-    # =============================================================================
-    if pipeline_config.get('cleanup', {}).get('cleanup_temp_dir', True):
-        logger.info("\n🧹 CLEANUP: Removing temporary download directory")
-        try:
-            if os.path.exists(local_download_dir):
-                shutil.rmtree(local_download_dir)
-                logger.info(f"✅ Cleaned up temp directory: {local_download_dir}")
-            else:
-                logger.info(f"ℹ️ Temp directory already clean: {local_download_dir}")
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to clean up temp directory: {e}")
-    else:
-        logger.info("ℹ️ Temp directory cleanup disabled in config")
-    
-    # After all shards are processed, enhance labelstudio tasks with model results
-    try:
-        process_shard_labelstudio_enhancement(output_dir, total_shards)
-        logger.info("🎯 Label Studio tasks enhanced with model results")
-    except Exception as e:
-        logger.error(f"❌ Failed to enhance Label Studio tasks: {e}")
     
     return final_results
-
-
-def _load_azure_config(config_path: str) -> dict:
-    """Load Azure configuration from YAML file"""
-    try:
-        with open(config_path, 'r') as file:
-            config = yaml.safe_load(file)
-            return config['azstorage']
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
-    except yaml.YAMLError as e:
-        raise ValueError(f"Error parsing YAML configuration: {e}")
-
-
-def _load_pipeline_config(config_path: str = "config/pipeline_config.yaml") -> dict:
-    """Load pipeline configuration from YAML file"""
-    try:
-        # Check if file exists at given path
-        if not os.path.exists(config_path):
-            # Try relative to current script directory
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            config_path = os.path.join(script_dir, config_path)
-        
-        with open(config_path, 'r') as file:
-            config = yaml.safe_load(file)
-            logger.info(f"✅ Pipeline configuration loaded from: {config_path}")
-            return config
-    except FileNotFoundError:
-        logger.warning(f"⚠️ Pipeline config file not found: {config_path}. Using defaults.")
-        # Return default configuration
-        return {
-            "azure_storage": {
-                "input_blob_prefix": "test/input_videos",
-                "output_blob_prefix": "processed_outputs"
-            },
-            "local_storage": {
-                "temp_download_dir": "/tmp/azure_downloads",
-                "output_base_dir": "./out",
-                "video_list_file": "./azure_video_list.json"
-            },
-            "cleanup": {
-                "cleanup_temp_dir": True,
-                "cleanup_files_after_each_video": True
-            }
-        }
-    except yaml.YAMLError as e:
-        raise ValueError(f"Error parsing pipeline configuration YAML: {e}")
-
-
-def _create_azure_blob_client(config: dict) -> BlobServiceClient:
-    """Create Azure Blob Service client"""
-    account_url = f"https://{config['account-name']}.blob.core.windows.net"
-    return BlobServiceClient(account_url=account_url, credential=config['account-key'])
-
-
-def _poll_azure_videos(
-    blob_service_client: BlobServiceClient, 
-    container_name: str, 
-    blob_prefix: str, 
-    video_list_file: str, 
-    force_refresh: bool = False
-) -> List[Dict]:
-    """Poll Azure Blob Storage for video files"""
-    
-    # Check if we already polled recently (unless force refresh)
-    if not force_refresh and os.path.exists(video_list_file):
-        with open(video_list_file, 'r') as f:
-            existing_data = json.load(f)
-            last_poll = datetime.fromisoformat(existing_data.get('last_poll', '2000-01-01'))
-            time_diff = datetime.now() - last_poll
-            if time_diff.total_seconds() < 300:  # 5 minutes
-                logger.info(f"📋 Videos polled {int(time_diff.total_seconds())} seconds ago. Found {len(existing_data['videos'])} videos.")
-                return existing_data['videos']
-    
-    video_extensions = ['.insv', '.mp4', '.avi', '.mov', '.mkv']
-    
-    try:
-        container_client = blob_service_client.get_container_client(container_name)
-        
-        videos = []
-        blob_list = container_client.list_blobs(name_starts_with=blob_prefix)
-        
-        for blob in blob_list:
-            blob_name = blob.name
-            
-            # Check if it's a video file
-            if any(blob_name.lower().endswith(ext) for ext in video_extensions):
-                # Look for corresponding audio file
-                audio_file = _find_corresponding_audio(blob_name, container_client)
-                
-                video_info = {
-                    "video_blob_name": blob_name,
-                    "audio_blob_name": audio_file,
-                    "video_size_mb": round(blob.size / (1024 * 1024), 2),
-                    "last_modified": blob.last_modified.isoformat(),
-                    "processed": False,
-                    "processing_date": None,
-                    "output_dir": None,
-                    "status": "pending"
-                }
-                videos.append(video_info)
-        
-        # Save to JSON file
-        video_data = {
-            "last_poll": datetime.now().isoformat(),
-            "total_videos": len(videos),
-            "container": container_name,
-            "blob_prefix": blob_prefix,
-            "videos": videos
-        }
-        
-        with open(video_list_file, 'w') as f:
-            json.dump(video_data, f, indent=2)
-        
-        logger.info(f"📋 Found {len(videos)} video files in Azure Blob Storage")
-        logger.info(f"💾 Video list saved to {video_list_file}")
-        
-        return videos
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to poll Azure Blob Storage: {e}")
-        raise
-
-
-def _find_corresponding_audio(video_blob_name: str, container_client) -> Optional[str]:
-    """Find corresponding audio file for a video"""
-    video_base = os.path.splitext(video_blob_name)[0]
-    
-    # Common audio naming patterns
-    audio_patterns = [
-        f"{video_base}.wav",
-        f"{video_base}.mp3",
-        f"{video_base}.m4a",
-        f"{video_base}-audio.wav",
-        f"{video_base}-audio.mp3",
-        video_blob_name.replace("video", "audio").replace(".insv", ".wav"),
-        video_blob_name.replace("-video", "-audio").replace(".insv", ".wav")
-    ]
-    
-    for pattern in audio_patterns:
-        try:
-            blob_client = container_client.get_blob_client(pattern)
-            if blob_client.exists():
-                return pattern
-        except:
-            continue
-    
-    return None
-
-
-def _download_video_audio_pair(
-    blob_service_client: BlobServiceClient, 
-    container_name: str, 
-    video_info: Dict, 
-    local_download_dir: str
-) -> Dict[str, str]:
-    """Download video and audio files from Azure"""
-    video_blob = video_info['video_blob_name']
-    audio_blob = video_info['audio_blob_name']
-    
-    # Create download paths
-    video_filename = os.path.basename(video_blob)
-    video_local_path = os.path.join(local_download_dir, video_filename)
-    
-    audio_local_path = None
-    if audio_blob:
-        audio_filename = os.path.basename(audio_blob)
-        audio_local_path = os.path.join(local_download_dir, audio_filename)
-    
-    try:
-        # Download video
-        blob_client = blob_service_client.get_blob_client(
-            container=container_name, 
-            blob=video_blob
-        )
-        
-        with open(video_local_path, "wb") as f:
-            download_stream = blob_client.download_blob()
-            f.write(download_stream.readall())
-        
-        logger.info(f"✅ Video downloaded: {video_local_path}")
-        
-        # Download audio if exists
-        if audio_blob and audio_local_path:
-            audio_client = blob_service_client.get_blob_client(
-                container=container_name, 
-                blob=audio_blob
-            )
-            
-            with open(audio_local_path, "wb") as f:
-                download_stream = audio_client.download_blob()
-                f.write(download_stream.readall())
-            
-            logger.info(f"✅ Audio downloaded: {audio_local_path}")
-        else:
-            logger.warning("⚠️ No corresponding audio file found")
-        
-        return {
-            "video_path": video_local_path,
-            "audio_path": audio_local_path
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to download {video_blob}: {e}")
-        raise
-
-
-def _cleanup_downloaded_files(file_paths: List[str]):
-    """Clean up downloaded files"""
-    for file_path in file_paths:
-        if file_path and os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-                logger.info(f"🗑️ Cleaned up: {file_path}")
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to clean up {file_path}: {e}")
-
-
-def _save_video_list_progress(video_list_file: str, videos: List[Dict]):
-    """Save video list progress to file"""
-    try:
-        with open(video_list_file, 'r') as f:
-            video_data = json.load(f)
-        
-        video_data['videos'] = videos
-        video_data['last_updated'] = datetime.now().isoformat()
-        
-        with open(video_list_file, 'w') as f:
-            json.dump(video_data, f, indent=2)
-            
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to save progress: {e}")
-
 
 def clear_gpu_memory():
     """Clear GPU memory between tasks"""
@@ -682,7 +786,6 @@ def extract_flagged_segments(task_result, task_type, shard_index, shard_offset_s
         logger.warning(f"Error extracting segments from {task_type}: {e}")
     return segments
 
-
 # Put near imports / helpers
 PRIORITY_ORDER = ['high', 'medium', 'low']  # 0 is highest
 
@@ -727,7 +830,6 @@ def merge_overlapping_segments(timeline, tol=1.0):
     merged.append(cur)
     return merged
 
-
 def merge_overlapping_segments_dual_view(timeline):
     if not timeline:
         return []
@@ -771,132 +873,6 @@ def merge_overlapping_segments_dual_view(timeline):
     merged.append(current)
     return merged
 
-def generate_azure_shard_urls(azure_blob_client, container, shard_paths, output_prefix,
-                              account_name: str, account_key: str):
-    from datetime import datetime, timedelta
-    shard_urls = {}
-    expiry = datetime.utcnow() + timedelta(days=90)
-
-    for i, shard_path in enumerate(shard_paths):
-        if not os.path.exists(shard_path):
-            logger.warning(f"Shard file not found: {shard_path}")
-            shard_urls[i] = None
-            continue
-
-        shard_filename = os.path.basename(shard_path)
-        # keep the path clean; output_prefix already contains view_*_shards
-        blob_name = f"{output_prefix}/{shard_filename}".replace("\\", "/")
-
-        try:
-            blob_client = azure_blob_client.get_blob_client(container=container, blob=blob_name)
-            with open(shard_path, "rb") as data:
-                blob_client.upload_blob(data, overwrite=True)
-
-            sas_token = generate_blob_sas(
-                account_name=account_name,
-                container_name=container,
-                blob_name=blob_name,
-                account_key=account_key,
-                permission=BlobSasPermissions(read=True),
-                expiry=expiry
-            )
-            shard_urls[i] = f"https://{account_name}.blob.core.windows.net/{container}/{blob_name}?{sas_token}"
-        except Exception as e:
-            logger.error(f"Failed to upload/SAS shard {i+1}: {e}")
-            shard_urls[i] = None
-
-    return shard_urls
-
-
-def upload_output_directory_to_blob(output_dir: str, azure_blob_client, container_name: str, 
-                                   blob_base_path: str, video_name: str):
-    """
-    Upload entire output directory to Azure blob storage
-    
-    Args:
-        output_dir: Local output directory path
-        azure_blob_client: Azure blob service client
-        container_name: Azure container name
-        blob_base_path: Base blob path (e.g., "/krishna-test/test1/test_activity")
-        video_name: Video name for organizing the upload
-        
-    Returns:
-        dict: Upload results with success status and uploaded files list
-    """
-    from pathlib import Path
-    
-    logger.info(f"🔄 Uploading output directory to Azure blob storage...")
-    logger.info(f"   Local path: {output_dir}")
-    logger.info(f"   Blob path: {blob_base_path}/{video_name}")
-    
-    uploaded_files = []
-    failed_files = []
-    
-    try:
-        # Walk through all files in the output directory
-        output_path = Path(output_dir)
-        if not output_path.exists():
-            logger.error(f"Output directory does not exist: {output_dir}")
-            return {"success": False, "error": "Output directory not found"}
-        
-        for file_path in output_path.rglob('*'):
-            if file_path.is_file():
-                # Calculate relative path from output directory
-                relative_path = file_path.relative_to(output_path)
-                
-                # Create blob path
-                blob_name = f"{blob_base_path.strip('/')}/{video_name}/{relative_path}".replace("\\", "/")
-                
-                try:
-                    # Upload file to blob
-                    blob_client = azure_blob_client.get_blob_client(
-                        container=container_name, 
-                        blob=blob_name
-                    )
-                    
-                    with open(file_path, "rb") as data:
-                        blob_client.upload_blob(data, overwrite=True)
-                    
-                    uploaded_files.append({
-                        "local_path": str(file_path),
-                        "blob_path": blob_name,
-                        "size_bytes": file_path.stat().st_size
-                    })
-                    
-                    logger.debug(f"✅ Uploaded: {relative_path} -> {blob_name}")
-                    
-                except Exception as e:
-                    logger.error(f"❌ Failed to upload {relative_path}: {e}")
-                    failed_files.append({
-                        "local_path": str(file_path),
-                        "error": str(e)
-                    })
-        
-        total_size = sum(f["size_bytes"] for f in uploaded_files)
-        
-        logger.info(f"✅ Upload completed!")
-        logger.info(f"   Files uploaded: {len(uploaded_files)}")
-        logger.info(f"   Files failed: {len(failed_files)}")
-        logger.info(f"   Total size: {total_size / (1024*1024):.2f} MB")
-        
-        return {
-            "success": len(failed_files) == 0,
-            "uploaded_files_count": len(uploaded_files),
-            "failed_files_count": len(failed_files),
-            "total_size_bytes": total_size,
-            "uploaded_files": uploaded_files,
-            "failed_files": failed_files,
-            "blob_base_path": f"{blob_base_path}/{video_name}"
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to upload output directory: {e}")
-        return {
-            "success": False, 
-            "error": str(e),
-            "uploaded_files_count": len(uploaded_files),
-            "failed_files_count": len(failed_files)
-        }
 
 
 def ensure_prompt_file_exists(prompt_path: str):
@@ -912,7 +888,6 @@ def ensure_prompt_file_exists(prompt_path: str):
     import yaml
     with open(prompt_path, 'w') as f:
         yaml.dump(default_prompt, f, default_flow_style=False)
-
 
 def consolidate_dual_view_outputs(all_results, local_outputs_dir, conv_time, local_input_path):
     import json, os
@@ -1030,12 +1005,8 @@ def consolidate_dual_view_outputs(all_results, local_outputs_dir, conv_time, loc
                 consolidated_data["consolidated_annotation_summary"]["annotation_workload_reduction"])
     return consolidated_data
 
-
-
-
-
 def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str, 
-                 process_dual_views: bool = None, process_unwarped_views: bool = False,
+                 process_dual_views: bool = None, process_unwarped_views: bool = True,
                  azure_blob_client=None, azure_container=None, azure_output_prefix=None, azure_account_name: str = None, azure_account_key: str = None, pipeline_config = None):
     """
     Unified Ray pipeline for video analysis with optional dual-view processing for INSV files
@@ -1066,6 +1037,8 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
     
     # Auto-detect dual view processing for INSV files
     is_insv_file = input_video_path.lower().endswith('.insv')
+    print("3"*100)
+    print(f"is_insv_file: {is_insv_file}")
     if process_dual_views is None:
         process_dual_views = is_insv_file
     
@@ -1095,7 +1068,6 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
             except Exception:
                 flat_result = None
                 raise RuntimeError(f"Failed to convert one 360 file: {mp4_result.get('error', 'Unknown error')}")
-    
 
         # Split audio once into 60s shards (reused per view by index)
         audio_shards = ray.get(split_audio_into_shards.remote(
@@ -1390,7 +1362,6 @@ def generate_consolidated_model_results_json(shard_output_dir, shard_number, vie
     
     logger.info(f"Consolidated model results saved to: {json_file}")
     return json_file
-
 
 def generate_final_combined_model_results_json(output_dir, consolidated_json_paths):
     """
@@ -1928,7 +1899,6 @@ def generate_multiview_consolidated_model_results_json(shard_output_dir, shard_n
     logger.info(f"💾 Saved multi-view consolidated results: {consolidated_json_path}")
     return consolidated_json_path
 
-
 def process_time_aligned_shard_multiview(
     shard_index,
     view_shard_paths,          # Dict: {view_name: shard_path}
@@ -2340,7 +2310,6 @@ def process_time_aligned_shard(
         "detection_flags": detection_flags
     }
 
-
 def process_single_shard_through_pipeline(video_shard_path, audio_shard_path, 
                                          output_dir, shard_offset_sec, shard_index=0):
     """
@@ -2357,14 +2326,11 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     nsfw_output_dir = os.path.join(output_dir, "nsfw_output")
     motion_output_dir = os.path.join(output_dir, "motion_output")
     face_output_dir = os.path.join(output_dir, "face_output")
-
-    lighting_output_dir = os.path.join(output_dir, "lighting_output")
-
+    
     # Create output directories
     os.makedirs(nsfw_output_dir, exist_ok=True)
     os.makedirs(motion_output_dir, exist_ok=True)
     os.makedirs(face_output_dir, exist_ok=True)
-    os.makedirs(lighting_output_dir, exist_ok=True)
 
     # Define the prompt for scene detection
     prompt_path = "config/cosmos_prompt.yaml"
@@ -2380,11 +2346,8 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     face_ref  = process_video_chunks_for_face_detection.remote([video_shard_path], config=None, frame_interval=30, save_frames=False, chunk_duration_sec=60)
     clap_ref  = detect_claps_in_media.remote(audio_shard_path, clap_output_dir, threshold_bias=6000, lowcut=200, highcut=3200)
 
-    # Testing lighting
-    lighting_ref = lighting_by_second_task.remote(video_shard_path, output_dir = lighting_output_dir)
-
-    (audio_res, yolo_res, scene_res, nsfw_res, motion_res, face_res, clap_res, lighting_res) = ray.get(
-        [audio_ref, yolo_ref, scene_ref, nsfw_ref, motion_ref, face_ref, clap_ref, lighting_ref]
+    (audio_res, yolo_res, scene_res, nsfw_res, motion_res, face_res, clap_res) = ray.get(
+        [audio_ref, yolo_ref, scene_ref, nsfw_ref, motion_ref, face_ref, clap_ref]
     )
     
     # Store results from Ray tasks
@@ -2395,8 +2358,7 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
         'nsfw': nsfw_res,
         'motion': motion_res,
         'face': face_res,
-        'clap': clap_res,
-        'lighting': lighting_res
+        'clap': clap_res
     }
     
     # Save individual model results to JSON files (following ray_pipeline_testing_old.py pattern)
@@ -2422,7 +2384,7 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
         with open(face_file, 'w') as f:
             json.dump(face_res, f, indent=2)
         logger.info(f"Face detection results saved to: {face_file}")
-
+    
     # Extract flagged segments from all models
     all_segments = []
     for task_type, task_result in results.items():
@@ -2662,7 +2624,6 @@ def create_consolidated_predictions(view1_results, view2_results):
                 "to_name": "video_left"
             }
         ])
-
     
     # Check for NSFW detection (based on lines 303-307) 
     nsfw_detected = False
@@ -2803,8 +2764,6 @@ def create_consolidated_predictions(view1_results, view2_results):
             ])
     
     return predictions
-
-
 
 def create_consolidated_summary(label_studio_tasks, output_dir):
     """
@@ -3043,7 +3002,6 @@ def merge_model_results_into_labelstudio_task(shard_output_dir: str, shard_numbe
         logger.error(f"❌ Failed to merge model results into labelstudio task: {e}")
         return False
 
-
 def process_shard_labelstudio_enhancement(shard_output_dir: str, total_shards: int) -> None:
     """
     Enhances all labelstudio task files in the output directory by adding model results.
@@ -3077,267 +3035,8 @@ def _signal_handler(signum, frame):
     _shutdown_requested = True
     logger.info("🛑 Shutdown signal received. Gracefully stopping...")
 
-def _load_video_checklist(checklist_path: str) -> Dict:
-    """Load video processing checklist from JSON file"""
-    try:
-        if os.path.exists(checklist_path):
-            with open(checklist_path, 'r') as f:
-                checklist = json.load(f)
-                logger.info(f"📋 Loaded checklist with {len(checklist.get('videos', {}))} videos")
-                return checklist
-        else:
-            logger.info("📋 Creating new video processing checklist")
-            return {
-                "created_at": datetime.now().isoformat(),
-                "last_updated": datetime.now().isoformat(),
-                "total_videos": 0,
-                "completed_videos": 0,
-                "failed_videos": 0,
-                "videos": {}
-            }
-    except Exception as e:
-        logger.error(f"❌ Failed to load checklist: {e}")
-        return {
-            "created_at": datetime.now().isoformat(),
-            "last_updated": datetime.now().isoformat(),
-            "total_videos": 0,
-            "completed_videos": 0,
-            "failed_videos": 0,
-            "videos": {}
-        }
 
-def _save_video_checklist(checklist_path: str, checklist: Dict):
-    """Save video processing checklist to JSON file"""
-    try:
-        checklist["last_updated"] = datetime.now().isoformat()
-        with open(checklist_path, 'w') as f:
-            json.dump(checklist, f, indent=2)
-        logger.debug(f"💾 Checklist saved to {checklist_path}")
-    except Exception as e:
-        logger.error(f"❌ Failed to save checklist: {e}")
 
-def _update_video_status(checklist: Dict, video_name: str, status: str, **kwargs):
-    """Update video status in checklist
-    
-    Status can be: 'pending', 'processing', 'completed', 'failed'
-    """
-    if video_name not in checklist["videos"]:
-        checklist["videos"][video_name] = {
-            "added_at": datetime.now().isoformat(),
-            "status": "pending",
-            "attempts": 0,
-            "last_attempt": None,
-            "error": None,
-            "output_dir": None,
-            "processing_time": None
-        }
-        checklist["total_videos"] += 1
-    
-    old_status = checklist["videos"][video_name]["status"]
-    checklist["videos"][video_name]["status"] = status
-    checklist["videos"][video_name]["last_attempt"] = datetime.now().isoformat()
-    
-    # Update additional fields if provided
-    for key, value in kwargs.items():
-        checklist["videos"][video_name][key] = value
-    
-    # Update counters
-    if old_status == "completed" and status != "completed":
-        checklist["completed_videos"] -= 1
-    elif old_status != "completed" and status == "completed":
-        checklist["completed_videos"] += 1
-    
-    if old_status == "failed" and status != "failed":
-        checklist["failed_videos"] -= 1
-    elif old_status != "failed" and status == "failed":
-        checklist["failed_videos"] += 1
-    
-    logger.info(f"📋 Updated {video_name}: {old_status} → {status}")
-
-def _get_pending_videos(checklist: Dict) -> List[str]:
-    """Get list of video names that need processing"""
-    pending_videos = []
-    for video_name, info in checklist["videos"].items():
-        if info["status"] in ["pending", "failed"]:
-            pending_videos.append(video_name)
-    return pending_videos
-
-def _load_pipeline_config(config_path: str = "config/pipeline_config.yaml") -> Dict:
-    """Load pipeline configuration from YAML file"""
-    try:
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f)
-            logger.info(f"✅ Loaded pipeline config from {config_path}")
-            return config
-    except FileNotFoundError:
-        logger.warning(f"⚠️ Pipeline config not found at {config_path}, using defaults")
-        return {
-            "azure_storage": {
-                "input_blob_prefix": "test/input_videos",
-                "output_blob_prefix": "processed_outputs"
-            },
-            "local_storage": {
-                "temp_download_dir": "/tmp/azure_downloads",
-                "output_base_dir": "./out",
-                "video_list_file": "./azure_video_list.json",
-                "checklist_file": "./video_processing_checklist.json"
-            },
-            "polling": {
-                "interval_minutes": 5,
-                "max_parallel_videos": 1
-            },
-            "cleanup": {
-                "cleanup_temp_dir": True,
-                "cleanup_files_after_each_video": True
-            }
-        }
-    except Exception as e:
-        logger.error(f"❌ Failed to load pipeline config: {e}")
-        raise
-
-def _load_azure_config(config_path: str) -> Dict:
-    """Load Azure blob storage configuration"""
-    try:
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f)
-            logger.info(f"✅ Azure config loaded from {config_path}")
-            return config
-    except Exception as e:
-        logger.error(f"❌ Failed to load Azure config: {e}")
-        raise
-
-def _create_azure_blob_client(config: Dict) -> BlobServiceClient:
-    """Create Azure blob service client"""
-    try:
-        # Extract Azure storage config - handle both direct and nested structures
-        if 'azstorage' in config:
-            # Nested structure from blobfuse2_config.yaml
-            az_config = config['azstorage']
-        else:
-            # Direct structure
-            az_config = config
-            
-        account_name = az_config['account-name']
-        account_key = az_config['account-key']
-        
-        connection_string = f"DefaultEndpointsProtocol=https;AccountName={account_name};AccountKey={account_key};EndpointSuffix=core.windows.net"
-        blob_service_client = BlobServiceClient.from_connection_string(connection_string)
-        logger.info("✅ Azure blob service client created")
-        return blob_service_client
-    except Exception as e:
-        logger.error(f"❌ Failed to create Azure blob client: {e}")
-        logger.error(f"Config structure: {list(config.keys())}")
-        raise
-
-def _poll_azure_videos(blob_service_client: BlobServiceClient, container_name: str, blob_prefix: str, 
-                      checklist: Dict) -> List[Dict]:
-    """Poll Azure blob storage for new videos and update checklist"""
-    try:
-        logger.info(f"🔍 Polling Azure blob storage: {container_name}/{blob_prefix}")
-        
-        container_client = blob_service_client.get_container_client(container_name)
-        blobs = container_client.list_blobs(name_starts_with=blob_prefix)
-        
-        new_videos = []
-        for blob in blobs:
-            if blob.name.lower().endswith(('.insv', '.mp4', '.avi', '.mov')):
-                video_name = os.path.splitext(os.path.basename(blob.name))[0]
-                
-                # Check if this video is already in checklist
-                if video_name not in checklist["videos"]:
-                    # Look for corresponding audio file
-                    audio_blob_name = _find_corresponding_audio(blob_service_client, container_name, blob.name, blob_prefix)
-                    
-                    if audio_blob_name:
-                        video_info = {
-                            "video_name": video_name,
-                            "video_blob_name": blob.name,
-                            "audio_blob_name": audio_blob_name,
-                            "discovered_at": datetime.now().isoformat()
-                        }
-                        new_videos.append(video_info)
-                        
-                        # Add to checklist
-                        _update_video_status(checklist, video_name, "pending")
-                        logger.info(f"📹 New video found: {video_name}")
-                    else:
-                        logger.warning(f"⚠️ No corresponding audio found for {video_name}")
-        
-        if new_videos:
-            logger.info(f"🆕 Found {len(new_videos)} new videos")
-        else:
-            logger.info("✅ No new videos found")
-            
-        return new_videos
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to poll Azure videos: {e}")
-        return []
-
-def _find_corresponding_audio(blob_service_client: BlobServiceClient, container_name: str, 
-                             video_blob_name: str, blob_prefix: str) -> Optional[str]:
-    """Find audio file corresponding to video file"""
-    try:
-        video_base_name = os.path.splitext(os.path.basename(video_blob_name))[0]
-        container_client = blob_service_client.get_container_client(container_name)
-        
-        # Search for audio files with similar names
-        audio_extensions = ['.wav', '.mp3', '.aac', '.m4a']
-        
-        for ext in audio_extensions:
-            # Try exact match first
-            potential_audio_name = f"{os.path.dirname(video_blob_name)}/{video_base_name}{ext}"
-            try:
-                blob_client = container_client.get_blob_client(potential_audio_name)
-                if blob_client.exists():
-                    return potential_audio_name
-            except:
-                pass
-            
-            # Try without directory prefix
-            potential_audio_name = f"{blob_prefix}/{video_base_name}{ext}"
-            try:
-                blob_client = container_client.get_blob_client(potential_audio_name)
-                if blob_client.exists():
-                    return potential_audio_name
-            except:
-                pass
-        
-        return None
-    except Exception as e:
-        logger.error(f"❌ Error finding audio for {video_blob_name}: {e}")
-        return None
-
-def _download_video_audio_pair(blob_service_client: BlobServiceClient, container_name: str,
-                              video_blob_name: str, audio_blob_name: str, local_download_dir: str) -> tuple:
-    """Download video and audio files to local directory"""
-    try:
-        os.makedirs(local_download_dir, exist_ok=True)
-        
-        # Download video
-        video_local_path = os.path.join(local_download_dir, os.path.basename(video_blob_name))
-        container_client = blob_service_client.get_container_client(container_name)
-        
-        logger.info(f"⬇️ Downloading video: {video_blob_name}")
-        with open(video_local_path, "wb") as f:
-            blob_client = container_client.get_blob_client(video_blob_name)
-            download_stream = blob_client.download_blob()
-            f.write(download_stream.readall())
-        
-        # Download audio
-        audio_local_path = os.path.join(local_download_dir, os.path.basename(audio_blob_name))
-        logger.info(f"⬇️ Downloading audio: {audio_blob_name}")
-        with open(audio_local_path, "wb") as f:
-            blob_client = container_client.get_blob_client(audio_blob_name)
-            download_stream = blob_client.download_blob()
-            f.write(download_stream.readall())
-        
-        logger.info(f"✅ Downloaded: {os.path.basename(video_blob_name)} + {os.path.basename(audio_blob_name)}")
-        return video_local_path, audio_local_path
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to download {video_blob_name}: {e}")
-        return None, None
 
 @ray.remote
 def continuous_blob_polling_and_pipeline_task(azure_config_path: str = "blobfuse2_config.yaml",
@@ -3352,14 +3051,14 @@ def continuous_blob_polling_and_pipeline_task(azure_config_path: str = "blobfuse
         logger.info("🚀 Starting Continuous Blob Polling & Pipeline Task")
         
         # Load configurations
-        pipeline_config = _load_pipeline_config(pipeline_config_path)
-        azure_config = _load_azure_config(azure_config_path)
+        pipeline_config = load_pipeline_config(pipeline_config_path)
+        azure_config = load_azure_config(azure_config_path)
         polling_interval_minutes = pipeline_config.get('polling', {}).get('interval_minutes', 5)
         
         logger.info(f"⏰ Polling interval: {polling_interval_minutes} minutes")
         
         # Setup Azure client
-        blob_service_client = _create_azure_blob_client(azure_config)
+        blob_service_client = create_azure_blob_client(azure_config)
         
         # Extract Azure storage config - handle both direct and nested structures
         if 'azstorage' in azure_config:
@@ -3377,12 +3076,12 @@ def continuous_blob_polling_and_pipeline_task(azure_config_path: str = "blobfuse
         current_dir = os.path.dirname(os.path.abspath(__file__))
         local_download_dir = pipeline_config['local_storage']['temp_download_dir']
         output_base_dir = os.path.join(current_dir, pipeline_config['local_storage']['output_base_dir'].lstrip('./'))
-        checklist_path = os.path.join(current_dir, pipeline_config['local_storage'].get('checklist_file', './video_processing_checklist.json'))
+        checklist_path = os.path.join(current_dir, pipeline_config['local_storage'].get('checklist_file', './video_checklist.json'))
         blob_prefix = pipeline_config['azure_storage']['input_blob_prefix']
         output_prefix = pipeline_config['azure_storage']['output_blob_prefix']
         
         # Load checklist
-        checklist = _load_video_checklist(checklist_path)
+        checklist = load_video_checklist(checklist_path)
         
         # Statistics
         total_processed = 0
@@ -3390,7 +3089,18 @@ def continuous_blob_polling_and_pipeline_task(azure_config_path: str = "blobfuse
         failed_processed = 0
         
         logger.info("✅ Continuous polling initialized successfully")
-        logger.info(f"📋 Checklist: {checklist['total_videos']} total, {checklist['completed_videos']} completed, {checklist['failed_videos']} failed")
+        
+        # Get detailed statistics
+        stats = get_checklist_statistics(checklist)
+        logger.info(f"📋 Checklist Statistics:")
+        logger.info(f"   Total videos: {stats['total_videos']}")
+        logger.info(f"   Completed: {stats['completed_videos']}")
+        logger.info(f"   Failed: {stats['failed_videos']}")
+        logger.info(f"   Pending: {stats['pending_videos']}")
+        logger.info(f"   Processing: {stats['processing_videos']}")
+        logger.info(f"   Discovered: {stats['discovered_videos']}")
+        if stats['status_breakdown']:
+            logger.info(f"   Status breakdown: {stats['status_breakdown']}")
         
         # Store video blob info for retries
         video_blob_info_cache = {}
@@ -3402,19 +3112,29 @@ def continuous_blob_polling_and_pipeline_task(azure_config_path: str = "blobfuse
                 logger.info(f"🔄 Polling cycle started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                 
                 # 1. Poll for new videos
-                new_videos = _poll_azure_videos(blob_service_client, container_name, blob_prefix, checklist)
+                new_videos = poll_azure_videos(blob_service_client, container_name, blob_prefix, checklist, pipeline_config)
                 
                 # Update cache with new video info
                 for video_info in new_videos:
                     video_blob_info_cache[video_info["video_name"]] = video_info
                 
-                # 2. Get pending videos (new + previously failed)
-                pending_videos = _get_pending_videos(checklist)
+                # Save checklist after polling to ensure new videos are recorded
+                if new_videos:
+                    save_video_checklist(checklist_path, checklist)
+                
+                # 2. Check for and reset stuck videos
+                stuck_count = reset_stuck_videos(checklist, max_processing_hours=2)
+                if stuck_count > 0:
+                    logger.info(f"🔄 Reset {stuck_count} stuck videos back to pending status")
+                    save_video_checklist(checklist_path, checklist)
+                
+                # 3. Get pending videos (new + previously failed + reset stuck videos)
+                pending_videos = get_pending_videos(checklist)
                 
                 if pending_videos:
                     logger.info(f"📋 Found {len(pending_videos)} videos to process")
                     
-                    # 3. Process pending videos one by one
+                    # 4. Process pending videos one by one
                     for video_name in pending_videos:
                         if _shutdown_requested:
                             break
@@ -3423,8 +3143,8 @@ def continuous_blob_polling_and_pipeline_task(azure_config_path: str = "blobfuse
                         
                         try:
                             logger.info(f"\n🎬 Processing video: {video_name}")
-                            _update_video_status(checklist, video_name, "processing", attempts=video_info.get("attempts", 0) + 1)
-                            _save_video_checklist(checklist_path, checklist)
+                            update_video_status(checklist, video_name, "processing", attempts=video_info.get("attempts", 0) + 1)
+                            save_video_checklist(checklist_path, checklist)
                             
                             # Get video blob info from cache
                             video_blob_info = video_blob_info_cache.get(video_name)
@@ -3435,12 +3155,13 @@ def continuous_blob_polling_and_pipeline_task(azure_config_path: str = "blobfuse
                             
                             # Download video and audio
                             start_time = time.time()
-                            video_path, audio_path = _download_video_audio_pair(
+                            download_result = download_video_audio_pair(
                                 blob_service_client, container_name,
-                                video_blob_info["video_blob_name"],
-                                video_blob_info["audio_blob_name"],
+                                video_blob_info,
                                 local_download_dir
                             )
+                            video_path = download_result["video_path"]
+                            audio_path = download_result["audio_path"]
                             
                             if not video_path or not audio_path:
                                 raise Exception("Failed to download video/audio files")
@@ -3466,11 +3187,20 @@ def continuous_blob_polling_and_pipeline_task(azure_config_path: str = "blobfuse
                             
                             processing_time = time.time() - start_time
                             
+                            # Check if pipeline actually succeeded
+                            if pipeline_results and pipeline_results.get("successful_shard_tasks", 0) > 0:
                             # Update success status
-                            _update_video_status(checklist, video_name, "completed",
+                                update_video_status(checklist, video_name, "completed",
                                                output_dir=video_output_dir,
                                                processing_time=f"{processing_time:.2f}s",
                                                completed_at=datetime.now().isoformat())
+                            else:
+                                # Pipeline failed - mark as failed
+                                error_msg = "Pipeline failed - no successful shard tasks"
+                                update_video_status(checklist, video_name, "failed",
+                                                   error=error_msg,
+                                                   processing_time=f"{processing_time:.2f}s")
+                                raise Exception(error_msg)
                             
                             successful_processed += 1
                             total_processed += 1
@@ -3487,18 +3217,29 @@ def continuous_blob_polling_and_pipeline_task(azure_config_path: str = "blobfuse
                                     logger.warning(f"⚠️ Failed to cleanup files: {e}")
                             
                         except Exception as e:
-                            logger.error(f"❌ Failed to process {video_name}: {e}")
-                            _update_video_status(checklist, video_name, "failed", error=str(e))
+                            error_msg = str(e)
+                            
+                            # Check for CUDA out of memory errors
+                            if "CUDA_ERROR_OUT_OF_MEMORY" in error_msg or "out of memory" in error_msg.lower():
+                                error_msg = f"CUDA out of memory error: {error_msg}"
+                                logger.error(f"❌ CUDA memory error for {video_name}: {error_msg}")
+                            else:
+                                logger.error(f"❌ Failed to process {video_name}: {error_msg}")
+                            
+                            update_video_status(checklist, video_name, "failed", error=error_msg)
                             failed_processed += 1
                             total_processed += 1
                         
                         # Save checklist after each video
-                        _save_video_checklist(checklist_path, checklist)
+                        save_video_checklist(checklist_path, checklist)
                 
                 else:
+                    # Get current statistics for logging
+                    stats = get_checklist_statistics(checklist)
                     logger.info("✅ No pending videos to process")
+                    logger.info(f"📊 Current status: {stats['completed_videos']} completed, {stats['failed_videos']} failed, {stats['processing_videos']} processing")
                 
-                # 4. Wait for next polling cycle
+                # 5. Wait for next polling cycle
                 if not _shutdown_requested:
                     logger.info(f"⏰ Waiting {polling_interval_minutes} minutes until next poll...")
                     for i in range(polling_interval_minutes * 60):  # Convert minutes to seconds
@@ -3537,6 +3278,16 @@ def continuous_blob_polling_and_pipeline_task(azure_config_path: str = "blobfuse
         logger.error(f"❌ Continuous polling task failed: {e}")
         return {"success": False, "error": str(e)}
 
+# =============================================================================
+# MISSING FUNCTIONS TO COMPLETE END-TO-END FUNCTIONALITY
+# =============================================================================
+
+# =============================================================================
+# END OF MISSING FUNCTIONS
+# =============================================================================
+
+# Global variables for signal handling
+_shutdown_requested = False
 
 if __name__ == "__main__":
     import argparse
@@ -3587,8 +3338,8 @@ if __name__ == "__main__":
             signal.signal(signal.SIGINT, _signal_handler)
             signal.signal(signal.SIGTERM, _signal_handler)
             
-            # Launch the continuous blob polling and pipeline task
-            task_ref = continuous_blob_polling_and_pipeline_task.remote(
+            # Launch the integrated blob polling and pipeline task with batch processing
+            task_ref = integrated_blob_polling_and_pipeline_task.remote(
                 azure_config_path=args.azure_config,
                 pipeline_config_path=args.pipeline_config
             )
@@ -3680,11 +3431,11 @@ if __name__ == "__main__":
         
             try:
                 # Load pipeline config for output prefix
-                pipeline_config = _load_pipeline_config(args.pipeline_config)
+                pipeline_config = load_pipeline_config(args.pipeline_config)
                 
                 # Load Azure config
-                azure_config = _load_azure_config(args.azure_config)
-                azure_blob_client = _create_azure_blob_client(azure_config)
+                azure_config = load_azure_config(args.azure_config)
+                azure_blob_client = create_azure_blob_client(azure_config)
                 azure_container = azure_config.get('container')
                 azure_account_name = azure_config.get('account-name')
                 azure_account_key = azure_config.get('account-key')
