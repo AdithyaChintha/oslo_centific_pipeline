@@ -33,7 +33,18 @@ from setup.cosmos.setup import setup_cosmos
 from ray_jobs.video_splitter import split_video_into_shards
 from ray_jobs.audio_splitter import split_audio_into_shards
 #from ray_jobs.insv_to_mp4 import convert_insv_to_dual_mp4
-from ray_jobs.scene_det import detect_scenes
+# Import scene detection with error handling
+try:
+    from ray_jobs.scene_det import detect_scenes
+    SCENE_DETECTION_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Scene detection not available: {e}")
+    SCENE_DETECTION_AVAILABLE = False
+    # Create a dummy function
+    def detect_scenes(*args, **kwargs):
+        return {"success": False, "error": "Scene detection not available"}
+
+from ray_jobs.domain_detection import process_scene_domain_classification, load_groq_config
 from ray_jobs.run_yolodetect_task import run_yolodetect_on_shard
 from ray_jobs.audio_diarization_pii import process_audio_diarization
 from ray_jobs.clap_detector import detect_claps_in_media
@@ -301,13 +312,36 @@ def integrated_blob_polling_and_pipeline_task(
     checklist = load_video_checklist(checklist_path)
     logger.info(f"📋 Loaded checklist: {checklist['total_videos']} total, {checklist['completed_videos']} completed, {checklist['failed_videos']} failed")
     
+    # =============================================================================
+    # DOMAIN DETECTION WILL RUN AFTER EACH VIDEO PROCESSING COMPLETES
+    # =============================================================================
+    logger.info("\n" + "="*80)
+    logger.info("🎯 DOMAIN DETECTION ENABLED - Will run after each video processing completes")
+    logger.info("="*80)
+    
+    # =============================================================================
+    # CHECK FOR FAILED VIDEOS AND RESET TO PENDING
+    # =============================================================================
+    failed_videos = [name for name, data in checklist['videos'].items() if data['status'] == 'failed']
+    if failed_videos:
+        logger.info(f"🔄 Found {len(failed_videos)} failed videos, resetting to pending: {failed_videos}")
+        for video_name in failed_videos:
+            checklist['videos'][video_name]['status'] = 'pending'
+            checklist['videos'][video_name]['last_updated'] = datetime.now().isoformat()
+        checklist['failed_videos'] = 0
+        checklist['last_updated'] = datetime.now().isoformat()
+        save_video_checklist(checklist, checklist_path)
+        logger.info("✅ Failed videos reset to pending state")
+    else:
+        logger.info("✅ No failed videos found")
+    
     processing_results = []
     successful_count = 0
     failed_count = 0
     total_processed = 0
     
     try:
-        while True:  # Continuous processing loop
+        while not _shutdown_requested:  # Continuous processing loop with shutdown check
             logger.info(f"\n{'='*60}")
             logger.info(f"🔄 Polling cycle started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             
@@ -320,7 +354,11 @@ def integrated_blob_polling_and_pipeline_task(
             if not all_videos:
                 logger.info("✅ No videos found in Azure Blob Storage")
                 logger.info(f"⏳ Waiting {polling_interval_minutes} minutes before next poll...")
-                time.sleep(polling_interval_minutes * 60)
+                # Sleep in smaller intervals to check for shutdown
+                for i in range(polling_interval_minutes * 60):
+                    if _shutdown_requested:
+                        break
+                    time.sleep(1)
                 continue
             
             # Get all videos from checklist and filter for unprocessed ones
@@ -344,7 +382,11 @@ def integrated_blob_polling_and_pipeline_task(
             if not pending_videos:
                 logger.info("✅ All videos have been processed")
                 logger.info(f"⏳ Waiting {polling_interval_minutes} minutes before next poll...")
-                time.sleep(polling_interval_minutes * 60)
+                # Sleep in smaller intervals to check for shutdown
+                for i in range(polling_interval_minutes * 60):
+                    if _shutdown_requested:
+                        break
+                    time.sleep(1)
                 continue
         
             # Process videos in batches
@@ -572,6 +614,7 @@ def integrated_blob_polling_and_pipeline_task(
                         logger.info(f"✅ Pipeline completed successfully for {video_name}")
                         logger.info(f"📁 Results saved to: {video_output_dir}")
                         
+                        
                     except Exception as e:
                         error_msg = str(e)
                         
@@ -681,6 +724,91 @@ def clear_gpu_memory():
         logger.info("GPU memory cleared")
     except Exception as e:
         logger.warning(f"Failed to clear GPU memory: {e}")
+
+def find_and_process_all_scene_detection_outputs(base_output_dir: str):
+    """
+    Find all scene detection output directories and run domain detection on them.
+    This function automatically discovers scene detection outputs and processes them.
+    
+    Args:
+        base_output_dir: Base output directory to search for scene detection outputs
+        
+    Returns:
+        Dict with processing results
+    """
+    try:
+        logger.info(f"🔍 Searching for scene detection outputs in: {base_output_dir}")
+        
+        # Find all scene_output directories
+        scene_output_dirs = []
+        for root, dirs, files in os.walk(base_output_dir):
+            if "scene_output" in dirs:
+                scene_output_path = os.path.join(root, "scene_output")
+                # Check if it contains scene detection JSON files
+                json_files = [f for f in os.listdir(scene_output_path) if f.endswith('_scene_detection_results.json')]
+                if json_files:
+                    scene_output_dirs.append(scene_output_path)
+                    logger.info(f"📁 Found scene detection output: {scene_output_path} ({len(json_files)} files)")
+        
+        if not scene_output_dirs:
+            logger.info("ℹ️ No scene detection outputs found")
+            return {"success": True, "processed_dirs": 0, "message": "No scene detection outputs found"}
+        
+        logger.info(f"🎯 Found {len(scene_output_dirs)} scene detection output directories")
+        
+        # Process all scene detection outputs synchronously (one by one)
+        if scene_output_dirs:
+            logger.info("🚀 Starting domain detection on all scene detection outputs...")
+            
+            total_processed_files = 0
+            total_scenes = 0
+            total_classified_scenes = 0
+            successful_dirs = 0
+            failed_dirs = 0
+            
+            for scene_output_dir in scene_output_dirs:
+                try:
+                    logger.info(f"🎯 Processing domain detection for: {scene_output_dir}")
+                    result = ray.get(process_scene_domain_classification.remote(scene_output_dir))
+                    
+                    if result.get("success", False):
+                        successful_dirs += 1
+                        total_processed_files += result.get("processed_files", 0)
+                        total_scenes += result.get("total_scenes", 0)
+                        total_classified_scenes += result.get("classified_scenes", 0)
+                        logger.info(f"✅ Completed domain detection for: {scene_output_dir}")
+                    else:
+                        failed_dirs += 1
+                        logger.error(f"❌ Domain detection failed for {scene_output_dir}: {result.get('error', 'Unknown error')}")
+                        
+                except Exception as e:
+                    failed_dirs += 1
+                    logger.error(f"❌ Error processing {scene_output_dir}: {e}")
+            
+            combined_result = {
+                "success": successful_dirs > 0,
+                "successful_directories": successful_dirs,
+                "failed_directories": failed_dirs,
+                "total_processed_files": total_processed_files,
+                "total_scenes": total_scenes,
+                "total_classified_scenes": total_classified_scenes
+            }
+            
+            if combined_result.get("success", False):
+                logger.info(f"✅ Domain detection completed successfully!")
+                logger.info(f"   📊 Processed directories: {combined_result.get('successful_directories', 0)}")
+                logger.info(f"   📊 Total scenes classified: {combined_result.get('total_classified_scenes', 0)}")
+                logger.info(f"   📊 Total files processed: {combined_result.get('total_processed_files', 0)}")
+            else:
+                logger.error(f"❌ Domain detection failed: {combined_result.get('error', 'Unknown error')}")
+            
+            return combined_result
+        else:
+            return {"success": True, "processed_dirs": 0, "message": "No scene detection outputs to process"}
+            
+    except Exception as e:
+        logger.error(f"❌ Error finding and processing scene detection outputs: {e}")
+        return {"success": False, "error": str(e)}
 
 def extract_flagged_segments(task_result, task_type, shard_index, shard_offset_sec):
     """Extract flagged segments from task results"""
@@ -1405,11 +1533,16 @@ def generate_final_combined_model_results_json(output_dir, consolidated_json_pat
                 # Extract clap detection flags for this shard
                 clap_flags = shard_data.get('detection_flags', {})
                 
-                # Create base shard data structure
-                shard_data_structure = {
-                    "view1": shard_data.get('view1', {}),
-                    "view2": shard_data.get('view2', {})
-                }
+                # Create base shard data structure - handle both dual-view and multi-view
+                if 'view_results' in shard_data:
+                    # Multi-view structure (front, back, left, right, etc.)
+                    shard_data_structure = shard_data.get('view_results', {})
+                else:
+                    # Dual-view structure (view1, view2)
+                    shard_data_structure = {
+                        "view1": shard_data.get('view1', {}),
+                        "view2": shard_data.get('view2', {})
+                    }
                 
                 # Only include detection_flags for first and last shards
                 is_first_shard_processed = clap_flags.get('is_first_shard_processed', False)
@@ -1983,6 +2116,43 @@ def process_time_aligned_shard_multiview(
 
     logger.info(f"✅ Successfully processed {len(view_results)} views for shard {shard_index+1}")
 
+    # =============================================================================
+    # DOMAIN DETECTION ON SCENE DETECTION OUTPUTS
+    # =============================================================================
+    logger.info(f"🎯 Running domain detection on scene outputs for shard {shard_index+1}...")
+    try:
+        domain_result = find_and_process_all_scene_detection_outputs(shard_output_dir)
+        if domain_result.get("success", False):
+            logger.info(f"✅ Domain detection completed for shard {shard_index+1}: {domain_result.get('total_classified_scenes', 0)} scenes classified")
+            logger.info(f"📊 Domain detection summary: {domain_result.get('successful_directories', 0)} directories, {domain_result.get('total_processed_files', 0)} files processed")
+        else:
+            logger.warning(f"⚠️ Domain detection failed for shard {shard_index+1}: {domain_result.get('error', 'Unknown error')}")
+    except Exception as domain_error:
+        logger.error(f"❌ Domain detection error for shard {shard_index+1}: {domain_error}")
+    
+    logger.info(f"🎯 Domain detection completed for shard {shard_index+1}, proceeding to clap detection...")
+
+    # --- RELOAD SCENE DATA WITH DOMAIN CLASSIFICATION ---
+    logger.info(f"🔄 Reloading scene data with domain classification for shard {shard_index+1}...")
+    for view_name, view_result in view_results.items():
+        if view_result.get('success', True):
+            # Find the scene output directory for this view
+            view_scene_output_dir = os.path.join(shard_output_dir, view_name, "scene_output")
+            if os.path.exists(view_scene_output_dir):
+                # Find the scene detection JSON file
+                scene_files = [f for f in os.listdir(view_scene_output_dir) if f.endswith('_scene_detection_results.json')]
+                if scene_files:
+                    scene_file_path = os.path.join(view_scene_output_dir, scene_files[0])
+                    try:
+                        # Reload the scene data with domain classification
+                        with open(scene_file_path, 'r') as f:
+                            updated_scene_data = json.load(f)
+                        # Update the view_results with the fresh scene data
+                        view_result['scene'] = updated_scene_data
+                        logger.info(f"✅ Reloaded scene data with domain classification for {view_name}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to reload scene data for {view_name}: {e}")
+
     # --- ENHANCED CLAP DETECTION ANALYSIS ACROSS ALL VIEWS ---
     is_intro_statement_there = False
     intro_transcript = ""
@@ -2121,6 +2291,15 @@ def process_time_aligned_shard_multiview(
         video_name,
         all_view_urls=view_azure_urls  # Pass all view URLs for metadata
     )
+    
+
+    # Merge model results into labelstudio task right after creation
+    if task_json_path:
+        try:
+            merge_model_results_into_labelstudio_task(shard_output_dir, shard_index + 1)
+            logger.info(f"📋 Enhanced shard {shard_index + 1} labelstudio task with model results")
+        except Exception as e:
+            logger.error(f"❌ Failed to enhance shard {shard_index + 1} labelstudio task: {e}")
     
     return {
         "shard_index": shard_index,
@@ -2269,6 +2448,41 @@ def process_time_aligned_shard(
     view1_results['detection_flags'] = detection_flags
     if view2_results:
         view2_results['detection_flags'] = detection_flags
+
+    # Domain detection is handled in process_time_aligned_shard_multiview() to avoid duplication
+    logger.info(f"🎯 Proceeding to consolidation for shard {shard_index+1}...")
+
+    # --- RELOAD SCENE DATA WITH DOMAIN CLASSIFICATION (if available) ---
+    logger.info(f"🔄 Reloading scene data with domain classification for shard {shard_index+1}...")
+    
+    # Reload scene data for view1
+    view1_scene_output_dir = os.path.join(shard_output_dir, "view_1", "scene_output")
+    if os.path.exists(view1_scene_output_dir):
+        scene_files = [f for f in os.listdir(view1_scene_output_dir) if f.endswith('_scene_detection_results.json')]
+        if scene_files:
+            scene_file_path = os.path.join(view1_scene_output_dir, scene_files[0])
+            try:
+                with open(scene_file_path, 'r') as f:
+                    updated_scene_data = json.load(f)
+                view1_results['scene'] = updated_scene_data
+                logger.info(f"✅ Reloaded scene data with domain classification for view_1")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to reload scene data for view_1: {e}")
+    
+    # Reload scene data for view2 (if exists)
+    if view2_results:
+        view2_scene_output_dir = os.path.join(shard_output_dir, "view_2", "scene_output")
+        if os.path.exists(view2_scene_output_dir):
+            scene_files = [f for f in os.listdir(view2_scene_output_dir) if f.endswith('_scene_detection_results.json')]
+            if scene_files:
+                scene_file_path = os.path.join(view2_scene_output_dir, scene_files[0])
+                try:
+                    with open(scene_file_path, 'r') as f:
+                        updated_scene_data = json.load(f)
+                    view2_results['scene'] = updated_scene_data
+                    logger.info(f"✅ Reloaded scene data with domain classification for view_2")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to reload scene data for view_2: {e}")
 
     # --- Generate Consolidated Model Results JSON ---
     logger.info(f"Generating consolidated model results JSON for shard {shard_index+1}")
@@ -2799,6 +3013,7 @@ def create_consolidated_summary(label_studio_tasks, output_dir):
                 "successful_audio": total_shards * 2,  # Assume audio processing succeeds for both views
                 "successful_yolo": total_shards * 2,
                 "successful_scene": total_shards * 2,
+                "successful_domain": total_shards * 2,  # Domain classification for both views
                 "successful_nsfw": total_shards * 2,
                 "successful_motion": total_shards * 2,
                 "successful_face": total_shards * 2,
@@ -2955,7 +3170,7 @@ def _process_single_view(
 def merge_model_results_into_labelstudio_task(shard_output_dir: str, shard_number: int) -> bool:
     """
     Merges the shard_X_consolidated_model_results.json content into the 
-    consolidated_shard_X_labelstudio_task.json file under the data section.
+    shard_X_labelstudio_task.json file under the predictions section.
     
     Args:
         shard_output_dir: Directory containing the shard files
@@ -2967,7 +3182,7 @@ def merge_model_results_into_labelstudio_task(shard_output_dir: str, shard_numbe
     try:
         # Construct file paths
         model_results_file = os.path.join(shard_output_dir, f"shard_{shard_number}_consolidated_model_results.json")
-        labelstudio_task_file = os.path.join(shard_output_dir, f"consolidated_shard_{shard_number}_labelstudio_task.json")
+        labelstudio_task_file = os.path.join(shard_output_dir, f"shard_{shard_number}_labelstudio_task.json")
         
         # Check if both files exist
         if not os.path.exists(model_results_file):
@@ -2986,12 +3201,23 @@ def merge_model_results_into_labelstudio_task(shard_output_dir: str, shard_numbe
         with open(labelstudio_task_file, 'r') as f:
             labelstudio_task = json.load(f)
         
-        # Add model results to the data section
-        if "data" not in labelstudio_task:
-            labelstudio_task["data"] = {}
+        # Add model results to the predictions section
+        if "predictions" not in labelstudio_task:
+            labelstudio_task["predictions"] = []
         
-        # Add the entire model results as a new key in data
-        labelstudio_task["data"]["model_results"] = model_results
+        # Get the first prediction entry (or create if none exists)
+        if not labelstudio_task["predictions"]:
+            labelstudio_task["predictions"].append({"result": []})
+        
+        # Add model results as a new item in the result array (keeping all existing items)
+        labelstudio_task["predictions"][0]["result"].append({
+            "id": "consolidated_model_results",
+            "type": "model_results",
+            "value": model_results,
+            "model_version": "consolidated_v1.0",
+            "from_name": "model_results",
+            "to_name": "data"
+        })
         
         # Write back the updated labelstudio task
         with open(labelstudio_task_file, 'w') as f:

@@ -1,0 +1,38 @@
+# Groq API Configuration for Domain Detection
+groq:
+  api_key: "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"
+  model: "openai/gpt-oss-20b"
+  temperature: 0.3
+  max_tokens: 50
+  top_p: 1
+  stream: false
+
+# Domain Classification Configuration
+domain_detection:
+  # Predefined domains for classification
+  domains:
+    - "Food & Mealtime"
+    - "Personal Care & Hygiene"
+    - "Household Movement"
+    - "Cleaning & Maintenance"
+    - "Work & Study"
+    - "Leisure & Entertainment"
+    - "Exercise & Wellness"
+    - "Social & Family Life"
+    - "Pet Care"
+    - "Home & Garden Projects"
+    - "Shopping & Logistics"
+    - "Safety & Security"
+  
+  # Default fallback domain
+  default_domain: "Unkonwn"
+  
+  # Prompt template for domain classification
+  prompt_template: |
+    You are a video scene domain classifier. Given a scene description, classify it into one of the following domains:
+
+    {domains_list}
+
+    Scene Description: "{description}"
+
+    Please respond with ONLY the exact domain name from the list above that best matches this scene. Do not include any additional text, explanations, or formatting.
