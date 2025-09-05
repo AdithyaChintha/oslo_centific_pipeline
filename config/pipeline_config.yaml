@@ -4,7 +4,7 @@
 # Azure Blob Storage Configuration
 azure_storage:
   # Input directory configuration
-  input_blob_prefix: "azure_directory_path/Oslo/test1"  # Default blob prefix to search for videos
+  input_blob_prefix: "test/input_videos"  # Default blob prefix to search for videos
   
   # Output directory configuration  
   output_blob_prefix: "five_outputs"  # Base prefix for uploading processed results
@@ -57,6 +57,11 @@ label_studio:
   
   # Project ID
   project_id: "5392"
+
+# API Keys Configuration
+api_keys:
+  # Groq API key for sensitive information analysis
+  groq_api_key: "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"
 
 # Logging Configuration
 logging:

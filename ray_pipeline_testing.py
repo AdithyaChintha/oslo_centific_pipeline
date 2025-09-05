@@ -36,6 +36,7 @@ from ray_jobs.audio_splitter import split_audio_into_shards
 from ray_jobs.scene_det import detect_scenes
 from ray_jobs.run_yolodetect_task import run_yolodetect_on_shard
 from ray_jobs.audio_diarization_pii import process_audio_diarization
+from ray_jobs.audio_sensitive_info import process_audio_sensitive_info
 from ray_jobs.clap_detector import detect_claps_in_media
 
 # Import new ray jobs
@@ -784,6 +785,45 @@ def extract_flagged_segments(task_result, task_type, shard_index, shard_offset_s
                     "description": f"Clap detected at {desc}",
                     "shard_index": shard_index + 1
                 })
+
+        elif task_type == "sensitive":
+            # Handle sensitive information analysis results with new structure
+            if isinstance(task_result, list) and len(task_result) > 0:
+                for sensitive_result in task_result:
+                    # Check if sensitive content was detected using the new structure
+                    if sensitive_result.get('summary', {}).get('has_sensitive_content', False):
+                        # Use sensitive_detections array if available, otherwise create from summary
+                        sensitive_detections = sensitive_result.get('sensitive_detections', [])
+                        if sensitive_detections:
+                            # Use individual detections
+                            for detection in sensitive_detections:
+                                segments.append({
+                                    "start_time": maybe_offset(detection.get('start_time', 0)),
+                                    "end_time": maybe_offset(detection.get('end_time', 60)),
+                                    "task_type": "sensitive_analysis",
+                                    "confidence": detection.get('confidence', 0.7),
+                                    "flag_type": "sensitive_content",
+                                    "priority": detection.get('priority', 'high'),
+                                    "description": f"Sensitive content detected: {detection.get('topic', 'unknown')}",
+                                    "shard_index": shard_index + 1,
+                                    "sensitive_topic": detection.get('topic', ''),
+                                    "analysis": detection.get('analysis', '')
+                                })
+                        else:
+                            # Fallback: create segment from summary data
+                            summary = sensitive_result.get('summary', {})
+                            segments.append({
+                                "start_time": shard_offset_sec,
+                                "end_time": shard_offset_sec + 60,  # Assuming 60-second shards
+                                "task_type": "sensitive_analysis",
+                                "confidence": summary.get('confidence', 0.7),
+                                "flag_type": "sensitive_content",
+                                "priority": "high",
+                                "description": f"Sensitive content detected: {', '.join(summary.get('sensitive_topics', []))}",
+                                "shard_index": shard_index + 1,
+                                "sensitive_topics": summary.get('sensitive_topics', []),
+                                "analysis": sensitive_result.get('sensitive_analysis', {}).get('analysis', '')
+                            })
     except Exception as e:
         logger.warning(f"Error extracting segments from {task_type}: {e}")
     return segments
@@ -2351,7 +2391,11 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     (audio_res, yolo_res, scene_res, nsfw_res, motion_res, face_res, clap_res) = ray.get(
         [audio_ref, yolo_ref, scene_ref, nsfw_ref, motion_ref, face_ref, clap_ref]
     )
-    
+    # Run sensitive information analysis after audio_diarization_pii completes
+    sensitive_output_dir = os.path.join(output_dir, "sensitive_output")
+    os.makedirs(sensitive_output_dir, exist_ok=True)
+    sensitive_ref = process_audio_sensitive_info.remote([audio_shard_path], audio_output_dir, sensitive_output_dir)
+    sensitive_res = ray.get(sensitive_ref)
     # Store results from Ray tasks
     results = {
         'audio': audio_res,
@@ -2360,7 +2404,8 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
         'nsfw': nsfw_res,
         'motion': motion_res,
         'face': face_res,
-        'clap': clap_res
+        'clap': clap_res,
+        'sensitive': sensitive_res
     }
     
     # Save individual model results to JSON files (following ray_pipeline_testing_old.py pattern)
@@ -2386,6 +2431,13 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
         with open(face_file, 'w') as f:
             json.dump(face_res, f, indent=2)
         logger.info(f"Face detection results saved to: {face_file}")
+    
+    # Save Sensitive Information Analysis results
+    if sensitive_res and isinstance(sensitive_res, list) and len(sensitive_res) > 0:
+        sensitive_file = os.path.join(sensitive_output_dir, f"{video_name}_sensitive_results.json")
+        with open(sensitive_file, 'w') as f:
+            json.dump(sensitive_res, f, indent=2)
+        logger.info(f"Sensitive information analysis results saved to: {sensitive_file}")
     
     # Extract flagged segments from all models
     all_segments = []
