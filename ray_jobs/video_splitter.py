@@ -34,7 +34,7 @@ def _ffprobe_duration(path: str) -> float:
     return float(out.stdout.strip())
 
 # ---------- public API ----------
-@ray.remote(num_gpus=1)
+@ray.remote(num_gpus=0.5)
 def split_video_into_shards(
     video_path: str,
     output_dir: str = "/tmp/shards",
