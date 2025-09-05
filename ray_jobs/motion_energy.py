@@ -31,7 +31,7 @@ except ImportError:
 
 logger = get_logger("motion_energy_ray")
 
-@ray.remote
+@ray.remote(max_calls=1)
 def analyze_motion_energy_only(
     video_path: str,
     sensitivity_level: str = "medium",
