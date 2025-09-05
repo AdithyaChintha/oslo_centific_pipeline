@@ -233,7 +233,7 @@ def build_labelstudio_json_for_shard_task(shard_output_dir: str, shard_video_url
             # Flattened metadata keys at root level to match UI template expectations
             "meta.home_identifier": f"Shard_{shard_number}",
             "meta.recording_datetime": current_time,
-            "meta.domain": "production",
+            "metadata_domain": "production",  # Required by Label Studio API
             "meta.actions": "",
             "home_id": "",
             "start_datetime": "",
@@ -799,7 +799,7 @@ def generate_multiview_4view_labelstudio_task(shard_output_dir, assigned_views,
             "meta": "",  # Required empty meta field
             "meta.home_identifier": f"Shard_{shard_number}",
             "meta.recording_datetime": current_time,
-            "meta.domain": "production", 
+            "metadata_domain": "production",  # Required by Label Studio API
             "meta.actions": "",
             
             # Multi-view specific metadata
@@ -927,7 +927,7 @@ def generate_consolidated_shard_labelstudio_task(shard_output_dir, view1_azure_u
                 # Flattened metadata keys at root level to match UI template expectations
                 "meta.home_identifier": f"Shard_{shard_number}",
                 "meta.recording_datetime": current_time,
-                "meta.domain": "production",
+                "metadata_domain": "production",  # Required by Label Studio API
                 "meta.actions": "",
                 # Additional metadata (these won't show in UI but good for context)
                 "shard_number": str(shard_number),
