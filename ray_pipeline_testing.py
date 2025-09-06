@@ -49,6 +49,7 @@ from ray_jobs.run_yolodetect_task import run_yolodetect_on_shard
 from ray_jobs.audio_diarization_pii import process_audio_diarization
 from ray_jobs.audio_sensitive_info import process_audio_sensitive_info
 from ray_jobs.clap_detector import detect_claps_in_media
+from ray_jobs.signal_quality_check_blur_black_screen import detect_blur_and_black_segments
 
 # Import new ray jobs
 from ray_jobs.nsfw_det_final import process_video_chunks_for_nsfw
@@ -1523,7 +1524,8 @@ def generate_consolidated_model_results_json(shard_output_dir, shard_number, vie
             "nsfw": view1_results.get('nsfw', {}),
             "motion": view1_results.get('motion', {}),
             "face": view1_results.get('face', {}),
-            "clap": view1_results.get('clap', {})
+            "clap": view1_results.get('clap', {}),
+            "signal_quality": view1_results.get('signal_quality', {})
         }
     }
     
@@ -1536,7 +1538,8 @@ def generate_consolidated_model_results_json(shard_output_dir, shard_number, vie
             "nsfw": view2_results.get('nsfw', {}),
             "motion": view2_results.get('motion', {}),
             "face": view2_results.get('face', {}),
-            "clap": view2_results.get('clap', {})
+            "clap": view2_results.get('clap', {}),
+            "signal_quality": view2_results.get('signal_quality', {})
         }
     else:
         # For single-view, still include view2 key but mark as not processed
@@ -2082,6 +2085,7 @@ def generate_multiview_consolidated_model_results_json(shard_output_dir, shard_n
             "motion": view_result.get('motion', {}),
             "face": view_result.get('face', {}),
             "clap": view_result.get('clap', {}),
+            "signal_quality": view_result.get('signal_quality', {}),
             "flagged_segments": view_result.get('flagged_segments', [])
         }
     
@@ -2660,11 +2664,16 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     nsfw_output_dir = os.path.join(output_dir, "nsfw_output")
     motion_output_dir = os.path.join(output_dir, "motion_output")
     face_output_dir = os.path.join(output_dir, "face_output")
-    
+    signal_quality_output_dir = os.path.join(output_dir, "signal_quality_output")
+
+    lighting_output_dir = os.path.join(output_dir, "lighting_output")
+
     # Create output directories
     os.makedirs(nsfw_output_dir, exist_ok=True)
     os.makedirs(motion_output_dir, exist_ok=True)
     os.makedirs(face_output_dir, exist_ok=True)
+    os.makedirs(lighting_output_dir, exist_ok=True)
+    os.makedirs(signal_quality_output_dir, exist_ok=True)
 
     # Define the prompt for scene detection
     prompt_path = "config/cosmos_prompt.yaml"
@@ -2679,7 +2688,15 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     motion_ref= compute_motion_energy.remote([video_shard_path], sensitivity_level="medium", save_detailed_data=False)
     face_ref  = process_video_chunks_for_face_detection.remote([video_shard_path], config=None, frame_interval=30, save_frames=False, chunk_duration_sec=60)
     clap_ref  = detect_claps_in_media.remote(audio_shard_path, clap_output_dir, threshold_bias=6000, lowcut=200, highcut=3200)
+    signal_quality_ref = detect_blur_and_black_segments.remote(video_shard_path)
 
+    # Testing lighting
+    lighting_ref = lighting_by_second_task.remote(video_shard_path, output_dir = lighting_output_dir)
+
+    (audio_res, yolo_res, scene_res, nsfw_res, motion_res, face_res, clap_res, lighting_res, signal_quality_res) = ray.get(
+        [audio_ref, yolo_ref, scene_ref, nsfw_ref, motion_ref, face_ref, clap_ref, lighting_ref, signal_quality_ref]
+    )
+    
     (audio_res, yolo_res, scene_res, nsfw_res, motion_res, face_res, clap_res) = ray.get(
         [audio_ref, yolo_ref, scene_ref, nsfw_ref, motion_ref, face_ref, clap_ref]
     )
@@ -2697,7 +2714,9 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
         'motion': motion_res,
         'face': face_res,
         'clap': clap_res,
-        'sensitive': sensitive_res
+        'sensitive': sensitive_res,
+        'lighting': lighting_res,
+        'signal_quality': signal_quality_res
     }
     
     # Save individual model results to JSON files (following ray_pipeline_testing_old.py pattern)
