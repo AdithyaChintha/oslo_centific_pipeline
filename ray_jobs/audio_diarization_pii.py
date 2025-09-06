@@ -241,7 +241,7 @@ def compile_separate_outputs(speakers_data):
     
     return full_transcript, diarization_segments, all_pii_detections
 
-@ray.remote
+@ray.remote(num_gpus=1, max_task_retries=0)
 class AudioDiarizationActor:
     def __init__(self):
         """Initialize models once per actor"""
@@ -399,37 +399,43 @@ class AudioDiarizationActor:
 def process_audio_diarization(shard_paths, output_dir=None):
     """Factory function for Ray pipeline integration"""
     actor = AudioDiarizationActor.remote()
-    results = ray.get(actor.process_shards.remote(shard_paths))
-    
-    # Save results to output directory if provided
-    if output_dir and results:
-        os.makedirs(output_dir, exist_ok=True)
+    try:
+        results = ray.get(actor.process_shards.remote(shard_paths))
         
-        for result in results:
-            shard_name = result["shard_name"]
-            base_name = os.path.splitext(shard_name)[0]
+        # Save results to output directory if provided
+        if output_dir and results:
+            os.makedirs(output_dir, exist_ok=True)
             
-            # Save transcript
-            transcript_file = os.path.join(output_dir, f"{base_name}_transcript.txt")
-            with open(transcript_file, 'w', encoding='utf-8') as f:
-                f.write(result["transcript"])
-            
-            # Save diarization segments
-            diarization_file = os.path.join(output_dir, f"{base_name}_diarization.json")
-            with open(diarization_file, 'w', encoding='utf-8') as f:
-                json.dump(result["diarization"], f, indent=2)
-            
-            # Save PII detections
-            pii_file = os.path.join(output_dir, f"{base_name}_pii_detections.json")
-            with open(pii_file, 'w', encoding='utf-8') as f:
-                json.dump(result["pii_detections"], f, indent=2)
-            
-            # Save complete results
-            complete_file = os.path.join(output_dir, f"{base_name}_complete_results.json")
-            with open(complete_file, 'w', encoding='utf-8') as f:
-                json.dump(result, f, indent=2)
-    
-    return results
+            for result in results:
+                shard_name = result["shard_name"]
+                base_name = os.path.splitext(shard_name)[0]
+                
+                # Save transcript
+                transcript_file = os.path.join(output_dir, f"{base_name}_transcript.txt")
+                with open(transcript_file, 'w', encoding='utf-8') as f:
+                    f.write(result["transcript"])
+                
+                # Save diarization segments
+                diarization_file = os.path.join(output_dir, f"{base_name}_diarization.json")
+                with open(diarization_file, 'w', encoding='utf-8') as f:
+                    json.dump(result["diarization"], f, indent=2)
+                
+                # Save PII detections
+                pii_file = os.path.join(output_dir, f"{base_name}_pii_detections.json")
+                with open(pii_file, 'w', encoding='utf-8') as f:
+                    json.dump(result["pii_detections"], f, indent=2)
+                
+                # Save complete results
+                complete_file = os.path.join(output_dir, f"{base_name}_complete_results.json")
+                with open(complete_file, 'w', encoding='utf-8') as f:
+                    json.dump(result, f, indent=2)
+        
+        return results
+    finally:
+        try:
+            ray.kill(actor)
+        except Exception:
+            pass
 # Integration Testing changes end
 
 if __name__ == "__main__":

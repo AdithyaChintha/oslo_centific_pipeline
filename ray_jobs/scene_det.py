@@ -32,7 +32,7 @@ def clear_gpu_memory():
         torch.cuda.synchronize()
         gc.collect()
 
-@ray.remote(num_gpus=1, max_retries=0)
+@ray.remote(num_gpus=1, max_calls=1, max_retries=0)
 def detect_scenes(video_path, prompt_path, output_dir=None):
     """
     Detects scenes in a video file using the nvidia/Cosmos-Reason1-7B model.

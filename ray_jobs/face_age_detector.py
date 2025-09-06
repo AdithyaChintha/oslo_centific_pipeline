@@ -281,8 +281,15 @@ def process_video_for_face_detection_sync(video_path: str, output_dir: str = "/t
             "flagged_segments": [],
             "total_processing_time_seconds": 0
         }
+    finally:
+        try:
+            import torch, gc
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
+        except Exception:
+            pass
 
-@ray.remote
 def process_video_for_face_detection(video_path: str, output_dir: str = "/tmp/face_analysis",
                                    frame_interval: int = 30, save_frames: bool = False,
                                    chunk_offset_seconds: float = 0.0):
@@ -518,7 +525,7 @@ def parse_timestamp(timestamp_str: str) -> float:
     except (ValueError, AttributeError):
         return 0.0
 
-@ray.remote
+@ray.remote(num_gpus=1, max_calls=1)
 def process_video_chunks_for_face_detection(chunk_paths: list, config=None, 
                                           frame_interval: int = None, save_frames: bool = False,
                                           chunk_duration_sec: int = 60):
