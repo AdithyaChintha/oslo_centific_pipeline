@@ -15,6 +15,10 @@ from typing import Dict, List, Optional
 from groq import Groq
 from utils.logger import get_logger
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 logger = get_logger("DomainDetection")
 
@@ -73,7 +77,10 @@ Please respond with ONLY the exact domain name from the list above that best mat
 # Load configuration
 CONFIG = load_groq_config()
 DOMAINS = CONFIG["domain_activity_detection"]["domains"]
-GROQ_API_KEY = CONFIG["groq"]["api_key"]
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+if not GROQ_API_KEY:
+    raise ValueError("GROQ_API_KEY not found in environment variables. Please add it to your .env file.")
 
 def classify_scene_domain(description: str, domains: List[str]) -> str:
     """
