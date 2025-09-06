@@ -24,7 +24,7 @@ def _part_index(filename: str) -> int:
     m = re.search(r"_part(\d+)\.mp4$", filename)
     return int(m.group(1)) if m else 0
 
-@ray.remote(num_gpus=0)  # set to 1 if you want GPU per shard
+@ray.remote(num_gpus=1, max_calls=1) # set to 1 if you want GPU per shard
 def run_yolodetect_on_shard(
     video_path: str,
     out_dir: str = "/tmp/yolo_demo",

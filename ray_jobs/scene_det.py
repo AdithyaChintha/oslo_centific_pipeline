@@ -3,11 +3,25 @@ import torch
 import gc
 import os
 import json
-from vllm import LLM, SamplingParams
-from transformers import AutoProcessor
-from qwen_vl_utils import process_vision_info
 import yaml
 import pathlib
+
+# Conditional imports to handle dependency issues
+try:
+    from vllm import LLM, SamplingParams
+    from transformers import AutoProcessor
+    from qwen_vl_utils import process_vision_info
+    VLLM_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: vllm dependencies not available: {e}")
+    VLLM_AVAILABLE = False
+    # Create dummy classes to prevent import errors
+    class LLM:
+        pass
+    class SamplingParams:
+        pass
+    class AutoProcessor:
+        pass
 
 ROOT = pathlib.Path(__file__).parents[2].resolve()
 
@@ -18,7 +32,7 @@ def clear_gpu_memory():
         torch.cuda.synchronize()
         gc.collect()
 
-@ray.remote(num_gpus=1, max_retries=0)
+@ray.remote(num_gpus=1, max_calls=1, max_retries=0)
 def detect_scenes(video_path, prompt_path, output_dir=None):
     """
     Detects scenes in a video file using the nvidia/Cosmos-Reason1-7B model.
@@ -29,6 +43,14 @@ def detect_scenes(video_path, prompt_path, output_dir=None):
         prompt_path: Path to the prompt configuration YAML file  
         output_dir: Output directory to save results
     """
+    if not VLLM_AVAILABLE:
+        return {
+            "success": False,
+            "error": "vllm dependencies not available",
+            "scenes": [],
+            "processing_info": {"success": False, "error": "vllm not available"}
+        }
+    
     llm = None
     
     try:

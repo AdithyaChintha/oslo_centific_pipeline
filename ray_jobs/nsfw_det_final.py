@@ -255,6 +255,27 @@ class NSFWDetectorWorker:
             "success": True
         }
 
+def shutdown(self):
+    try:
+        # Drop ONNX session and labels
+        try:
+            self.session = None
+        except Exception:
+            pass
+        self.labels = None
+        # GC and CUDA cache
+        import gc
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+    finally:
+        # Exit the actor process to guarantee teardown
+        import ray
+        ray.actor.exit_actor()
 
 def create_flagged_segments(nsfw_detections: list, segment_buffer: float = 5.0) -> list:
     """
@@ -425,6 +446,18 @@ def process_video_chunks_for_nsfw(chunk_paths: list, model_path: str = None, lab
             "chunks_processed": 0,
             "successful_chunks": 0
         }
+    finally:
+        # Proactively shut down all workers to release GPU memory
+        try:
+            ray.get([w.shutdown.remote() for w in workers])
+        except Exception:
+            pass
+        # Backstop: ensure termination even if shutdown fails
+        for w in workers:
+            try:
+                ray.kill(w)
+            except Exception:
+                pass
 
 
 def extract_flagged_segments(nsfw_result: dict, content_type: str, shard_index: int, shard_offset_sec: float) -> list:

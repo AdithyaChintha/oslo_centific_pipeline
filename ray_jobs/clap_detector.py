@@ -306,7 +306,7 @@ class ClapDetector:
                 self.logger.warning(f"Failed to clean up temporary file: {e}")
 
 
-@ray.remote
+@ray.remote(max_calls=1)
 def detect_claps_in_media(media_path: str, 
                          output_dir: str = "/tmp/clap_detection",
                          threshold_bias: int = 6000,

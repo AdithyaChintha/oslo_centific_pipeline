@@ -233,7 +233,7 @@ def build_labelstudio_json_for_shard_task(shard_output_dir: str, shard_video_url
             # Flattened metadata keys at root level to match UI template expectations
             "meta.home_identifier": f"Shard_{shard_number}",
             "meta.recording_datetime": current_time,
-            "meta.domain": "production",
+            "metadata_domain": "production",  # Required by Label Studio API
             "meta.actions": "",
             "home_id": "",
             "start_datetime": "",
@@ -799,7 +799,7 @@ def generate_multiview_4view_labelstudio_task(shard_output_dir, assigned_views,
             "meta": "",  # Required empty meta field
             "meta.home_identifier": f"Shard_{shard_number}",
             "meta.recording_datetime": current_time,
-            "meta.domain": "production", 
+            "metadata_domain": "production",  # Required by Label Studio API
             "meta.actions": "",
             
             # Multi-view specific metadata
@@ -927,7 +927,7 @@ def generate_consolidated_shard_labelstudio_task(shard_output_dir, view1_azure_u
                 # Flattened metadata keys at root level to match UI template expectations
                 "meta.home_identifier": f"Shard_{shard_number}",
                 "meta.recording_datetime": current_time,
-                "meta.domain": "production",
+                "metadata_domain": "production",  # Required by Label Studio API
                 "meta.actions": "",
                 # Additional metadata (these won't show in UI but good for context)
                 "shard_number": str(shard_number),
@@ -989,3 +989,99 @@ if __name__ == "__main__":
         save_dir=args.out,
     )
     print(out_path)
+
+@ray.remote  
+def update_labelstudio_tasks_with_video_domain_and_activity(video_output_dir: str, video_domain: str, video_activity: str, video_name: str) -> Dict:
+    """
+    Ray task to update ALL Label Studio task files with the video-level predicted domain and activity.
+    
+    This function finds all Label Studio task JSON files for a video and updates their
+    metadata_domain and metadata_activity fields with the video-level classifications.
+    
+    Args:
+        video_output_dir: Base output directory containing all shards for this video
+        video_domain: The predicted domain for the entire video
+        video_activity: The predicted activity for the entire video  
+        video_name: Name of the video being processed
+        
+    Returns:
+        Dictionary with update results
+    """
+    try:
+        logger.info(f"📝 Updating Label Studio tasks with video classifications for: {video_name}")
+        logger.info(f"   🎯 Domain: '{video_domain}'")
+        logger.info(f"   🎬 Activity: '{video_activity}'")
+        
+        # Find all Label Studio task files across all shards
+        task_files = []
+        for root, dirs, files in os.walk(video_output_dir):
+            for file in files:
+                if file.endswith('_labelstudio_task.json'):
+                    task_file_path = os.path.join(root, file)
+                    task_files.append(task_file_path)
+        
+        if not task_files:
+            logger.warning(f"No Label Studio task files found for video: {video_name}")
+            return {"success": False, "error": "No task files found"}
+        
+        logger.info(f"📁 Found {len(task_files)} Label Studio task files to update")
+        
+        updated_files = []
+        failed_files = []
+        
+        for task_file in task_files:
+            try:
+                # Read existing task
+                with open(task_file, 'r') as f:
+                    task_data = json.load(f)
+                
+                # Update metadata_domain and metadata_activity fields
+                if 'data' in task_data:
+                    old_domain = task_data['data'].get('AI_predicted_domain', 'unknown')
+                    old_activity = task_data['data'].get('AI_predicted_activity', 'unknown')
+                    
+                    task_data['data']['AI_predicted_domain'] = video_domain
+                    task_data['data']['AI_predicted_activity'] = video_activity  
+                    
+                    # Add video-level classification info to metadata for tracking
+                    task_data['data']['video_level_domain_applied'] = True
+                    task_data['data']['video_level_activity_applied'] = True
+                    task_data['data']['video_level_classification_timestamp'] = datetime.utcnow().isoformat() + "Z"
+                    
+                    # Write updated task back to file
+                    with open(task_file, 'w') as f:
+                        json.dump(task_data, f, indent=2)
+                    
+                    updated_files.append(task_file)
+                    logger.info(f"✅ Updated {os.path.basename(task_file)}: Domain '{old_domain}' -> '{video_domain}', Activity '{old_activity}' -> '{video_activity}'")
+                else:
+                    logger.error(f"❌ Invalid task structure in {task_file}: missing 'data' field")
+                    failed_files.append(task_file)
+                    
+            except Exception as e:
+                logger.error(f"❌ Error updating task file {task_file}: {e}")
+                failed_files.append(task_file)
+                continue
+        
+        result = {
+            "success": len(updated_files) > 0,
+            "video_name": video_name,
+            "video_domain": video_domain,
+            "video_activity": video_activity,
+            "total_task_files": len(task_files),
+            "updated_files": len(updated_files),
+            "failed_files": len(failed_files),
+            "updated_file_paths": updated_files,
+            "failed_file_paths": failed_files
+        }
+        
+        logger.info(f"🎉 Label Studio task update completed for video '{video_name}':")
+        logger.info(f"   ✅ Updated: {len(updated_files)}/{len(task_files)} files")
+        logger.info(f"   🎯 Applied domain: '{video_domain}'")
+        logger.info(f"   🎬 Applied activity: '{video_activity}'")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to update Label Studio tasks for video '{video_name}': {e}")
+        return {"success": False, "error": str(e)}
