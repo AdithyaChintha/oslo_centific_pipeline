@@ -31,5 +31,6 @@ torchaudio
 soundfile
 insightface
 nudenet
+python-dotenv
 label_studio_sdk
 decord
