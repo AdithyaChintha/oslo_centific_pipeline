@@ -45,7 +45,7 @@ except ImportError as e:
         return {"success": False, "error": "Scene detection not available"}
 
 from ray_jobs.domain_detection import process_scene_domain_classification, load_groq_config, process_video_level_domain_classification
-from ray_jobs.run_yolodetect_task import run_yolodetect_on_shard
+from ray_jobs.yolo_detection import run_yolo_detection
 from ray_jobs.audio_diarization_pii import process_audio_diarization
 from ray_jobs.audio_sensitive_info import process_audio_sensitive_info
 from ray_jobs.clap_detector import detect_claps_in_media
@@ -61,8 +61,6 @@ from ray_jobs.labelstudio_tasks import (assign_views_to_labelstudio_positions, g
     update_labelstudio_tasks_with_video_domain_and_activity)
    
 from ray_jobs.video_unwarp_task import erp_unwarp_task
-
-# Test unwarp
 from ray_jobs.video_unwarp_task import insv_unwarp_task
 
 logger = get_logger("SimplifiedUnifiedPipeline")
@@ -1226,7 +1224,7 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
         if input_video_path.lower().endswith('.insv'):
             # Try the simpler single-output
             try:
-                mp4_result = ray.get(insv_unwarp_task.remote(input_video_path))#, viewsoutput_dir))
+                mp4_result = ray.get(insv_unwarp_task.remote(input_video_path, out_dir=os.path.join(output_dir, "4views")))
                 flat_result = mp4_result.get('views')
                 logger.info(f"Using two 180 for unwarp:: {len(flat_result)} views under {flat_result}")
             except Exception:
@@ -2682,7 +2680,7 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     ensure_prompt_file_exists(prompt_path)
     
     audio_ref = process_audio_diarization.remote([audio_shard_path], audio_output_dir)
-    yolo_ref  = run_yolodetect_on_shard.remote(video_shard_path, yolo_output_dir)
+    yolo_ref  = run_yolo_detection.remote(video_shard_path, yolo_output_dir)
     scene_ref = detect_scenes.remote(video_shard_path, prompt_path, scene_output_dir)
     nsfw_ref  = process_video_chunks_for_nsfw.remote([video_shard_path], confidence_threshold=0.5, chunk_duration_sec=60)
     motion_ref= compute_motion_energy.remote([video_shard_path], sensitivity_level="medium", save_detailed_data=False)
@@ -2691,15 +2689,15 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     signal_quality_ref = detect_blur_and_black_segments.remote(video_shard_path)
 
     # Testing lighting
-    lighting_ref = lighting_by_second_task.remote(video_shard_path, output_dir = lighting_output_dir)
+    #lighting_ref = 1 #lighting_by_second_task.remote(video_shard_path, output_dir = lighting_output_dir)
 
-    (audio_res, yolo_res, scene_res, nsfw_res, motion_res, face_res, clap_res, lighting_res, signal_quality_res) = ray.get(
-        [audio_ref, yolo_ref, scene_ref, nsfw_ref, motion_ref, face_ref, clap_ref, lighting_ref, signal_quality_ref]
+    (audio_res, yolo_res, scene_res, nsfw_res, motion_res, face_res, clap_res, signal_quality_res) = ray.get(
+        [audio_ref, yolo_ref, scene_ref, nsfw_ref, motion_ref, face_ref, clap_ref, signal_quality_ref]
     )
     
-    (audio_res, yolo_res, scene_res, nsfw_res, motion_res, face_res, clap_res) = ray.get(
-        [audio_ref, yolo_ref, scene_ref, nsfw_ref, motion_ref, face_ref, clap_ref]
-    )
+    # (audio_res, yolo_res, scene_res, nsfw_res, motion_res, face_res, clap_res) = ray.get(
+    #     [audio_ref, yolo_ref, scene_ref, nsfw_ref, motion_ref, face_ref, clap_ref]
+    # )
     # Run sensitive information analysis after audio_diarization_pii completes
     sensitive_output_dir = os.path.join(output_dir, "sensitive_output")
     os.makedirs(sensitive_output_dir, exist_ok=True)
@@ -2715,7 +2713,7 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
         'face': face_res,
         'clap': clap_res,
         'sensitive': sensitive_res,
-        'lighting': lighting_res,
+        #'lighting': lighting_res,
         'signal_quality': signal_quality_res
     }
     
