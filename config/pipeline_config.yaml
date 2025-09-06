@@ -7,7 +7,7 @@ azure_storage:
   input_blob_prefix: "test/input_videos/single_test"  # Default blob prefix to search for videos
   
   # Output directory configuration  
-  output_blob_prefix: "five_outputs"  # Base prefix for uploading processed results
+  output_blob_prefix: "output_test/video_domain_testing"  # Base prefix for uploading processed results
   
   # Container settings (these can override blobfuse2_config.yaml if needed)
   # container_name: "instavideo"  # Uncomment to override
@@ -56,7 +56,7 @@ label_studio:
   api_token: "d75a31c7994b96099cfbf7d61e15cff643943853"
   
   # Project ID
-  project_id: "5458"
+  project_id: "5392"
 
 # Logging Configuration
 logging:

@@ -14,11 +14,12 @@ import ray
 from typing import Dict, List, Optional
 from groq import Groq
 from utils.logger import get_logger
+from datetime import datetime
 
 logger = get_logger("DomainDetection")
 
 # Load configuration from YAML file
-def load_groq_config(config_path: str = "config/groqconfig.yaml") -> Dict:
+def load_groq_config(config_path: str = "config/domain_detection_groqconfig.yaml") -> Dict:
     """Load Groq configuration from YAML file."""
     try:
         # Get the directory of the current script
@@ -43,7 +44,7 @@ def load_groq_config(config_path: str = "config/groqconfig.yaml") -> Dict:
                 "top_p": 1,
                 "stream": False
             },
-            "domain_detection": {
+            "domain_activity_detection": {
                 "domains": [
                     "Food & Mealtime",
                     "Personal Care & Hygiene", 
@@ -71,7 +72,7 @@ Please respond with ONLY the exact domain name from the list above that best mat
 
 # Load configuration
 CONFIG = load_groq_config()
-DOMAINS = CONFIG["domain_detection"]["domains"]
+DOMAINS = CONFIG["domain_activity_detection"]["domains"]
 GROQ_API_KEY = CONFIG["groq"]["api_key"]
 
 def classify_scene_domain(description: str, domains: List[str]) -> str:
@@ -88,7 +89,7 @@ def classify_scene_domain(description: str, domains: List[str]) -> str:
     try:
         # Get configuration from loaded config
         groq_config = CONFIG["groq"]
-        domain_config = CONFIG["domain_detection"]
+        domain_config = CONFIG["domain_activity_detection"]
         
         client = Groq(api_key=groq_config["api_key"])
         
@@ -130,11 +131,11 @@ def classify_scene_domain(description: str, domains: List[str]) -> str:
             
             # Default fallback
             logger.warning(f"Could not classify scene, using default domain. Response: '{response}'")
-            return CONFIG["domain_detection"]["default_domain"]
+            return CONFIG["domain_activity_detection"]["default_domain"]
             
     except Exception as e:
         logger.error(f"Error classifying scene domain: {e}")
-        return CONFIG["domain_detection"]["default_domain"]
+        return CONFIG["domain_activity_detection"]["default_domain"]
 
 @ray.remote
 def process_scene_domain_classification(scene_output_dir: str) -> Dict:
@@ -297,6 +298,251 @@ def test_domain_classification():
         print(f"Description: {desc[:50]}...")
         print(f"Classified as: {domain}")
         print("-" * 50)
+
+
+# domain classification at video level
+@ray.remote
+def process_video_level_domain_classification(video_output_dir: str, video_name: str) -> Dict:
+    """
+    Ray task to process ALL shards of a video and perform single video-level domain classification.
+    
+    This replaces the shard-level domain classification approach.
+    
+    Args:
+        video_output_dir: Base output directory containing all shards for this video
+        video_name: Name of the video being processed
+        
+    Returns:
+        Dictionary with video-level domain classification results
+    """
+    try:
+        logger.info(f"🎯 Starting VIDEO-LEVEL domain classification for: {video_name}")
+        logger.info(f"📁 Video output directory: {video_output_dir}")
+        
+        if not os.path.exists(video_output_dir):
+            logger.error(f"Video output directory does not exist: {video_output_dir}")
+            return {"success": False, "error": "Directory not found"}
+        
+        # Find all scene detection JSON files across ALL shards
+        all_scene_files = []
+        all_scene_descriptions = []
+        
+        # Walk through all shard directories
+        for root, dirs, files in os.walk(video_output_dir):
+            for file in files:
+                if file.endswith('_scene_detection_results.json'):
+                    scene_file_path = os.path.join(root, file)
+                    all_scene_files.append(scene_file_path)
+        
+        if not all_scene_files:
+            logger.warning(f"No scene detection JSON files found in video directory: {video_output_dir}")
+            return {"success": False, "error": "No scene files found"}
+        
+        logger.info(f"📁 Found {len(all_scene_files)} scene detection files across all shards")
+        
+        # Collect ALL scene descriptions from ALL shards
+        total_scenes = 0
+        for scene_file in all_scene_files:
+            try:
+                with open(scene_file, 'r') as f:
+                    scene_data = json.load(f)
+                
+                scenes = scene_data.get('scenes', [])
+                total_scenes += len(scenes)
+                
+                # Collect scene descriptions with timing info for context
+                for scene in scenes:
+                    if 'description' in scene:
+                        description = scene['description']
+                        start_time = scene.get('start_time', 0)
+                        end_time = scene.get('end_time', 0)
+                        
+                        # Add contextual information to scene description
+                        contextual_description = f"[{start_time:.1f}s-{end_time:.1f}s]: {description}"
+                        all_scene_descriptions.append(contextual_description)
+                        
+            except Exception as e:
+                logger.error(f"Error reading scene file {scene_file}: {e}")
+                continue
+        
+        if not all_scene_descriptions:
+            logger.warning(f"No scene descriptions found across all shards")
+            return {"success": False, "error": "No scene descriptions found"}
+        
+        logger.info(f"📝 Collected {len(all_scene_descriptions)} scene descriptions from {total_scenes} total scenes")
+        
+        # Create consolidated scene description for video-level classification
+        consolidated_description = "\n".join(all_scene_descriptions)
+        
+        # Limit description length for API call (openai/gpt-oss-20b supports 128K tokens ≈ 512K chars)
+        max_chars = 400000  # Conservative limit using ~80% of 128K token context window
+        if len(consolidated_description) > max_chars:
+            logger.warning(f"Scene descriptions too long ({len(consolidated_description)} chars), truncating to {max_chars}")
+            consolidated_description = consolidated_description[:max_chars] + "..."
+        
+        # Classify the entire video using aggregated scene descriptions
+        logger.info(f"🤖 Calling Groq API for video-level domain and activity classification with prompt:{consolidated_description}...")
+        classification_result = classify_video_level_domain_and_activity(consolidated_description, DOMAINS, video_name)
+        
+        video_domain = classification_result["domain"]
+        video_activity = classification_result["activity"]
+        
+        # Save video-level domain and activity result
+        domain_result_file = os.path.join(video_output_dir, "video_level_domain_activity_classification.json")
+        domain_result = {
+            "video_name": video_name,
+            "predicted_domain": video_domain,
+            "predicted_activity": video_activity,
+            "total_scene_files": len(all_scene_files),
+            "total_scenes": total_scenes,
+            "total_descriptions": len(all_scene_descriptions),
+            "classification_timestamp": datetime.utcnow().isoformat() + "Z",
+            "consolidated_description_preview": consolidated_description[:500] + "..." if len(consolidated_description) > 500 else consolidated_description
+        }
+        
+        with open(domain_result_file, 'w') as f:
+            json.dump(domain_result, f, indent=2)
+        
+        result = {
+            "success": True,
+            "video_name": video_name,
+            "predicted_domain": video_domain,
+            "predicted_activity": video_activity,
+            "total_scene_files": len(all_scene_files),
+            "total_scenes": total_scenes,
+            "domain_result_file": domain_result_file
+        }
+        
+        logger.info(f"🎉 Video-level classification completed for '{video_name}': Domain='{video_domain}', Activity='{video_activity}'")
+        logger.info(f"📊 Classification summary: {len(all_scene_descriptions)} descriptions from {len(all_scene_files)} files across all shards")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Video-level domain classification failed for {video_name}: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def classify_video_level_domain_and_activity(consolidated_description: str, domains: List[str], video_name: str) -> Dict[str, str]:
+    """
+    Classify an entire video using consolidated scene descriptions from all shards.
+    Extracts both domain and activity from the video content.
+    
+    Args:
+        consolidated_description: All scene descriptions from all shards combined
+        domains: List of available domains
+        video_name: Name of the video for logging
+        
+    Returns:
+        Dictionary with classified domain and activity: {"domain": str, "activity": str}
+    """
+    try:
+        # Get configuration from loaded config
+        groq_config = CONFIG["groq"]
+        domain_activity_config = CONFIG["domain_activity_detection"]  # Updated config section
+        
+        client = Groq(api_key=groq_config["api_key"])
+        
+        # Create enhanced prompt for video-level classification
+        domains_text = "\n".join([f"- {domain}" for domain in domains])
+        
+        # Use the new video-level prompt template from config
+        video_level_prompt = domain_activity_config["video_level_prompt_template"].format(
+            domains_list=domains_text,
+            video_name=video_name,
+            consolidated_description=consolidated_description
+        )
+
+        completion = client.chat.completions.create(
+            model=groq_config["model"],
+            messages=[
+                {
+                    "role": "user",
+                    "content": video_level_prompt
+                }
+            ],
+            temperature=groq_config["temperature"],
+            max_tokens=groq_config["max_tokens"],
+            top_p=groq_config["top_p"],
+            stream=groq_config["stream"],
+            stop=None
+        )
+        
+        # Extract the response
+        response = completion.choices[0].message.content.strip()
+        
+        # Parse structured response: "DOMAIN: ... \n ACTIVITY: ..."
+        parsed_result = parse_domain_activity_response(response, domains, domain_activity_config)
+        
+        logger.info(f"✅ Video-level classification successful for '{video_name}': Domain='{parsed_result['domain']}', Activity='{parsed_result['activity']}'")
+        return parsed_result
+            
+    except Exception as e:
+        logger.error(f"Error classifying video-level domain and activity for '{video_name}': {e}")
+        return {
+            "domain": domain_activity_config["default_domain"],
+            "activity": domain_activity_config["default_activity"]
+        }
+
+
+def parse_domain_activity_response(response: str, domains: List[str], config: Dict) -> Dict[str, str]:
+    """
+    Parse the structured response from Groq API to extract domain and activity.
+    
+    Expected format:
+    DOMAIN: Food & Mealtime
+    ACTIVITY: Cooking pasta dinner
+    
+    Args:
+        response: Raw response from Groq API
+        domains: List of valid domains for validation
+        config: Configuration with default values
+        
+    Returns:
+        Dictionary with parsed domain and activity
+    """
+    try:
+        # Initialize with defaults
+        result = {
+            "domain": config["default_domain"],
+            "activity": config["default_activity"]
+        }
+        
+        # Split response into lines
+        lines = response.split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            
+            # Parse domain line
+            if line.startswith('DOMAIN:'):
+                domain_text = line.replace('DOMAIN:', '').strip()
+                
+                # Validate domain
+                if domain_text in domains:
+                    result["domain"] = domain_text
+                else:
+                    # Try approximate match
+                    for domain in domains:
+                        if domain.lower() in domain_text.lower() or domain_text.lower() in domain.lower():
+                            result["domain"] = domain
+                            logger.warning(f"Approximate domain match: '{domain_text}' -> '{domain}'")
+                            break
+            
+            # Parse activity line
+            elif line.startswith('ACTIVITY:'):
+                activity_text = line.replace('ACTIVITY:', '').strip()
+                if activity_text:  # Only use if not empty
+                    result["activity"] = activity_text
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error parsing domain/activity response: {e}")
+        return {
+            "domain": config["default_domain"],
+            "activity": config["default_activity"]
+        }
 
 if __name__ == "__main__":
     # Initialize Ray for testing

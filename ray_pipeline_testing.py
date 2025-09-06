@@ -44,7 +44,7 @@ except ImportError as e:
     def detect_scenes(*args, **kwargs):
         return {"success": False, "error": "Scene detection not available"}
 
-from ray_jobs.domain_detection import process_scene_domain_classification, load_groq_config
+from ray_jobs.domain_detection import process_scene_domain_classification, load_groq_config, process_video_level_domain_classification
 from ray_jobs.run_yolodetect_task import run_yolodetect_on_shard
 from ray_jobs.audio_diarization_pii import process_audio_diarization
 from ray_jobs.clap_detector import detect_claps_in_media
@@ -53,7 +53,10 @@ from ray_jobs.clap_detector import detect_claps_in_media
 from ray_jobs.nsfw_det_final import process_video_chunks_for_nsfw
 from ray_jobs.motion_energy import compute_motion_energy
 from ray_jobs.face_age_detector import process_video_chunks_for_face_detection
-from ray_jobs.labelstudio_tasks import assign_views_to_labelstudio_positions, generate_multiview_4view_labelstudio_task, generate_consolidated_shard_labelstudio_task, import_consolidated_tasks_to_labelstudio
+from ray_jobs.labelstudio_tasks import (assign_views_to_labelstudio_positions, generate_multiview_4view_labelstudio_task,
+    generate_consolidated_shard_labelstudio_task, 
+    import_consolidated_tasks_to_labelstudio,
+    update_labelstudio_tasks_with_video_domain_and_activity)
    
 from ray_jobs.video_unwarp_task import erp_unwarp_task
 
@@ -1290,8 +1293,17 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
             
             logger.info(f"✅ Completed multi-view processing for shard {shard_idx + 1}: {shard_results['total_views_processed']} views, {shard_results['successful_views']} successful")
 
+        
         # Add missing final processing steps  
         generate_final_combined_model_results_json(output_dir, consolidated_json_paths)
+        
+        logger.info(f"🎯 Running video-level domain classification for video: {video_name}")
+        domain_result = process_video_level_domain_and_update_tasks(output_dir, video_name)
+        if domain_result.get("success", False):
+            logger.info(f"✅ Video-level domain processing completed: {domain_result.get('video_domain', 'Unknown')}")
+        else:
+            logger.error(f"❌ Video-level domain processing failed: {domain_result.get('error', 'Unknown error')}")
+        
         import_consolidated_tasks_to_labelstudio(label_studio_tasks,pipeline_config)
         if azure_blob_client and azure_container:
             video_name_for_upload = os.path.basename(output_dir)
@@ -1375,6 +1387,13 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
         # Generate final combined JSON with all shards
         generate_final_combined_model_results_json(output_dir, consolidated_json_paths)
         
+        logger.info(f"🎯 Running video-level domain classification for video: {video_name}")
+        domain_result = process_video_level_domain_and_update_tasks(output_dir, video_name)
+        if domain_result.get("success", False):
+            logger.info(f"✅ Video-level domain processing completed: {domain_result.get('video_domain', 'Unknown')}")
+        else:
+            logger.error(f"❌ Video-level domain processing failed: {domain_result.get('error', 'Unknown error')}")
+
         # Import consolidated tasks to Label Studio
         import_consolidated_tasks_to_labelstudio(label_studio_tasks,pipeline_config)
         
@@ -2034,6 +2053,65 @@ def generate_multiview_consolidated_model_results_json(shard_output_dir, shard_n
     logger.info(f"💾 Saved multi-view consolidated results: {consolidated_json_path}")
     return consolidated_json_path
 
+def process_video_level_domain_and_update_tasks(video_output_dir: str, video_name: str) -> Dict:
+    """
+    Process video-level domain classification and update all Label Studio tasks.
+    
+    This function runs AFTER all shards have been processed and their Label Studio 
+    tasks have been generated. It performs video-level domain classification and
+    updates all task files with the consistent domain.
+    
+    Args:
+        video_output_dir: Base output directory containing all shards for this video
+        video_name: Name of the video being processed
+        
+    Returns:
+        Dictionary with processing results
+    """
+    try:
+        logger.info(f" Starting video-level domain processing for: {video_name}")
+        
+        # Step 1: Perform video-level domain classification
+        logger.info(f" Step 1: Running video-level domain classification...")
+        domain_result_ref = process_video_level_domain_classification.remote(video_output_dir, video_name)
+        domain_result = ray.get(domain_result_ref)
+        
+        if not domain_result.get("success", False):
+            logger.error(f" Video-level domain classification failed: {domain_result.get('error')}")
+            return {"success": False, "error": f"Domain classification failed: {domain_result.get('error')}"}
+        
+        video_domain = domain_result.get("predicted_domain", "Unknown")
+        video_activity = domain_result.get("predicted_activity", "General Activity")
+        logger.info(f" Video-level domain classification successful: '{video_domain}'")
+        logger.info(f" Video-level activity detection successful: '{video_activity}'")
+        
+        # Step 2: Update all Label Studio tasks with the video domain
+        logger.info(f" Step 2: Updating all Label Studio tasks with domain '{video_domain}'...")
+        update_result_ref = update_labelstudio_tasks_with_video_domain_and_activity.remote(video_output_dir, video_domain, video_activity, video_name)
+        update_result = ray.get(update_result_ref)
+        
+        if not update_result.get("success", False):
+            logger.error(f" Label Studio task update failed: {update_result.get('error')}")
+            return {"success": False, "error": f"Task update failed: {update_result.get('error')}"}
+        
+        logger.info(f" Label Studio tasks updated: {update_result.get('updated_files', 0)} files")
+        
+        # Combined result
+        result = {
+            "success": True,
+            "video_name": video_name,
+            "video_domain": video_domain,
+            "domain_classification": domain_result,
+            "task_updates": update_result
+        }
+        
+        logger.info(f"Video-level domain processing completed for '{video_name}': domain='{video_domain}'")
+        return result
+        
+    except Exception as e:
+        logger.error(f" Video-level domain processing failed for '{video_name}': {e}")
+        return {"success": False, "error": str(e)}
+
 def process_time_aligned_shard_multiview(
     shard_index,
     view_shard_paths,          # Dict: {view_name: shard_path}
@@ -2116,42 +2194,42 @@ def process_time_aligned_shard_multiview(
 
     logger.info(f"✅ Successfully processed {len(view_results)} views for shard {shard_index+1}")
 
-    # =============================================================================
-    # DOMAIN DETECTION ON SCENE DETECTION OUTPUTS
-    # =============================================================================
-    logger.info(f"🎯 Running domain detection on scene outputs for shard {shard_index+1}...")
-    try:
-        domain_result = find_and_process_all_scene_detection_outputs(shard_output_dir)
-        if domain_result.get("success", False):
-            logger.info(f"✅ Domain detection completed for shard {shard_index+1}: {domain_result.get('total_classified_scenes', 0)} scenes classified")
-            logger.info(f"📊 Domain detection summary: {domain_result.get('successful_directories', 0)} directories, {domain_result.get('total_processed_files', 0)} files processed")
-        else:
-            logger.warning(f"⚠️ Domain detection failed for shard {shard_index+1}: {domain_result.get('error', 'Unknown error')}")
-    except Exception as domain_error:
-        logger.error(f"❌ Domain detection error for shard {shard_index+1}: {domain_error}")
+    # # =============================================================================
+    # # DOMAIN DETECTION ON SCENE DETECTION OUTPUTS
+    # # =============================================================================
+    # logger.info(f"🎯 Running domain detection on scene outputs for shard {shard_index+1}...")
+    # try:
+    #     domain_result = find_and_process_all_scene_detection_outputs(shard_output_dir)
+    #     if domain_result.get("success", False):
+    #         logger.info(f"✅ Domain detection completed for shard {shard_index+1}: {domain_result.get('total_classified_scenes', 0)} scenes classified")
+    #         logger.info(f"📊 Domain detection summary: {domain_result.get('successful_directories', 0)} directories, {domain_result.get('total_processed_files', 0)} files processed")
+    #     else:
+    #         logger.warning(f"⚠️ Domain detection failed for shard {shard_index+1}: {domain_result.get('error', 'Unknown error')}")
+    # except Exception as domain_error:
+    #     logger.error(f"❌ Domain detection error for shard {shard_index+1}: {domain_error}")
     
-    logger.info(f"🎯 Domain detection completed for shard {shard_index+1}, proceeding to clap detection...")
+    # logger.info(f"🎯 Domain detection completed for shard {shard_index+1}, proceeding to clap detection...")
 
-    # --- RELOAD SCENE DATA WITH DOMAIN CLASSIFICATION ---
-    logger.info(f"🔄 Reloading scene data with domain classification for shard {shard_index+1}...")
-    for view_name, view_result in view_results.items():
-        if view_result.get('success', True):
-            # Find the scene output directory for this view
-            view_scene_output_dir = os.path.join(shard_output_dir, view_name, "scene_output")
-            if os.path.exists(view_scene_output_dir):
-                # Find the scene detection JSON file
-                scene_files = [f for f in os.listdir(view_scene_output_dir) if f.endswith('_scene_detection_results.json')]
-                if scene_files:
-                    scene_file_path = os.path.join(view_scene_output_dir, scene_files[0])
-                    try:
-                        # Reload the scene data with domain classification
-                        with open(scene_file_path, 'r') as f:
-                            updated_scene_data = json.load(f)
-                        # Update the view_results with the fresh scene data
-                        view_result['scene'] = updated_scene_data
-                        logger.info(f"✅ Reloaded scene data with domain classification for {view_name}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Failed to reload scene data for {view_name}: {e}")
+    # # --- RELOAD SCENE DATA WITH DOMAIN CLASSIFICATION ---
+    # logger.info(f"🔄 Reloading scene data with domain classification for shard {shard_index+1}...")
+    # for view_name, view_result in view_results.items():
+    #     if view_result.get('success', True):
+    #         # Find the scene output directory for this view
+    #         view_scene_output_dir = os.path.join(shard_output_dir, view_name, "scene_output")
+    #         if os.path.exists(view_scene_output_dir):
+    #             # Find the scene detection JSON file
+    #             scene_files = [f for f in os.listdir(view_scene_output_dir) if f.endswith('_scene_detection_results.json')]
+    #             if scene_files:
+    #                 scene_file_path = os.path.join(view_scene_output_dir, scene_files[0])
+    #                 try:
+    #                     # Reload the scene data with domain classification
+    #                     with open(scene_file_path, 'r') as f:
+    #                         updated_scene_data = json.load(f)
+    #                     # Update the view_results with the fresh scene data
+    #                     view_result['scene'] = updated_scene_data
+    #                     logger.info(f"✅ Reloaded scene data with domain classification for {view_name}")
+    #                 except Exception as e:
+    #                     logger.warning(f"⚠️ Failed to reload scene data for {view_name}: {e}")
 
     # --- ENHANCED CLAP DETECTION ANALYSIS ACROSS ALL VIEWS ---
     is_intro_statement_there = False
@@ -3148,6 +3226,13 @@ def _process_single_view(
     generate_final_combined_model_results_json(output_dir, consolidated_json_paths)
 
     # --- Import all tasks to Label Studio (SAME function as dual-view) ---
+    logger.info(f"🎯 Running video-level domain classification for video: {video_name}")
+    domain_result = process_video_level_domain_and_update_tasks(output_dir, video_name)
+    if domain_result.get("success", False):
+        logger.info(f"✅ Video-level domain processing completed: {domain_result.get('video_domain', 'Unknown')}")
+    else:
+        logger.error(f"❌ Video-level domain processing failed: {domain_result.get('error', 'Unknown error')}")
+    
     import_consolidated_tasks_to_labelstudio(label_studio_tasks, pipeline_config)
 
     # Upload output directory to Azure blob storage
