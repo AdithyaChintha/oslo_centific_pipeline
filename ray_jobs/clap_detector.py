@@ -257,7 +257,8 @@ class ClapDetector:
         
         return []
 
-    def detectAllClaps(self, thresholdBias=6000, lowcut=100, highcut=4000):
+    def detectAllClaps(self, thresholdBias=6000, lowcut=100, highcut=4000,
+                       audio_threshold_bias=7900, audio_lowcut=780, audio_highcut=4000):
         """Process the entire media file and detect all claps."""
         if self.file_audio_data is None:
             raise Exception("No media file loaded")
@@ -267,8 +268,23 @@ class ClapDetector:
         
         total_duration = len(self.file_audio_data) / self.rate
         
+        # Use specific parameters for audio files to reduce sensitivity
+        if not self.is_video_file:
+            tb = audio_threshold_bias
+            lc = audio_lowcut
+            hc = audio_highcut
+        else:
+            tb = thresholdBias
+            lc = lowcut
+            hc = highcut
+
         while self.file_position < len(self.file_audio_data):
-            self.run(thresholdBias=thresholdBias, lowcut=lowcut, highcut=highcut)
+            # Relax threshold for the first 0.1s to catch initial claps
+            if self.file_position < int(0.1 * self.rate):
+                current_tb = thresholdBias
+            else:
+                current_tb = tb
+            self.run(thresholdBias=current_tb, lowcut=lc, highcut=hc)
         
         # Create result
         result = {
@@ -311,16 +327,22 @@ def detect_claps_in_media(media_path: str,
                          output_dir: str = "/tmp/clap_detection",
                          threshold_bias: int = 6000,
                          lowcut: int = 200,
-                         highcut: int = 3200) -> dict:
+                         highcut: int = 3200,
+                         audio_threshold_bias: int = 7900,
+                         audio_lowcut: int = 780,
+                         audio_highcut: int = 4000) -> dict:
     """
     Detects all claps in a video or audio file and returns timestamps in JSON format.
 
     Args:
         media_path (str): Path to video or audio file.
         output_dir (str): Directory where output JSON will be stored.
-        threshold_bias (int): Threshold bias for clap detection sensitivity.
-        lowcut (int): Low frequency cutoff for bandpass filter.
-        highcut (int): High frequency cutoff for bandpass filter.
+        threshold_bias (int): Threshold bias for video clap detection.
+        lowcut (int): Low frequency cutoff for video bandpass filter.
+        highcut (int): High frequency cutoff for video bandpass filter.
+        audio_threshold_bias (int): Threshold bias for audio clap detection.
+        audio_lowcut (int): Low frequency cutoff for audio bandpass filter.
+        audio_highcut (int): High frequency cutoff for audio bandpass filter.
 
     Returns:
         dict: Detection results with clap timestamps and metadata.
@@ -357,7 +379,10 @@ def detect_claps_in_media(media_path: str,
         result = detector.detectAllClaps(
             thresholdBias=threshold_bias,
             lowcut=lowcut,
-            highcut=highcut
+            highcut=highcut,
+            audio_threshold_bias=audio_threshold_bias,
+            audio_lowcut=audio_lowcut,
+            audio_highcut=audio_highcut
         )
         
         # Add processing metadata
@@ -419,7 +444,10 @@ if __name__ == '__main__':
                 output_dir="/tmp/clap_results",
                 threshold_bias=6000,
                 lowcut=200,
-                highcut=3200
+                highcut=3200,
+                audio_threshold_bias=7900,  # Stricter for audio
+                audio_lowcut=780,
+                audio_highcut=4000
             )
             futures.append(future)
         else:
