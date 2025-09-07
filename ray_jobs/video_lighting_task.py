@@ -7,7 +7,7 @@ from typing import Optional, Dict, Tuple
 # Ray tasks
 # ---------------------------------------------------------------------------
 
-@ray.remote(num_cpus=1, num_gpus=1, max_retries=1)
+@ray.remote(num_cpus=1, num_gpus=0.04, max_retries=1, max_calls =1)
 def lighting_by_second_task(
     video_path: str,
     *,

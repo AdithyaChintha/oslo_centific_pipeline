@@ -95,7 +95,7 @@ def setup_nsfw_model_files(model_dir: str = "nsfw_model") -> tuple[str, str]:
     logger.info(f"Model files ready: model={model_path}, labels={labels_path}")
     return str(model_path), str(labels_path)
 
-@ray.remote(num_gpus=1)
+@ray.remote(num_gpus=0.08)
 class NSFWDetectorWorker:
     """Ray actor that loads the NSFW model on a GPU and processes video chunks."""
     

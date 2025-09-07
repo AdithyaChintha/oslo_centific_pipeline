@@ -19,6 +19,8 @@ from typing import Optional
 from pyannote.audio import Pipeline
 from faster_whisper import WhisperModel
 from presidio_analyzer import AnalyzerEngine
+from dotenv import load_dotenv
+load_dotenv()
 
 # Setup paths
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -36,15 +38,32 @@ SPEAKER_MERGE_THRESHOLD = 0.5
 
 logger = get_logger("audio_diarization_pii")
 
+def _can_use_ct2_cuda() -> bool:
+    try:
+        import ctranslate2 as ct
+        _ = ct.StorageView.from_array([0.0])
+        return True
+    except Exception:
+        return False
+
 def get_device():
     """Get optimal device for processing"""
-    if torch.cuda.is_available():
+    if torch.cuda.is_available() and _can_use_ct2_cuda():
         gpu_name = torch.cuda.get_device_name(0)
         logger.info(f"Using GPU: {gpu_name}")
         return "cuda"
     else:
         logger.info("Using CPU")
         return "cpu"
+
+def _load_whisper(device: str):
+    model = "large-v3" if device == "cuda" else "base"
+    ctype = "float16" if device == "cuda" else "int8"
+    try:
+        return WhisperModel(model, device=device, compute_type=ctype)
+    except Exception as e:
+        logger.warning(f"Whisper init on {device} failed ({e}); retrying on CPU.")
+        return WhisperModel("base", device="cpu", compute_type="int8")
 
 def load_models(device):
     """Load all required models based on device"""
@@ -91,7 +110,7 @@ def load_models(device):
         
         # Load Whisper
         logger.info(f"Loading Whisper model: {whisper_model}")
-        whisper = WhisperModel(whisper_model, device=device, compute_type=compute_type)
+        whisper = _load_whisper(device)
         
         # Load PII analyzer
         logger.info("Loading PII analyzer")
@@ -241,7 +260,14 @@ def compile_separate_outputs(speakers_data):
     
     return full_transcript, diarization_segments, all_pii_detections
 
-@ray.remote(num_gpus=1, max_task_retries=0)
+ACTOR_ENV = {
+    "LD_LIBRARY_PATH": "/lib/x86_64-linux-gnu:/usr/local/cuda/lib64:" + os.environ.get("LD_LIBRARY_PATH", ""),
+    "LD_PRELOAD": "/lib/x86_64-linux-gnu/libcudnn.so.9:/lib/x86_64-linux-gnu/libcudnn_cnn.so.9:/lib/x86_64-linux-gnu/libcudnn_ops.so.9",
+    "HF_HOME": os.environ.get("HF_HOME", str(Path.home() / ".cache" / "huggingface")),
+    "TRANSFORMERS_OFFLINE": os.environ.get("TRANSFORMERS_OFFLINE", "0"),
+}
+
+@ray.remote(num_gpus=0.20, max_task_retries=0, runtime_env={"env_vars": ACTOR_ENV})
 class AudioDiarizationActor:
     def __init__(self):
         """Initialize models once per actor"""

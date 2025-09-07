@@ -525,7 +525,7 @@ def parse_timestamp(timestamp_str: str) -> float:
     except (ValueError, AttributeError):
         return 0.0
 
-@ray.remote(num_gpus=1, max_calls=1)
+@ray.remote(num_gpus=0.06, max_calls=1)
 def process_video_chunks_for_face_detection(chunk_paths: list, config=None, 
                                           frame_interval: int = None, save_frames: bool = False,
                                           chunk_duration_sec: int = 60):
