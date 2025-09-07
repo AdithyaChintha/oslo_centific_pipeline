@@ -30,7 +30,7 @@ def run_yolo_detection(
     #tracking
     enable_tracking: bool = True,              
     tracker_backend: str = "botsort",        
-    tracker_cfg: Optional[str] = None,     
+    tracker_cfg: Optional[str] = "config/botsort_reid.yaml",     
     #counter
     enable_count: bool = True, #new
     bin_size_sec: float = 1.0,  
