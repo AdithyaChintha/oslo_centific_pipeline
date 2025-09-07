@@ -98,7 +98,7 @@ def classify_scene_domain(description: str, domains: List[str]) -> str:
         groq_config = CONFIG["groq"]
         domain_config = CONFIG["domain_activity_detection"]
         
-        client = Groq(api_key=groq_config["api_key"])
+        client = Groq(api_key=GROQ_API_KEY)
         
         # Create the prompt for domain classification using template from config
         domains_text = "\n".join([f"- {domain}" for domain in domains])
@@ -448,7 +448,7 @@ def classify_video_level_domain_and_activity(consolidated_description: str, doma
         groq_config = CONFIG["groq"]
         domain_activity_config = CONFIG["domain_activity_detection"]  # Updated config section
         
-        client = Groq(api_key=groq_config["api_key"])
+        client = Groq(api_key=GROQ_API_KEY)
         
         # Create enhanced prompt for video-level classification
         domains_text = "\n".join([f"- {domain}" for domain in domains])
