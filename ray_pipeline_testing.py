@@ -1218,6 +1218,13 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
     if process_unwarped_views and is_insv_file:
         logger.info("🎥 INSV file detected - enabling unwarped view processing")
 
+        #test for ERP pipline
+
+        mp4_result = ray.get(insv_unwarp_task.remote(input_video_path, out_dir=os.path.join(output_dir, "4views")))
+        erp_result = mp4_result.get('erp')
+        print(f"erp_result: {erp_result}")
+        yolo_ref  = run_yolo_detection.remote(erp_result, "out_4viewsERP")
+
         # Convert .insv to four.mp4 videos directly (single-output converter)
         
         #viewsoutput_dir=os.path.join(output_dir, "4views"),
@@ -2688,17 +2695,12 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     clap_ref  = detect_claps_in_media.remote(audio_shard_path, clap_output_dir, threshold_bias=6000, lowcut=200, highcut=3200)
     signal_quality_ref = detect_blur_and_black_segments.remote(video_shard_path)
 
-    # Testing lighting
-    #lighting_ref = 1 #lighting_by_second_task.remote(video_shard_path, output_dir = lighting_output_dir)
+
 
     (audio_res, yolo_res, scene_res, nsfw_res, motion_res, face_res, clap_res, signal_quality_res) = ray.get(
         [audio_ref, yolo_ref, scene_ref, nsfw_ref, motion_ref, face_ref, clap_ref, signal_quality_ref]
     )
     
-    # (audio_res, yolo_res, scene_res, nsfw_res, motion_res, face_res, clap_res) = ray.get(
-    #     [audio_ref, yolo_ref, scene_ref, nsfw_ref, motion_ref, face_ref, clap_ref]
-    # )
-    # Run sensitive information analysis after audio_diarization_pii completes
     sensitive_output_dir = os.path.join(output_dir, "sensitive_output")
     os.makedirs(sensitive_output_dir, exist_ok=True)
     sensitive_ref = process_audio_sensitive_info.remote([audio_shard_path], audio_output_dir, sensitive_output_dir)
