@@ -691,8 +691,8 @@ def people_presence_spans_from_events(
         "summary": {
             "total_tracks": len(tracks_out),
             "total_spans": total_spans,
-            "people_number": people_number,
             "min_duration_sec": float(min_duration_sec),
+            "people_number": people_number,
         },
         "tracks": tracks_out
     }
