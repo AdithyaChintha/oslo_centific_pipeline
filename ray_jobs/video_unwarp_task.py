@@ -102,7 +102,7 @@ def insv_unwarp_task(
     out_size: Tuple[int, int] = (1440, 1440), # erp_w/4
     v_fov_deg: float = 90.0,
     h_fov_deg: float = 90.0,
-    roll_deg: float = 180.0,
+    roll_deg: float = 0.0,
     views: Optional[Sequence[Tuple[float, str]]] = None,
 ) -> Dict[str, str]:
     """Convert INSV -> ERP -> four perspective views using the local video4_unwarp implementation.
