@@ -50,6 +50,7 @@ from ray_jobs.audio_diarization_pii import process_audio_diarization
 from ray_jobs.audio_sensitive_info import process_audio_sensitive_info
 from ray_jobs.clap_detector import detect_claps_in_media
 from ray_jobs.signal_quality_check_blur_black_screen import detect_blur_and_black_segments
+from ray_jobs.video_lighting_task import lighting_by_second_task
 
 # Import new ray jobs
 from ray_jobs.nsfw_det_final import process_video_chunks_for_nsfw
@@ -841,7 +842,37 @@ def extract_flagged_segments(task_result, task_type, shard_index, shard_offset_s
 
         elif task_type == "yolo":
             pass  # handled elsewhere if needed
-
+        elif task_type == "lighting":
+            if isinstance(task_result, tuple) and len(task_result) == 2:
+                try:
+                    per_second_path, events_path = task_result
+                    import json
+                    with open(events_path, 'r') as f:
+                        lighting_data = json.load(f)
+                    
+                    events = lighting_data.get('events', [])
+                    for event in events:
+                        # Only flag Dark and Bright lighting as noteworthy
+                        if event.get('label') in ['Dark', 'Bright']:
+                            segments.append({
+                                'start_time': shard_offset_sec + event.get('start', 0),
+                                'end_time': shard_offset_sec + event.get('end', 0),
+                                'task_type': 'lighting',
+                                'confidence': min(event.get('meanY_avg', 0) / 255.0, 1.0),
+                                'flag_type': f"lighting_{event.get('label', 'unknown').lower()}",
+                                'priority': 'medium',
+                                'description': f"Lighting: {event.get('label')} (avg: {event.get('meanY_avg', 0):.1f})",
+                                'shard_index': shard_index + 1,
+                                'metadata': {
+                                    'lighting_label': event.get('label'),
+                                    'duration': event.get('duration', 0),
+                                    'brightness_avg': event.get('meanY_avg', 0),
+                                    'brightness_med': event.get('meanY_med', 0),
+                                    'brightness_range': event.get('brightness_range_avg', 0)
+                                }
+                            })
+                except Exception as e:
+                    logger.error(f"Failed to extract lighting segments: {e}")
         elif task_type == "scene":
             success = task_result.get('processing_info', {}).get('success', False)
             if not success:
@@ -954,6 +985,32 @@ def extract_flagged_segments(task_result, task_type, shard_index, shard_offset_s
                                 "sensitive_topics": summary.get('sensitive_topics', []),
                                 "analysis": sensitive_result.get('sensitive_analysis', {}).get('analysis', '')
                             })
+        elif task_type == "signal_quality":
+            # Handle blur segments
+            for blur_segment in task_result.get('blur_segments', []):
+                segments.append({
+                    "start_time": maybe_offset(blur_segment.get('start_time', 0)),
+                    "end_time": maybe_offset(blur_segment.get('end_time', 0)),
+                    "task_type": "signal_quality",
+                    "confidence": 0.8,
+                    "flag_type": "signal_blur",
+                    "priority": "medium",
+                    "description": f"Blur detected from {blur_segment.get('start_time', 0):.1f}s to {blur_segment.get('end_time', 0):.1f}s",
+                    "shard_index": shard_index + 1
+                })
+            
+            # Handle black screen segments
+            for black_segment in task_result.get('black_segments', []):
+                segments.append({
+                    "start_time": maybe_offset(black_segment.get('start_time', 0)),
+                    "end_time": maybe_offset(black_segment.get('end_time', 0)),
+                    "task_type": "signal_quality",
+                    "confidence": 0.8,
+                    "flag_type": "signal_black_screen",
+                    "priority": "medium", 
+                    "description": f"Black screen detected from {black_segment.get('start_time', 0):.1f}s to {black_segment.get('end_time', 0):.1f}s",
+                    "shard_index": shard_index + 1
+                })
     except Exception as e:
         logger.warning(f"Error extracting segments from {task_type}: {e}")
     return segments
@@ -1720,8 +1777,9 @@ def consolidate_multiview_time_segment_results(view_results, shard_index, shard_
 def create_multiview_consolidated_predictions(view_results):
     """
     Build ONLY compliance predictions (PII, NSFW, Minors) in the same shape as the
-    manual `annotations.result` from complete-task.txt. All other model outputs (scene,
-    taxonomy, lighting, motion, yolo, clap, etc.) are intentionally omitted.
+    manual `annotations.result` from complete-task.txt. All other model outputs (motion, yolo, clap, etc.) are intentionally omitted.
+    Lighting, Signal Quality, and Sensitive Information are now included.
+
 
     Expected label config (based on complete-task.txt):
       - PII (audio):
@@ -2027,7 +2085,280 @@ def create_multiview_consolidated_predictions(view_results):
             "to_name": "md_home_id"
         })
 
-    # Done — ONLY PII/NSFW/Minors predictions are returned.
+    # -----------------------------
+    # 4) LIGHTING PREDICTIONS
+    # -----------------------------
+    # Extract lighting predictions from all views
+    lighting_predictions = []
+    dominant_lighting = "Normal"
+    lighting_confidence = 0.5
+    
+    for view_name, view_result in view_results.items():
+        if view_result.get('success', True):
+            lighting_result = view_result.get('lighting')
+            if isinstance(lighting_result, tuple) and len(lighting_result) == 2:
+                try:
+                    per_second_path, events_path = lighting_result
+                    
+                    # Read lighting events JSON
+                    import json
+                    with open(events_path, 'r') as f:
+                        lighting_data = json.load(f)
+                    
+                    events = lighting_data.get('events', [])
+                    if events:
+                        # Find the most significant lighting event (longest duration)
+                        significant_event = max(events, key=lambda x: x.get('duration', 0))
+                        lighting_label = significant_event.get('label', 'Normal')
+                        lighting_predictions.append(lighting_label)
+                        
+                        # Calculate confidence based on duration and consistency
+                        total_duration = sum(e.get('duration', 0) for e in events)
+                        if total_duration > 0:
+                            confidence = significant_event.get('duration', 0) / total_duration
+                            lighting_confidence = max(lighting_confidence, confidence * 0.9)
+                        
+                        # Update dominant lighting if higher confidence
+                        if confidence * 0.9 > lighting_confidence:
+                            dominant_lighting = lighting_label
+                            
+                except Exception as e:
+                    logger.warning(f"Failed to process lighting results for {view_name}: {e}")
+    
+    # If we have lighting predictions, create consolidated lighting choice
+    if lighting_predictions:
+        from collections import Counter
+        lighting_counts = Counter(lighting_predictions)
+        dominant_lighting = lighting_counts.most_common(1)[0][0]
+        
+        # Create lighting prediction entry
+        predictions.append({
+            "id": _mk_id("lighting"),
+            "type": "choices",
+            "value": {
+                "choices": [dominant_lighting]
+            },
+            "from_name": "lighting",
+            "to_name": "video_top"  # or whichever view you prefer
+        })
+    
+    # -----------------------------
+    # 5) SIGNAL QUALITY PREDICTIONS  
+    # -----------------------------
+    signal_issues_detected = False
+    signal_segments = []
+    signal_issue_types = []
+
+    for view_name, view_result in view_results.items():
+        if view_result.get('success', True):
+            signal_quality = view_result.get('signal_quality', {})
+            
+            blur_segments = signal_quality.get('blur_segments', [])
+            black_segments = signal_quality.get('black_segments', [])
+            
+            # Collect all signal quality issues
+            for segment in blur_segments:
+                signal_segments.append({
+                    'type': 'blur',
+                    'start_time': segment['start_time'],
+                    'end_time': segment['end_time'],
+                    'view': view_name
+                })
+                signal_issues_detected = True
+                if 'blur' not in signal_issue_types:
+                    signal_issue_types.append('blur')
+            
+            for segment in black_segments:
+                signal_segments.append({
+                    'type': 'black_screen', 
+                    'start_time': segment['start_time'],
+                    'end_time': segment['end_time'],
+                    'view': view_name
+                })
+                signal_issues_detected = True
+                if 'black_screen' not in signal_issue_types:
+                    signal_issue_types.append('black_screen')
+
+    # Create signal quality prediction
+    if signal_issues_detected:
+        # Find the earliest signal issue for time fields
+        earliest_issue = min(signal_segments, key=lambda x: x['start_time'])
+        latest_issue = max(signal_segments, key=lambda x: x['end_time'])
+        
+        start_minutes = int(earliest_issue['start_time'] // 60)
+        start_seconds = int(earliest_issue['start_time'] % 60)
+        end_minutes = int(latest_issue['end_time'] // 60) 
+        end_seconds = int(latest_issue['end_time'] % 60)
+        
+        # Signal detected - YES choice
+        predictions.append({
+            "id": _mk_id("signal_detected"),
+            "type": "choices", 
+            "value": {
+                "choices": ["Yes"]
+            },
+            "from_name": "val_signal",
+            "to_name": "video_left"  # Default view
+        })
+        
+        # Start time fields
+        predictions.append({
+            "id": _mk_id("signal_start_min"),
+            "type": "taxonomy",
+            "value": {
+                "taxonomy": [[str(start_minutes).zfill(2)]]
+            },
+            "from_name": "signal_start_minute", 
+            "to_name": "video_left"
+        })
+        
+        predictions.append({
+            "id": _mk_id("signal_start_sec"),
+            "type": "taxonomy",
+            "value": {
+                "taxonomy": [[str(start_seconds).zfill(2)]]
+            },
+            "from_name": "signal_start_second",
+            "to_name": "video_left"
+        })
+        
+        # End time fields
+        predictions.append({
+            "id": _mk_id("signal_end_min"),
+            "type": "taxonomy", 
+            "value": {
+                "taxonomy": [[str(end_minutes).zfill(2)]]
+            },
+            "from_name": "signal_end_minute",
+            "to_name": "video_left" 
+        })
+        
+        predictions.append({
+            "id": _mk_id("signal_end_sec"),
+            "type": "taxonomy",
+            "value": {
+                "taxonomy": [[str(end_seconds).zfill(2)]]
+            },
+            "from_name": "signal_end_second",
+            "to_name": "video_left"
+        })
+
+    else:
+        # No signal issues detected - NO choice
+        predictions.append({
+            "id": _mk_id("signal_no_issues"),
+            "type": "choices",
+            "value": {
+                "choices": ["No"]  
+            },
+            "from_name": "val_signal",
+            "to_name": "video_left"
+        })
+
+    # -----------------------------
+    # 6) SENSITIVE INFORMATION PREDICTIONS  
+    # -----------------------------
+    sensitive_detected = False
+    sensitive_segments = []
+    sensitive_topics = set()
+
+    # Process sensitive information from audio processing results
+    # Sensitive information is processed per-view like other models
+    sensitive_results = None
+    for view_name, view_result in view_results.items():
+        if view_result.get('success', True):
+            view_sensitive = view_result.get('sensitive')
+            if view_sensitive:
+                sensitive_results = view_sensitive
+                break  # Use first available sensitive results (audio is shared across views)
+
+    if sensitive_results:
+        
+        # Handle list format from audio processing
+        if isinstance(sensitive_results, list) and len(sensitive_results) > 0:
+            for sensitive_result in sensitive_results:
+                # Check if sensitive content was detected
+                if sensitive_result.get('summary', {}).get('has_sensitive_content', False):
+                    sensitive_detected = True
+                    
+                    # Extract topics from summary
+                    summary_topics = sensitive_result.get('summary', {}).get('sensitive_topics', [])
+                    sensitive_topics.update(summary_topics)
+                    
+                    # Extract individual detections for spectrogram regions
+                    sensitive_detections = sensitive_result.get('sensitive_detections', [])
+                    for detection in sensitive_detections:
+                        sensitive_segments.append({
+                            'start_time': detection.get('start_time', 0),
+                            'end_time': detection.get('end_time', 0),
+                            'topic': detection.get('topic', 'unknown'),
+                            'confidence': detection.get('confidence', 0.7),
+                            'transcript': detection.get('transcript_segment', '')
+                        })
+
+    # Create sensitive information predictions
+    if sensitive_detected:
+        # Audio sensitive - YES choice
+        predictions.append({
+            "id": _mk_id("sensitive_audio_yes"),
+            "type": "choices",
+            "value": {
+                "choices": ["Yes"]
+            },
+            "from_name": "val_sensitive_audio",
+            "to_name": "audio_main"
+        })
+        
+        # Video sensitive - NO choice (detection is audio-only)
+        predictions.append({
+            "id": _mk_id("sensitive_video_no"),
+            "type": "choices",
+            "value": {
+                "choices": ["No"]
+            },
+            "from_name": "val_sensitive_video", 
+            "to_name": "video_left"
+        })
+        
+        # Create spectrogram region labels for each detection
+        for i, segment in enumerate(sensitive_segments):
+            predictions.append({
+                "id": _mk_id(f"sensitive_region_{i}"),
+                "type": "labels",
+                "value": {
+                    "start": segment['start_time'],
+                    "end": segment['end_time'],
+                    "labels": ["Sensitive Topic Issue"],
+                    "channel": 0
+                },
+                "from_name": "audio_labels_sensitive",
+                "to_name": "audio_main"
+            })
+
+    else:
+        # No sensitive content detected - NO choice for audio
+        predictions.append({
+            "id": _mk_id("sensitive_audio_no"),
+            "type": "choices",
+            "value": {
+                "choices": ["No"]
+            },
+            "from_name": "val_sensitive_audio",
+            "to_name": "audio_main"
+        })
+        
+        # Video sensitive - NO choice
+        predictions.append({
+            "id": _mk_id("sensitive_video_no_clean"),
+            "type": "choices",
+            "value": {
+                "choices": ["No"]
+            },
+            "from_name": "val_sensitive_video",
+            "to_name": "video_left"
+        })
+
+    # Done — PII/NSFW/Minors/Lighting/Sensitive predictions are returned.
     return predictions
 
 def generate_multiview_consolidated_model_results_json(shard_output_dir, shard_number, view_results, total_shards=None, video_name=None):
@@ -2095,7 +2426,34 @@ def generate_multiview_consolidated_model_results_json(shard_output_dir, shard_n
             "signal_quality": view_result.get('signal_quality', {}),
             "flagged_segments": view_result.get('flagged_segments', [])
         }
-    
+        # Process lighting results if available
+        lighting_result = view_result.get('lighting')
+        if isinstance(lighting_result, tuple) and len(lighting_result) == 2:
+            try:
+                per_second_path, events_path = lighting_result
+                consolidated_data["view_results"][view_name]["lighting"] = {
+                    "per_second_file": per_second_path,
+                    "events_file": events_path
+                }
+                
+                # Extract dominant lighting for quick access
+                import json
+                with open(events_path, 'r') as f:
+                    lighting_data = json.load(f)
+                
+                events = lighting_data.get('events', [])
+                if events:
+                    significant_event = max(events, key=lambda x: x.get('duration', 0))
+                    consolidated_data["view_results"][view_name]["lighting"]["dominant_lighting"] = significant_event.get('label', 'Normal')
+                    consolidated_data["view_results"][view_name]["lighting"]["confidence"] = min(significant_event.get('duration', 0) / 60.0, 1.0) * 0.9
+                else:
+                    consolidated_data["view_results"][view_name]["lighting"]["dominant_lighting"] = "Normal"
+                    consolidated_data["view_results"][view_name]["lighting"]["confidence"] = 0.5
+                    
+            except Exception as e:
+                logger.warning(f"Failed to process lighting results for {view_name}: {e}")
+                consolidated_data["view_results"][view_name]["lighting"] = {"error": str(e)}
+
     # Save consolidated JSON
     consolidated_json_path = os.path.join(shard_output_dir, f"shard_{shard_number}_consolidated_model_results.json")
     with open(consolidated_json_path, 'w') as f:
@@ -2704,15 +3062,16 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     clap_ref  = detect_claps_in_media.remote(audio_shard_path, clap_output_dir, threshold_bias=6000, lowcut=200, highcut=3200)
     signal_quality_ref = detect_blur_and_black_segments.remote(video_shard_path)
 
-    # (audio_res, yolo_res, scene_res, nsfw_res, motion_res, face_res, clap_res, signal_quality_res) = ray.get(
-    #     [audio_ref, yolo_ref, scene_ref, nsfw_ref, motion_ref, face_ref, clap_ref, signal_quality_ref]
-    # )
-    
-    (audio_res, scene_res, nsfw_res, motion_res, face_res, clap_res, signal_quality_res) = ray.get(
-        [audio_ref, scene_ref, nsfw_ref, motion_ref, face_ref, clap_ref, signal_quality_ref]
+    # Testing lighting
+    lighting_ref = lighting_by_second_task.remote(video_shard_path, output_dir = lighting_output_dir)
+
+    scene_res = ray.get(scene_ref)
+
+    (audio_res, nsfw_res, motion_res, face_res, clap_res, lighting_res, signal_quality_res) = ray.get(
+        [audio_ref, nsfw_ref, motion_ref, face_ref, clap_ref, lighting_ref, signal_quality_ref]
     )
     
-    
+    # Run sensitive information analysis after audio_diarization_pii completes
     sensitive_output_dir = os.path.join(output_dir, "sensitive_output")
     os.makedirs(sensitive_output_dir, exist_ok=True)
     sensitive_ref = process_audio_sensitive_info.remote([audio_shard_path], audio_output_dir, sensitive_output_dir)

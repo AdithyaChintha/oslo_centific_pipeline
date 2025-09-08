@@ -15,7 +15,7 @@ from yolo_detection_r.detection_module import people_count_bins_from_events
 from yolo_detection_r.detection_module import people_presence_spans_from_events
 import cv2
 
-@ray.remote(num_cpus=1, num_gpus=1) # Can be changed to num_gpus=1 if a GPU model is used
+@ray.remote(num_cpus=1, num_gpus=0.06, max_calls=1) # Can be changed to num_gpus=1 if a GPU model is used
 def run_yolo_detection(
     video_path: str,
     output_dir: str,

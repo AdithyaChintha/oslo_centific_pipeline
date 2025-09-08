@@ -778,6 +778,20 @@ def generate_multiview_4view_labelstudio_task(shard_output_dir, assigned_views,
     raw_predictions = consolidated_results.get('consolidated_predictions_for_ls', [])
     # prediction_entries = assign_predictions_to_4view_positions(raw_predictions, assigned_views)
     
+    # Extract lighting prediction from consolidated results
+    lighting_prediction = "Normal light"  # Default fallback
+    for pred in raw_predictions:
+        if pred.get("from_name") == "lighting" and pred.get("type") == "choices":
+            choices = pred.get("value", {}).get("choices", [])
+            if choices:
+                lighting_prediction = choices[0]
+                break
+
+    signal_quality_prediction = extract_signal_quality_prediction_from_consolidated(consolidated_results)
+    sensitive_prediction = extract_sensitive_prediction_from_consolidated(consolidated_results)
+    pii_prediction = extract_pii_prediction_from_consolidated(consolidated_results)
+    nsfw_prediction = extract_nsfw_prediction_from_consolidated(consolidated_results)
+    minor_prediction = extract_minor_prediction_from_consolidated(consolidated_results)
     # Extract URLs from assigned views, using fallbacks if positions are empty
     video_top = assigned_views.get('top', {}).get('url', '') if assigned_views.get('top') else ''
     video_left = assigned_views.get('left', {}).get('url', '') if assigned_views.get('left') else ''
@@ -802,6 +816,12 @@ def generate_multiview_4view_labelstudio_task(shard_output_dir, assigned_views,
             "metadata_domain": "production",  # Required by Label Studio API
             "meta.actions": "",
             
+            "AI_lighting_prediction": lighting_prediction,
+            "AI_signal_prediction": signal_quality_prediction,
+            "AI_sensitive_prediction": sensitive_prediction,
+            "AI_PII_prediction": pii_prediction,
+            "AI_NSFW_prediction": nsfw_prediction,
+            "AI_minor_prediction": minor_prediction,
             # Multi-view specific metadata
             "shard_number": str(shard_number),
             "shard_id": shard_number,
@@ -1085,3 +1105,100 @@ def update_labelstudio_tasks_with_video_domain_and_activity(video_output_dir: st
     except Exception as e:
         logger.error(f"❌ Failed to update Label Studio tasks for video '{video_name}': {e}")
         return {"success": False, "error": str(e)}
+    
+def extract_signal_quality_prediction_from_consolidated(consolidated_results):
+    """
+    Extract signal quality prediction from consolidated results for AI prediction field.
+    
+    Returns:
+        str: Simple prediction of detected signal issues
+    """
+    view_results = consolidated_results.get('view_results', {})
+    issue_types = set()
+    
+    for view_name, view_result in view_results.items():
+        if view_result.get('success', True):
+            signal_quality = view_result.get('signal_quality', {})
+            
+            if signal_quality.get('blur_segments'):
+                issue_types.add('Blur')
+            if signal_quality.get('black_segments'):
+                issue_types.add('Black screen')
+    
+    if not issue_types:
+        return "No signal issues"
+    
+    return ', '.join(sorted(issue_types))
+
+def extract_sensitive_prediction_from_consolidated(consolidated_results):
+    """
+    Extract sensitive information prediction from consolidated results for AI prediction field.
+    
+    Returns:
+        str: List of detected sensitive topics or "No sensitive content"
+    """
+    sensitive_results = consolidated_results.get('sensitive', [])
+    sensitive_topics = set()
+    
+    # Handle list format from audio processing
+    if isinstance(sensitive_results, list) and len(sensitive_results) > 0:
+        for sensitive_result in sensitive_results:
+            if sensitive_result.get('summary', {}).get('has_sensitive_content', False):
+                summary_topics = sensitive_result.get('summary', {}).get('sensitive_topics', [])
+                sensitive_topics.update(summary_topics)
+    
+    if not sensitive_topics:
+        return "No sensitive content"
+    
+    return ', '.join(sorted(sensitive_topics))
+
+def extract_pii_prediction_from_consolidated(consolidated_results):
+    """
+    Extract PII prediction from consolidated results for AI prediction field.
+    
+    Returns:
+        str: PII detection status
+    """
+    # Check predictions for PII detection
+    predictions = consolidated_results.get('predictions', [])
+    for prediction in predictions:
+        if (prediction.get('from_name') == 'val_pii_audio' and 
+            prediction.get('type') == 'choices' and 
+            'Yes' in prediction.get('value', {}).get('choices', [])):
+            return "PII detected"
+    
+    return "No PII detected"
+
+def extract_nsfw_prediction_from_consolidated(consolidated_results):
+    """
+    Extract NSFW prediction from consolidated results for AI prediction field.
+    
+    Returns:
+        str: NSFW detection status
+    """
+    # Check predictions for NSFW detection
+    predictions = consolidated_results.get('predictions', [])
+    for prediction in predictions:
+        if (prediction.get('from_name') == 'val_nudity_video' and 
+            prediction.get('type') == 'choices' and 
+            'Yes' in prediction.get('value', {}).get('choices', [])):
+            return "NSFW content detected"
+    
+    return "No NSFW content detected"
+
+def extract_minor_prediction_from_consolidated(consolidated_results):
+    """
+    Extract minor detection prediction from consolidated results for AI prediction field.
+    
+    Returns:
+        str: Minor detection status
+    """
+    # Check predictions for minor detection
+    predictions = consolidated_results.get('predictions', [])
+    for prediction in predictions:
+        if (prediction.get('from_name') == 'val_minors_video' and 
+            prediction.get('type') == 'choices' and 
+            'Yes' in prediction.get('value', {}).get('choices', [])):
+            return "Minors detected"
+    
+    return "No minors detected"
