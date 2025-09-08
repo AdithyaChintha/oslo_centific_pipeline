@@ -63,6 +63,7 @@ from ray_jobs.labelstudio_tasks import (assign_views_to_labelstudio_positions, g
    
 from ray_jobs.video_unwarp_task import erp_unwarp_task
 from ray_jobs.video_unwarp_task import insv_unwarp_task
+from ray_jobs.video_lighting_task import lighting_by_second_task
 
 logger = get_logger("SimplifiedUnifiedPipeline")
 # Global shutdown flag for graceful stopping
@@ -3086,7 +3087,7 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
         'face': face_res,
         'clap': clap_res,
         'sensitive': sensitive_res,
-        #'lighting': lighting_res,
+        'lighting': lighting_res,
         'signal_quality': signal_quality_res
     }
     
