@@ -24,6 +24,8 @@ import ray
 import cv2
 import subprocess
 
+from video_process.video4_unwarpERP import insv_to_4viewsERP
+
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
@@ -112,7 +114,8 @@ def insv_unwarp_task(
     try:
         # import here so the worker can receive the working_dir via runtime_env
         from video_process.video4_unwarp import video4views_unwarpF
-        # return video4views_unwarp( #Based on openCV slow
+        #Based on openCV slow (tested)
+        # return video4views_unwarp( 
         #     insv_path,
         #     output_dir=out_dir,
         #     erp_w=erp_w,
@@ -124,14 +127,27 @@ def insv_unwarp_task(
         #     views=views,
         # )
 
-        return video4views_unwarpF(
+        # The new insv -> fisheye --> 4views pipeline (tested)
+        # return video4views_unwarpF(
+        #     insv_path,
+        #     output_dir=out_dir,
+        #     out_size=out_size,
+        #     h_fov=h_fov_deg,
+        #     v_fov=v_fov_deg,
+        #     roll=roll_deg,
+        # )
+     
+        # The new insv -> ERP --> 4views pipeline (under testing)
+        from video_process.video4_unwarpERP import insv_to_4viewsERP
+        return insv_to_4viewsERP(
             insv_path,
             output_dir=out_dir,
             out_size=out_size,
-            h_fov=h_fov_deg,
-            v_fov=v_fov_deg,
-            roll=roll_deg,
+            h_fov_deg=h_fov_deg,
+            v_fov_deg=v_fov_deg,
+            roll_deg=roll_deg,
         )
+        
     except Exception as e:
         return {"__error__": f"insv_unwarp_task failed: {e}"}
 

@@ -45,7 +45,7 @@ except ImportError as e:
         return {"success": False, "error": "Scene detection not available"}
 
 from ray_jobs.domain_detection import process_scene_domain_classification, load_groq_config, process_video_level_domain_classification
-from ray_jobs.run_yolodetect_task import run_yolodetect_on_shard
+from ray_jobs.yolo_detection import run_yolo_detection
 from ray_jobs.audio_diarization_pii import process_audio_diarization
 from ray_jobs.audio_sensitive_info import process_audio_sensitive_info
 from ray_jobs.clap_detector import detect_claps_in_media
@@ -62,9 +62,8 @@ from ray_jobs.labelstudio_tasks import (assign_views_to_labelstudio_positions, g
     update_labelstudio_tasks_with_video_domain_and_activity)
    
 from ray_jobs.video_unwarp_task import erp_unwarp_task
-
-# Test unwarp
 from ray_jobs.video_unwarp_task import insv_unwarp_task
+from ray_jobs.video_lighting_task import lighting_by_second_task
 
 logger = get_logger("SimplifiedUnifiedPipeline")
 # Global shutdown flag for graceful stopping
@@ -1277,15 +1276,24 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
     if process_unwarped_views and is_insv_file:
         logger.info("🎥 INSV file detected - enabling unwarped view processing")
 
+        #test for ERP pipline
+        # mp4_result = ray.get(insv_unwarp_task.remote(input_video_path, out_dir=os.path.join(output_dir, "4views")))
+        # erp_result = mp4_result.get('erp')
+        # print(f"erp_result: {erp_result}")
+        # yolo_ref  = run_yolo_detection.remote(erp_result, "out_4viewsERP")
+
         # Convert .insv to four.mp4 videos directly (single-output converter)
-        
         #viewsoutput_dir=os.path.join(output_dir, "4views"),
         if input_video_path.lower().endswith('.insv'):
             # Try the simpler single-output
             try:
-                mp4_result = ray.get(insv_unwarp_task.remote(input_video_path))#, viewsoutput_dir))
-                flat_result = mp4_result.get('views')
+                mp4_result = ray.get(insv_unwarp_task.remote(input_video_path, out_dir=os.path.join(output_dir, "4views")))
+                flat_result = mp4_result
                 logger.info(f"Using two 180 for unwarp:: {len(flat_result)} views under {flat_result}")
+                # mp4_result = ray.get(insv_unwarp_task.remote(input_video_path, out_dir=os.path.join(output_dir, "4views")))
+                # flat_result = mp4_result.get('erp')
+                # print(f"erp_result: {erp_result}")
+                # yolo_ref  = run_yolo_detection.remote(erp_result, "out_4viewsERP")
             except Exception:
                 flat_result = None
                 raise RuntimeError(f"Failed to convert two 180 INSV file: {mp4_result.get('error', 'Unknown error')}")
@@ -2582,7 +2590,7 @@ def process_time_aligned_shard_multiview(
         try:
             # Process each view through the full pipeline
             view_result = process_single_shard_through_pipeline(
-                view_shard_path, audio_shard_path, view_output_dir, shard_offset_sec, shard_index
+                view_shard_path, audio_shard_path, view_output_dir, shard_offset_sec, shard_index, view_name
             )
             view_results[view_name] = view_result
             logger.info(f"✅ Successfully processed {view_name} for shard {shard_index+1}")
@@ -2841,7 +2849,7 @@ def process_time_aligned_shard(
     logger.info(f"Processing view 1 of shard {shard_index+1}")
     view1_output_dir = os.path.join(shard_output_dir, "view_1")
     view1_results = process_single_shard_through_pipeline(
-        view1_shard_path, audio_shard_path, view1_output_dir, shard_offset_sec, shard_index
+        view1_shard_path, audio_shard_path, view1_output_dir, shard_offset_sec, shard_index, "view_1"
     )
 
     # --- View 2 (optional) ---
@@ -2849,7 +2857,7 @@ def process_time_aligned_shard(
         logger.info(f"Processing view 2 of shard {shard_index+1}")
         view2_output_dir = os.path.join(shard_output_dir, "view_2")
         view2_results = process_single_shard_through_pipeline(
-            view2_shard_path, audio_shard_path, view2_output_dir, shard_offset_sec, shard_index
+            view2_shard_path, audio_shard_path, view2_output_dir, shard_offset_sec, shard_index, "view_2"
         )
     else:
         logger.info(f"No view 2 for shard {shard_index+1} — running single-view consolidation")
@@ -3007,23 +3015,31 @@ def process_time_aligned_shard(
     }
 
 def process_single_shard_through_pipeline(video_shard_path, audio_shard_path, 
-                                         output_dir, shard_offset_sec, shard_index=0):
+                                         output_dir, shard_offset_sec, shard_index=0, view_name="view"):
     """
     Run single shard through all 7 AI models
     """
     os.makedirs(output_dir, exist_ok=True)
     results = {}
 
+    if view_name == "erp":
+        #Yolo people counter only for ERP view
+        logger.info(f"ERP view: only run yolo people counter")
+        yolo_output_dir = os.path.join(output_dir, "yolo_output")
+        yolo_ref  = run_yolo_detection.remote(video_shard_path, yolo_output_dir)
+        yolo_res = ray.get(yolo_ref)  
+        results = {'yolo': yolo_res}
+        logger.info(f"Yolo people counter results saved to yolo_output_dir: {yolo_output_dir}")
+        return results
+
     # Define output directories for models that need them
     audio_output_dir = os.path.join(output_dir, "audio_output")
-    yolo_output_dir = os.path.join(output_dir, "yolo_output")
     scene_output_dir = os.path.join(output_dir, "scene_output")
     clap_output_dir = os.path.join(output_dir, "clap_output")
     nsfw_output_dir = os.path.join(output_dir, "nsfw_output")
     motion_output_dir = os.path.join(output_dir, "motion_output")
     face_output_dir = os.path.join(output_dir, "face_output")
     signal_quality_output_dir = os.path.join(output_dir, "signal_quality_output")
-
     lighting_output_dir = os.path.join(output_dir, "lighting_output")
 
     # Create output directories
@@ -3040,7 +3056,6 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     ensure_prompt_file_exists(prompt_path)
     
     audio_ref = process_audio_diarization.remote([audio_shard_path], audio_output_dir)
-    yolo_ref  = run_yolodetect_on_shard.remote(video_shard_path, yolo_output_dir)
     scene_ref = detect_scenes.remote(video_shard_path, prompt_path, scene_output_dir)
     nsfw_ref  = process_video_chunks_for_nsfw.remote([video_shard_path], confidence_threshold=0.5, chunk_duration_sec=60)
     motion_ref= compute_motion_energy.remote([video_shard_path], sensitivity_level="medium", save_detailed_data=False)
@@ -3053,8 +3068,8 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
 
     scene_res = ray.get(scene_ref)
 
-    (audio_res, yolo_res, nsfw_res, motion_res, face_res, clap_res, lighting_res, signal_quality_res) = ray.get(
-        [audio_ref, yolo_ref, nsfw_ref, motion_ref, face_ref, clap_ref, lighting_ref, signal_quality_ref]
+    (audio_res, nsfw_res, motion_res, face_res, clap_res, lighting_res, signal_quality_res) = ray.get(
+        [audio_ref, nsfw_ref, motion_ref, face_ref, clap_ref, lighting_ref, signal_quality_ref]
     )
     
     # Run sensitive information analysis after audio_diarization_pii completes
@@ -3065,7 +3080,7 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     # Store results from Ray tasks
     results = {
         'audio': audio_res,
-        'yolo': yolo_res,
+        #'yolo': yolo_res,
         'scene': scene_res,
         'nsfw': nsfw_res,
         'motion': motion_res,
