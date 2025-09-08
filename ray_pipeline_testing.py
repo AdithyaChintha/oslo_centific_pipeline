@@ -3026,9 +3026,9 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
         logger.info(f"ERP view: only run yolo people counter")
         yolo_output_dir = os.path.join(output_dir, "yolo_output")
         yolo_ref  = run_yolo_detection.remote(video_shard_path, yolo_output_dir)
-        (yolo_res) = ray.get([yolo_ref])  
-        results = {'yolo': yolo_res,}
-        logger.info(f"Yolo people counter results saved to: {sensitive_file}")
+        yolo_res = ray.get(yolo_ref)  
+        results = {'yolo': yolo_res}
+        logger.info(f"Yolo people counter results saved to yolo_output_dir: {yolo_output_dir}")
         return results
 
     # Define output directories for models that need them
