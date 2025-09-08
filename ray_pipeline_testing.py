@@ -48,7 +48,7 @@ from ray_jobs.domain_detection import process_scene_domain_classification, load_
 from ray_jobs.run_yolodetect_task import run_yolodetect_on_shard
 from ray_jobs.audio_diarization_pii import process_audio_diarization
 from ray_jobs.audio_sensitive_info import process_audio_sensitive_info
-from ray_jobs.clap_detector import detect_claps_in_media
+from ray_jobs.clap_detector import detect_claps_in_media, detect_claps_in_audio_video_pair
 from ray_jobs.signal_quality_check_blur_black_screen import detect_blur_and_black_segments
 from ray_jobs.video_lighting_task import lighting_by_second_task
 
@@ -2582,7 +2582,7 @@ def process_time_aligned_shard_multiview(
         try:
             # Process each view through the full pipeline
             view_result = process_single_shard_through_pipeline(
-                view_shard_path, audio_shard_path, view_output_dir, shard_offset_sec, shard_index
+                view_shard_path, audio_shard_path, view_output_dir, shard_offset_sec, shard_index, total_shard_count
             )
             view_results[view_name] = view_result
             logger.info(f"✅ Successfully processed {view_name} for shard {shard_index+1}")
@@ -2841,7 +2841,7 @@ def process_time_aligned_shard(
     logger.info(f"Processing view 1 of shard {shard_index+1}")
     view1_output_dir = os.path.join(shard_output_dir, "view_1")
     view1_results = process_single_shard_through_pipeline(
-        view1_shard_path, audio_shard_path, view1_output_dir, shard_offset_sec, shard_index
+        view1_shard_path, audio_shard_path, view1_output_dir, shard_offset_sec, shard_index, total_shard_count
     )
 
     # --- View 2 (optional) ---
@@ -2849,7 +2849,7 @@ def process_time_aligned_shard(
         logger.info(f"Processing view 2 of shard {shard_index+1}")
         view2_output_dir = os.path.join(shard_output_dir, "view_2")
         view2_results = process_single_shard_through_pipeline(
-            view2_shard_path, audio_shard_path, view2_output_dir, shard_offset_sec, shard_index
+            view2_shard_path, audio_shard_path, view2_output_dir, shard_offset_sec, shard_index, total_shard_count
         )
     else:
         logger.info(f"No view 2 for shard {shard_index+1} — running single-view consolidation")
@@ -3007,7 +3007,7 @@ def process_time_aligned_shard(
     }
 
 def process_single_shard_through_pipeline(video_shard_path, audio_shard_path, 
-                                         output_dir, shard_offset_sec, shard_index=0):
+                                         output_dir, shard_offset_sec, shard_index=0, total_shard_count=None):
     """
     Run single shard through all 7 AI models
     """
@@ -3039,13 +3039,26 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     # Verify prompt file exists
     ensure_prompt_file_exists(prompt_path)
     
+    # Determine if this is first or last shard for clap detection
+    is_first_shard = (shard_index == 0)
+    is_last_shard = (total_shard_count and shard_index == total_shard_count - 1)
+    
     audio_ref = process_audio_diarization.remote([audio_shard_path], audio_output_dir)
     yolo_ref  = run_yolodetect_on_shard.remote(video_shard_path, yolo_output_dir)
     scene_ref = detect_scenes.remote(video_shard_path, prompt_path, scene_output_dir)
     nsfw_ref  = process_video_chunks_for_nsfw.remote([video_shard_path], confidence_threshold=0.5, chunk_duration_sec=60)
     motion_ref= compute_motion_energy.remote([video_shard_path], sensitivity_level="medium", save_detailed_data=False)
     face_ref  = process_video_chunks_for_face_detection.remote([video_shard_path], config=None, frame_interval=30, save_frames=False, chunk_duration_sec=60)
-    clap_ref  = detect_claps_in_media.remote(audio_shard_path, clap_output_dir, threshold_bias=6000, lowcut=200, highcut=3200)
+    
+    # Only run clap detection for first and last shards
+    clap_ref = None
+    if is_first_shard or is_last_shard:
+        shard_type = "first" if is_first_shard else "last" 
+        logger.info(f"🔍 Running clap detection for {shard_type} shard {shard_index+1}")
+        clap_ref = detect_claps_in_audio_video_pair.remote(audio_shard_path, video_shard_path, clap_output_dir, search_window_sec=30.0)
+    else:
+        logger.info(f"ℹ️ Skipping clap detection for middle shard {shard_index+1}")
+    
     signal_quality_ref = detect_blur_and_black_segments.remote(video_shard_path)
 
     # Testing lighting
@@ -3053,9 +3066,17 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
 
     scene_res = ray.get(scene_ref)
 
-    (audio_res, yolo_res, nsfw_res, motion_res, face_res, clap_res, lighting_res, signal_quality_res) = ray.get(
-        [audio_ref, yolo_ref, nsfw_ref, motion_ref, face_ref, clap_ref, lighting_ref, signal_quality_ref]
-    )
+    # Get results, handling conditional clap detection
+    if clap_ref is not None:
+        (audio_res, yolo_res, nsfw_res, motion_res, face_res, clap_res, lighting_res, signal_quality_res) = ray.get(
+            [audio_ref, yolo_ref, nsfw_ref, motion_ref, face_ref, clap_ref, lighting_ref, signal_quality_ref]
+        )
+    else:
+        # Set empty clap result for middle shards
+        (audio_res, yolo_res, nsfw_res, motion_res, face_res, lighting_res, signal_quality_res) = ray.get(
+            [audio_ref, yolo_ref, nsfw_ref, motion_ref, face_ref, lighting_ref, signal_quality_ref]
+        )
+        clap_res = {"success": True, "clap_count": 0, "clap_timestamps": [], "message": "Clap detection skipped for middle shard"}
     
     # Run sensitive information analysis after audio_diarization_pii completes
     sensitive_output_dir = os.path.join(output_dir, "sensitive_output")

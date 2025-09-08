@@ -38,18 +38,20 @@ def convert_insv_to_dual_mp4(insv_path: str, output_dir: str = "/tmp/converted_m
         except Exception as e:
             logger.warning(f"[WARN] ExifTool failed on {insv_path.name}: {e}")
 
-        # Extract each video stream separately
+        # Extract each video stream separately with audio
         ffmpeg_cmd1 = [
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
             "-i", str(insv_path),
-            "-map", "0:v:0",
+            "-map", "0:v:0",  # Map first video stream
+            "-map", "0:a",    # Map all audio streams
             "-c", "copy",
             str(output1)
         ]
         ffmpeg_cmd2 = [
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
             "-i", str(insv_path),
-            "-map", "0:v:1",
+            "-map", "0:v:1",  # Map second video stream  
+            "-map", "0:a",    # Map all audio streams
             "-c", "copy",
             str(output2)
         ]

@@ -1,137 +1,48 @@
 {
-  "total_videos": 3,
-  "completed_videos": 3,
+  "total_videos": 1,
+  "completed_videos": 1,
   "failed_videos": 0,
-  "last_updated": "2025-09-05T13:49:54.137671",
+  "last_updated": "2025-09-08T16:28:53.180154",
   "videos": {
-    "VID_20250809_094836_00_045": {
+    "skincare-20250819_1359-video.insv": {
       "status": "completed",
-      "discovery_date": "2025-09-05T13:37:17.898177",
-      "last_updated": "2025-09-05T13:41:28.488026",
-      "output_dir": "/home/nvcoe_admin/Mangesh/PR_48/insta360-video-activity-segmentation/outtrymain/video_VID_20250809_094836_00_045_20250905_133728",
+      "discovery_date": "2025-09-08T15:33:39.180917",
+      "last_updated": "2025-09-08T16:28:53.180151",
+      "output_dir": "/home/nvcoe_admin/pavan/currdev/insta360-video-activity-segmentation/outtrymain/video_skincare-20250819_1359-video.insv_20250908_153902",
       "results_summary": {
         "input_file": "INSV dual-view processing",
         "processing_type": "shard_first_dual_view",
         "views_analyzed": 2,
-        "total_shards_processed": 1,
-        "successful_shard_tasks": 1,
-        "total_duration_seconds": 120,
+        "total_shards_processed": 6,
+        "successful_shard_tasks": 6,
+        "total_duration_seconds": 720,
         "consolidated_processing_summary": {
-          "total_shards": 1,
-          "successful_audio": 2,
-          "successful_yolo": 2,
-          "successful_scene": 2,
-          "successful_nsfw": 2,
-          "successful_motion": 2,
-          "successful_face": 2,
-          "successful_clap": 2,
+          "total_shards": 6,
+          "successful_audio": 12,
+          "successful_yolo": 12,
+          "successful_scene": 12,
+          "successful_domain": 12,
+          "successful_nsfw": 12,
+          "successful_motion": 12,
+          "successful_face": 12,
+          "successful_clap": 12,
           "overall_success_rate": "100.0%"
         },
         "consolidated_annotation_summary": {
-          "total_label_studio_tasks": 1,
-          "dual_view_tasks_created": 1,
+          "total_label_studio_tasks": 6,
+          "dual_view_tasks_created": 6,
           "annotation_efficiency": "Each task covers 60 seconds from both camera views",
           "estimated_annotation_time_per_task": "2-3 minutes",
-          "total_estimated_annotation_time": "2.5 minutes"
+          "total_estimated_annotation_time": "15.0 minutes"
         },
         "shard_first_benefits": {
           "tasks_per_minute": 1,
           "dual_view_consolidation": "Both views processed and consolidated per time segment",
-          "annotation_workload": "Reduced from 2 separate tasks to 1 consolidated tasks",
+          "annotation_workload": "Reduced from 12 separate tasks to 6 consolidated tasks",
           "workload_reduction_percentage": "50.0%"
         },
         "label_studio_integration": {
-          "tasks_imported": 1,
-          "task_format": "dual_view_consolidated",
-          "video_left_field": "view_1_shard_url",
-          "video_right_field": "view_2_shard_url",
-          "consolidated_predictions": "AI results from both views merged intelligently"
-        }
-      }
-    },
-    "VID_20250809_094836_00_050": {
-      "status": "completed",
-      "discovery_date": "2025-09-05T13:37:17.973764",
-      "last_updated": "2025-09-05T13:45:33.040627",
-      "output_dir": "/home/nvcoe_admin/Mangesh/PR_48/insta360-video-activity-segmentation/outtrymain/video_VID_20250809_094836_00_050_20250905_134149",
-      "results_summary": {
-        "input_file": "INSV dual-view processing",
-        "processing_type": "shard_first_dual_view",
-        "views_analyzed": 2,
-        "total_shards_processed": 1,
-        "successful_shard_tasks": 1,
-        "total_duration_seconds": 120,
-        "consolidated_processing_summary": {
-          "total_shards": 1,
-          "successful_audio": 2,
-          "successful_yolo": 2,
-          "successful_scene": 2,
-          "successful_nsfw": 2,
-          "successful_motion": 2,
-          "successful_face": 2,
-          "successful_clap": 2,
-          "overall_success_rate": "100.0%"
-        },
-        "consolidated_annotation_summary": {
-          "total_label_studio_tasks": 1,
-          "dual_view_tasks_created": 1,
-          "annotation_efficiency": "Each task covers 60 seconds from both camera views",
-          "estimated_annotation_time_per_task": "2-3 minutes",
-          "total_estimated_annotation_time": "2.5 minutes"
-        },
-        "shard_first_benefits": {
-          "tasks_per_minute": 1,
-          "dual_view_consolidation": "Both views processed and consolidated per time segment",
-          "annotation_workload": "Reduced from 2 separate tasks to 1 consolidated tasks",
-          "workload_reduction_percentage": "50.0%"
-        },
-        "label_studio_integration": {
-          "tasks_imported": 1,
-          "task_format": "dual_view_consolidated",
-          "video_left_field": "view_1_shard_url",
-          "video_right_field": "view_2_shard_url",
-          "consolidated_predictions": "AI results from both views merged intelligently"
-        }
-      }
-    },
-    "VID_20250809_094836_00_051": {
-      "status": "completed",
-      "discovery_date": "2025-09-05T13:37:18.049489",
-      "last_updated": "2025-09-05T13:49:54.137660",
-      "output_dir": "/home/nvcoe_admin/Mangesh/PR_48/insta360-video-activity-segmentation/outtrymain/video_VID_20250809_094836_00_051_20250905_134553",
-      "results_summary": {
-        "input_file": "INSV dual-view processing",
-        "processing_type": "shard_first_dual_view",
-        "views_analyzed": 2,
-        "total_shards_processed": 1,
-        "successful_shard_tasks": 1,
-        "total_duration_seconds": 120,
-        "consolidated_processing_summary": {
-          "total_shards": 1,
-          "successful_audio": 2,
-          "successful_yolo": 2,
-          "successful_scene": 2,
-          "successful_nsfw": 2,
-          "successful_motion": 2,
-          "successful_face": 2,
-          "successful_clap": 2,
-          "overall_success_rate": "100.0%"
-        },
-        "consolidated_annotation_summary": {
-          "total_label_studio_tasks": 1,
-          "dual_view_tasks_created": 1,
-          "annotation_efficiency": "Each task covers 60 seconds from both camera views",
-          "estimated_annotation_time_per_task": "2-3 minutes",
-          "total_estimated_annotation_time": "2.5 minutes"
-        },
-        "shard_first_benefits": {
-          "tasks_per_minute": 1,
-          "dual_view_consolidation": "Both views processed and consolidated per time segment",
-          "annotation_workload": "Reduced from 2 separate tasks to 1 consolidated tasks",
-          "workload_reduction_percentage": "50.0%"
-        },
-        "label_studio_integration": {
-          "tasks_imported": 1,
+          "tasks_imported": 6,
           "task_format": "dual_view_consolidated",
           "video_left_field": "view_1_shard_url",
           "video_right_field": "view_2_shard_url",

@@ -815,7 +815,6 @@ def generate_multiview_4view_labelstudio_task(shard_output_dir, assigned_views,
             "meta.recording_datetime": current_time,
             "metadata_domain": "production",  # Required by Label Studio API
             "meta.actions": "",
-            
             "AI_lighting_prediction": lighting_prediction,
             "AI_signal_prediction": signal_quality_prediction,
             "AI_sensitive_prediction": sensitive_prediction,
