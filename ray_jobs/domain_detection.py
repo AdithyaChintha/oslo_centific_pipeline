@@ -63,7 +63,7 @@ def load_groq_config(config_path: str = "config/domain_detection_groqconfig.yaml
                     "Shopping & Logistics",
                     "Safety & Security"
                 ],
-                "default_domain": "Unkonwn",
+                "default_domain": "Unknown",
                 "prompt_template": """You are a video scene domain classifier. Given a scene description, classify it into one of the following domains:
 
 {domains_list}
