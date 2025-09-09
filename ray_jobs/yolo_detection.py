@@ -114,6 +114,7 @@ def run_yolo_detection(
             try:
                 if isinstance(counts, dict) and 'summary' in counts and isinstance(presence, dict) and 'summary' in presence:
                     people_num = int(presence['summary'].get('people_number', counts['summary'].get('unique_people', 0)))
+                    counts['summary']['unique_id'] =  counts['summary']['unique_people']
                     counts['summary']['unique_people'] = people_num
                     # propagate min_duration_sec from presence summary into counts summary
                     if 'min_duration_sec' in presence['summary']:
