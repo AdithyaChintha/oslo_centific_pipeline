@@ -4,7 +4,7 @@
 # Azure Blob Storage Configuration
 azure_storage:
   # Input directory configuration
-  input_blob_prefix: "azure_directory_path/Geo_files_test/clap"  # Default blob prefix to search for videos  
+  input_blob_prefix: "azure_directory_path/Geo_files_test/people_presence"  # Default blob prefix to search for videos  
   # Output directory configuration  
   output_blob_prefix: "output_test/video_domain_testing"  # Base prefix for uploading processed results
   
