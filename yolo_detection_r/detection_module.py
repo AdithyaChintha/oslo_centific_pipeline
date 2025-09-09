@@ -594,12 +594,17 @@ def people_presence_spans_from_events(
                       Can also pass {0} if cls is integer-coded.
       gap_sec: Max allowed gap (seconds) between consecutive frames to keep within
                the same presence span.
+        min_duration_sec: Minimum duration (seconds) for a presence span to be
+                            counted towards the "people_number" summary metric.
 
     Returns:
       {
         "summary": {
            "total_tracks": <num of distinct track_id>,
            "total_spans": <num of spans across all tracks>,
+           "min_duration_sec": <as passed in>,
+           "people_number": <num of distinct track_id that have at least one span
+                             whose duration >= min_duration_sec>
         },
         "tracks": [
            {
