@@ -2710,7 +2710,8 @@ def generate_multiview_consolidated_model_results_json(shard_output_dir, shard_n
     # Save consolidated JSON
     consolidated_json_path = os.path.join(shard_output_dir, f"shard_{shard_number}_consolidated_model_results.json")
     with open(consolidated_json_path, 'w') as f:
-        json.dump(consolidated_data, f, indent=2)
+        import json as json_module  # Avoid any potential variable shadowing
+        json_module.dump(consolidated_data, f, indent=2)
     
     logger.info(f"💾 Saved multi-view consolidated results: {consolidated_json_path}")
     return consolidated_json_path
@@ -3313,6 +3314,8 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     
     audio_ref = process_audio_diarization.remote([audio_shard_path], audio_output_dir)
     scene_ref = detect_scenes.remote(video_shard_path, prompt_path, scene_output_dir)
+    yolo_output_dir = os.path.join(output_dir, "yolo_output")
+    yolo_ref  = run_yolo_detection.remote(video_shard_path, yolo_output_dir)
     nsfw_ref  = process_video_chunks_for_nsfw.remote([video_shard_path], confidence_threshold=0.5, chunk_duration_sec=60)
     motion_ref= compute_motion_energy.remote([video_shard_path], sensitivity_level="medium", save_detailed_data=False)
     face_ref  = process_video_chunks_for_face_detection.remote([video_shard_path], config=None, frame_interval=30, save_frames=False, chunk_duration_sec=60)
@@ -3335,8 +3338,8 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
 
     # Get results, handling conditional clap detection
     if clap_ref is not None:
-        (audio_res, nsfw_res, motion_res, face_res, clap_res, lighting_res, signal_quality_res) = ray.get(
-            [audio_ref, nsfw_ref, motion_ref, face_ref, clap_ref, lighting_ref, signal_quality_ref]
+        (audio_res, yolo_res, nsfw_res, motion_res, face_res, clap_res, lighting_res, signal_quality_res) = ray.get(
+            [audio_ref, yolo_ref, nsfw_ref, motion_ref, face_ref, clap_ref, lighting_ref, signal_quality_ref]
         )
     else:
         # Set empty clap result for middle shards
@@ -3353,7 +3356,7 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     # Store results from Ray tasks
     results = {
         'audio': audio_res,
-        #'yolo': yolo_res,
+        'yolo': yolo_res,
         'scene': scene_res,
         'nsfw': nsfw_res,
         'motion': motion_res,

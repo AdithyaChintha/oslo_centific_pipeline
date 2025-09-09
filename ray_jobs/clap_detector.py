@@ -9,16 +9,230 @@ import time
 import logging
 import ray
 import json
+import yaml
 from datetime import datetime
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("unified_clap_detector")
 
+def get_file_duration(file_path: str) -> float:
+    """
+    Get duration of a media file using ffprobe.
+    
+    Args:
+        file_path (str): Path to media file
+        
+    Returns:
+        float: Duration in seconds, or None if unable to determine
+    """
+    try:
+        cmd = ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration', '-of', 'csv=p=0', file_path]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0 and result.stdout.strip():
+            duration = float(result.stdout.strip())
+            logger.info(f"Duration of {Path(file_path).name}: {duration:.2f} seconds")
+            return round(duration, 2)
+        else:
+            logger.warning(f"Could not get duration for {file_path}: {result.stderr}")
+            return None
+    except Exception as e:
+        logger.error(f"Error getting duration for {file_path}: {e}")
+        return None
+
+
+def find_original_files(shard_path: str, core_identifier: str) -> dict:
+    """
+    Find original full-length video and audio files in the project directory.
+    
+    Args:
+        shard_path (str): Path to shard file to help locate project root
+        core_identifier (str): Core video identifier (e.g., VID_20250809_094836_00_056)
+        
+    Returns:
+        dict: Paths to original video and audio files if found
+    """
+    # Get the project root directory from shard path
+    shard_path_obj = Path(shard_path)
+    project_root = None
+    
+    # Walk up the directory tree to find the project root
+    current_dir = shard_path_obj.parent
+    while current_dir.parent != current_dir:  # Not at filesystem root
+        if (current_dir / "ray_jobs").exists() or (current_dir / "config").exists():
+            project_root = current_dir
+            break
+        current_dir = current_dir.parent
+    
+    if not project_root:
+        logger.warning(f"Could not find project root from {shard_path}")
+        return {"original_video_file": None, "original_audio_file": None}
+    
+    logger.info(f"Searching for original files with identifier '{core_identifier}' in {project_root}")
+    
+    # Common video file patterns and extensions
+    video_patterns = [
+        f"{core_identifier}*ERP*.mp4",
+        f"{core_identifier}*.insv",
+        f"*{core_identifier}*ERP*.mp4",
+        f"dual_fisheye.mp4",  # Common original file name
+        f"{core_identifier}*.mp4"
+    ]
+    
+    # Common audio file patterns
+    audio_patterns = [
+        f"{core_identifier}*audio*.WAV",
+        f"{core_identifier}*audio*.wav", 
+        f"{core_identifier}*.WAV",
+        f"{core_identifier}*.wav"
+    ]
+    
+    original_video_file = None
+    original_audio_file = None
+    
+    # Search for video files
+    for pattern in video_patterns:
+        matching_files = list(project_root.rglob(pattern))
+        # Look for files that are not in shard directories (likely original files)
+        for file_path in matching_files:
+            if "shard" not in str(file_path) and "output" not in str(file_path):
+                logger.info(f"Found potential original video file: {file_path}")
+                original_video_file = str(file_path)
+                break
+        if original_video_file:
+            break
+    
+    # Search for audio files  
+    for pattern in audio_patterns:
+        matching_files = list(project_root.rglob(pattern))
+        # Look for files that are not in shard directories
+        for file_path in matching_files:
+            if "shard" not in str(file_path) and "output" not in str(file_path):
+                logger.info(f"Found potential original audio file: {file_path}")
+                original_audio_file = str(file_path)
+                break
+        if original_audio_file:
+            break
+    
+    if not original_video_file:
+        logger.warning(f"No original video file found for identifier: {core_identifier}")
+    if not original_audio_file:
+        logger.warning(f"No original audio file found for identifier: {core_identifier}")
+    
+    return {
+        "original_video_file": original_video_file,
+        "original_audio_file": original_audio_file
+    }
+
+
+def get_original_blob_metadata(shard_path: str) -> dict:
+    """
+    Extract original blob file paths, URLs and durations from pipeline config and shard path.
+    
+    Args:
+        shard_path (str): Path to audio or video shard file
+        
+    Returns:
+        dict: Original blob paths, URLs and durations for both audio and video
+    """
+    try:
+        # Load pipeline config
+        config_path = "/home/nvcoe_admin/pavan/currdev/insta360-video-activity-segmentation/config/pipeline_config.yaml"
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        
+        # Load Azure blob config for URL construction
+        blob_config_path = "/home/nvcoe_admin/pavan/currdev/insta360-video-activity-segmentation/blobfuse2_config.yaml"
+        with open(blob_config_path, 'r') as f:
+            blob_config = yaml.safe_load(f)
+        
+        blob_prefix = config['azure_storage']['input_blob_prefix']
+        account_name = blob_config['azstorage']['account-name']
+        container = blob_config['azstorage']['container']
+        
+        # Extract video identifier from shard path
+        # Example shard path: /path/to/skincare-20250819_1359-audio_part5.wav
+        # Extract: skincare-20250819_1359
+        shard_filename = Path(shard_path).stem
+        
+        # Remove part suffix to get base name
+        if '_part' in shard_filename:
+            base_name = shard_filename.split('_part')[0]
+        else:
+            base_name = shard_filename
+            
+        # Remove -audio or -video suffix to get core identifier
+        if base_name.endswith('-audio'):
+            core_identifier = base_name[:-6]  # Remove '-audio'
+        elif base_name.endswith('-video'):
+            core_identifier = base_name[:-6]  # Remove '-video'  
+        else:
+            core_identifier = base_name
+        
+        # Construct original blob paths
+        original_video_path = f"{blob_prefix}/{core_identifier}-video.insv"
+        original_audio_path = f"{blob_prefix}/{core_identifier}-audio.WAV"
+        
+        # Construct blob URLs (format: https://{account}.blob.core.windows.net/{container}/{path})
+        original_video_url = f"https://{account_name}.blob.core.windows.net/{container}/{original_video_path}"
+        original_audio_url = f"https://{account_name}.blob.core.windows.net/{container}/{original_audio_path}"
+        
+        # Try to find and probe original files locally to get durations
+        original_files = find_original_files(shard_path, core_identifier)
+        
+        original_video_duration = None
+        original_audio_duration = None
+        
+        # Get duration of original video file if found
+        if original_files["original_video_file"] and os.path.exists(original_files["original_video_file"]):
+            logger.info(f"Probing original video file: {original_files['original_video_file']}")
+            original_video_duration = get_file_duration(original_files["original_video_file"])
+        
+        # Get duration of original audio file if found  
+        if original_files["original_audio_file"] and os.path.exists(original_files["original_audio_file"]):
+            logger.info(f"Probing original audio file: {original_files['original_audio_file']}")
+            original_audio_duration = get_file_duration(original_files["original_audio_file"])
+        
+        # If no separate audio file found, try to extract audio duration from video
+        if original_video_duration and not original_audio_duration:
+            logger.info("Using video duration as audio duration (no separate audio file found)")
+            original_audio_duration = original_video_duration
+        
+        result = {
+            "original_video_blob_path": original_video_path,
+            "original_audio_blob_path": original_audio_path,
+            "original_video_blob_url": original_video_url,
+            "original_audio_blob_url": original_audio_url,
+            "original_video_duration": original_video_duration,
+            "original_audio_duration": original_audio_duration
+        }
+        
+        logger.info(f"Extracted blob metadata for {core_identifier}:")
+        logger.info(f"  Video Path: {original_video_path}")
+        logger.info(f"  Video URL: {original_video_url}")
+        logger.info(f"  Video Duration: {original_video_duration}s")
+        logger.info(f"  Audio Path: {original_audio_path}")
+        logger.info(f"  Audio URL: {original_audio_url}")
+        logger.info(f"  Audio Duration: {original_audio_duration}s")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error extracting blob metadata from {shard_path}: {e}")
+        return {
+            "original_video_blob_path": None,
+            "original_audio_blob_path": None,
+            "original_video_blob_url": None,
+            "original_audio_blob_url": None,
+            "original_video_duration": None,
+            "original_audio_duration": None
+        }
+
 class UnifiedClapDetector:
     """
     Unified clap detector that handles both audio and video files.
-    Uses advanced spectral analysis to detect first and last claps only.
+    Uses advanced spectral analysis to detect claps in first 30 seconds only.
     """
     
     def __init__(self, search_window_sec=30.0):
@@ -27,13 +241,13 @@ class UnifiedClapDetector:
     
     def detect_claps_in_file(self, file_path):
         """
-        Main method to detect first and last claps in audio or video files.
+        Main method to detect claps in first 30 seconds of audio or video files.
         
         Args:
             file_path (str): Path to audio or video file
             
         Returns:
-            dict: Results containing first and last clap timestamps
+            dict: Results containing clap timestamp from first 30 seconds
         """
         try:
             file_path = Path(file_path)
@@ -97,13 +311,13 @@ class UnifiedClapDetector:
             temp_audio.close()
             self.temp_files.append(temp_audio_path)
             
-            # Extract audio using ffmpeg
+            # Extract audio using ffmpeg - preserve original characteristics
             cmd = [
                 'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
                 '-i', video_path,
                 '-vn',  # No video
                 '-acodec', 'pcm_s16le',  # 16-bit PCM
-                '-ar', '44100',  # Sample rate
+                '-ar', '44100',  # Resample to 44.1kHz
                 '-ac', '1',  # Mono
                 temp_audio_path
             ]
@@ -135,15 +349,15 @@ class UnifiedClapDetector:
             }
     
     def _process_audio_file(self, audio_path):
-        """Process audio file to detect first and last claps."""
+        """Process audio file to detect claps in first 30 seconds only."""
         try:
-            # Load the audio file
-            y, sr = librosa.load(audio_path, sr=None)
+            # Load only the first search_window_sec seconds of audio
+            y, sr = librosa.load(audio_path, sr=None, duration=self.search_window_sec)
             duration = librosa.get_duration(y=y, sr=sr)
             
-            print(f"Audio duration: {duration:.2f} seconds")
+            print(f"Audio duration (loaded): {duration:.2f} seconds")
             print(f"Sample rate: {sr} Hz")
-            print(f"Searching first {self.search_window_sec}s and last {self.search_window_sec}s")
+            print(f"Searching first {self.search_window_sec}s only")
 
             # Calculate onset strength with higher temporal resolution
             hop_length = 256  # Smaller hop for better temporal resolution
@@ -193,8 +407,11 @@ class UnifiedClapDetector:
             clap_mean = np.mean(clap_score)
             clap_std = np.std(clap_score)
             
-            # Adaptive threshold: mean + 2.5 * std (catches top ~1% of peaks)
-            min_height = clap_mean + 2.5 * clap_std
+            # Adaptive threshold with fallback for difficult cases
+            # Primary: mean + 2.5 * std, but use more lenient fallback if needed
+            primary_threshold = clap_mean + 2.5 * clap_std
+            fallback_threshold = clap_mean + 1.5 * clap_std
+            min_height = primary_threshold
             
             # Minimum distance between peaks (0.3 seconds to avoid double detection)
             min_distance = int(sr * 0.3 / hop_length)
@@ -209,12 +426,29 @@ class UnifiedClapDetector:
                 prominence=clap_std * 0.5  # Peak must be prominent
             )
             
+            # If no peaks found with strict threshold, try fallback
+            if len(peaks) == 0:
+                print(f"No peaks with strict threshold, trying fallback: {fallback_threshold:.3f}")
+                min_height = fallback_threshold
+                peaks, properties = find_peaks(
+                    clap_score,
+                    height=min_height,
+                    distance=min_distance,
+                    prominence=clap_std * 0.3  # More lenient prominence
+                )
+            
             # Convert peak frame indices to time
             times = librosa.times_like(onset_env, sr=sr, hop_length=hop_length)
             peak_times = times[peaks]
             peak_scores = clap_score[peaks]
             
             print(f"Found {len(peak_times)} potential clap candidates")
+            
+            # Debug: Show all candidates with their timestamps and scores
+            if len(peak_times) > 0:
+                print("All clap candidates:")
+                for i, (time, score) in enumerate(zip(peak_times, peak_scores)):
+                    print(f"  {i+1}. Time: {time:.2f}s, Confidence: {score:.3f}")
             
             if len(peak_times) == 0:
                 print("No significant clap-like peaks detected.")
@@ -445,6 +679,9 @@ def detect_claps_in_audio_video_pair(audio_path: str, video_path: str,
                 selected_confidence = video_confidence
                 selected_source = "video"
             
+            # Get original blob metadata
+            blob_metadata = get_original_blob_metadata(audio_path)
+            
             results["combined_analysis"] = {
                 "overall_success": True,
                 "sources_processed": {
@@ -458,11 +695,17 @@ def detect_claps_in_audio_video_pair(audio_path: str, video_path: str,
                 },
                 "audio_clap": {
                     "timestamp": audio_clap,
-                    "confidence": audio_confidence
+                    "confidence": audio_confidence,
+                    "original_audio_blob_path": blob_metadata.get("original_audio_blob_path"),
+                    "original_audio_blob_url": blob_metadata.get("original_audio_blob_url"),
+                    "original_full_audio_length": blob_metadata.get("original_audio_duration")
                 },
                 "video_clap": {
                     "timestamp": video_clap,
-                    "confidence": video_confidence
+                    "confidence": video_confidence,
+                    "original_video_blob_path": blob_metadata.get("original_video_blob_path"),
+                    "original_video_blob_url": blob_metadata.get("original_video_blob_url"),
+                    "original_video_length": blob_metadata.get("original_video_duration")
                 }
             }
         else:
@@ -622,11 +865,11 @@ if __name__ == "__main__":
     
     # Define your audio and video files separately for clarity
     audio_files = [
-        "/home/nvcoe_admin/code/oslo/whole_pipeline_testing/insta360-video-activity-segmentation/blob_mount/azure_directory_path/Geo_files_test/skincare-20250819_1359-audio.WAV"
+       "/home/nvcoe_admin/pavan/currdev/insta360-video-activity-segmentation/outtrymain/video_skincare-20250819_1359-video.insv_20250909_123832/audio_shards/skincare-20250819_1359-audio_part5.wav"
     ]
     
     video_files = [
-        "/home/nvcoe_admin/insta360-video-activity-segmentation/files/skincare-20250819_1359.mp4"
+        "/home/nvcoe_admin/pavan/currdev/insta360-video-activity-segmentation/outtrymain/video_skincare-20250819_1359-video.insv_20250909_123832/back_shards/back_1440x1440_part5.mp4"
     ]
     
     # Combine all files for processing
