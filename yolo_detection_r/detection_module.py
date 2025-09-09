@@ -577,6 +577,7 @@ def people_presence_spans_from_events(
     events: List[Dict[str, Any]],
     person_classes: Optional[List[Any]] = {"person"},
     gap_sec: float = 1.0,
+    min_duration_sec: float = 3.0,
 ) -> Dict[str, Any]:
     """
     Build per-person (track_id) presence spans from detection/tracking events.
@@ -593,12 +594,17 @@ def people_presence_spans_from_events(
                       Can also pass {0} if cls is integer-coded.
       gap_sec: Max allowed gap (seconds) between consecutive frames to keep within
                the same presence span.
+        min_duration_sec: Minimum duration (seconds) for a presence span to be
+                            counted towards the "people_number" summary metric.
 
     Returns:
       {
         "summary": {
            "total_tracks": <num of distinct track_id>,
            "total_spans": <num of spans across all tracks>,
+           "min_duration_sec": <as passed in>,
+           "people_number": <num of distinct track_id that have at least one span
+                             whose duration >= min_duration_sec>
         },
         "tracks": [
            {
@@ -613,7 +619,7 @@ def people_presence_spans_from_events(
       }
     """
     if not events:
-        return {"summary": {"total_tracks": 0, "total_spans": 0}, "tracks": []}
+        return {"summary": {"total_tracks": 0, "total_spans": 0, "people_number": 0}, "tracks": []}
 
     if person_classes is None:
         person_classes = {"person"}
@@ -643,7 +649,7 @@ def people_presence_spans_from_events(
     tracks_out = []
     total_spans = 0
 
-    # 2) build spans per track
+    # 2) build spans per track, then filter by min_duration_sec
     for tid, rows in by_tid.items():
         rows.sort(key=lambda r: r["t"])
         spans = []
@@ -669,13 +675,29 @@ def people_presence_spans_from_events(
         if cur is not None:
             spans.append(cur)
 
+        # Keep all spans in the output for this track
         tracks_out.append({"track_id": tid, "spans": spans})
         total_spans += len(spans)
+
+    # people_number: number of distinct tracks that have at least one span
+    # whose duration >= min_duration_sec
+    people_number = 0
+    for t in tracks_out:
+        has_long = False
+        for s in t.get('spans', []):
+            dur = float(s.get('end', 0.0)) - float(s.get('start', 0.0))
+            if dur >= min_duration_sec:
+                has_long = True
+                break
+        if has_long:
+            people_number += 1
 
     return {
         "summary": {
             "total_tracks": len(tracks_out),
             "total_spans": total_spans,
+            "min_duration_sec": float(min_duration_sec),
+            "people_number": people_number,
         },
         "tracks": tracks_out
     }

@@ -12,7 +12,13 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT_DIR))
 
 # Import the Ray job and helper functions
-from ray_jobs.run_yolodetect_task import run_yolodetect_on_shard, _part_index
+#from ray_jobs.run_yolodetect_task import run_yolodetect_on_shard, _part_index
+from ray_jobs.yolo_detection import run_yolo_detection
+
+def _part_index(filename: str) -> int:
+    """Extract shard index from names like 'xxx_part3.mp4' -> 3; default to 0."""
+    m = re.search(r"_part(\d+)\.mp4$", filename)
+    return int(m.group(1)) if m else 0
 
 def test_part_index_parsing():
     """Unit test for shard index parsing function"""
@@ -258,9 +264,9 @@ def test_run_yolodetect_integration():
     
     try:
         # Call the Ray job (exactly how it will be used in production)
-        result = ray.get(run_yolodetect_on_shard.remote(
+        result = ray.get(run_yolo_detection.remote(
             video_path=test_video,
-            out_dir=output_dir,
+            output_dir=output_dir,
             shard_seconds=60,
             model="yolo11m.pt",  # Using default model
             conf=0.5,
@@ -271,13 +277,21 @@ def test_run_yolodetect_integration():
             gap_sec=10.0,
         ))
         processing_time = time.time() - start_time
-        
+
         if result and isinstance(result, dict):
+            # New: ensure people_count_json key is present in the result
+            if 'people_count_json' in result:
+                if result['people_count_json'] is not None:
+                    if not os.path.exists(result['people_count_json']):
+                        print(f"Warning: people_count_json file not found: {result['people_count_json']}")
+            else:
+                print("Warning: 'people_count_json' not present in run_yolo_detection result")
+
             print(f"SUCCESS in {processing_time:.2f}s")
             print("Results:")
             print(f"   - Result type: {type(result)}")
             print(f"   - Result keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
-            
+
             # Check if output files were created
             if output_dir and os.path.exists(output_dir):
                 output_files = os.listdir(output_dir)
@@ -286,21 +300,21 @@ def test_run_yolodetect_integration():
                     file_path = os.path.join(output_dir, file)
                     file_size = os.path.getsize(file_path)
                     print(f"   - {file} ({file_size} bytes)")
-            
+
             # Show result summary
             if 'detections_count' in result:
                 print(f"Detections: {result['detections_count']}")
-            if 'video_duration' in result:
+            if 'video_duration' in result and result['video_duration'] is not None:
                 print(f"Video duration: {result['video_duration']:.1f}s")
-            if 'fps' in result:
+            if 'fps' in result and result['fps'] is not None:
                 print(f"FPS: {result['fps']:.1f}")
             if 'num_events' in result:
                 print(f"Detection events: {result['num_events']}")
-            
+
             print(f"\nYOLO detection test PASSED!")
             print(f"   Processing time: {processing_time:.1f}s")
             return True
-            
+
         else:
             print(f"FAILED - Invalid result type: {type(result)}")
             return False
@@ -343,9 +357,9 @@ def test_behavioral_yolo_detection_known_video():
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = os.path.join(temp_dir, "yolo_output")
             
-            result = ray.get(run_yolodetect_on_shard.remote(
+            result = ray.get(run_yolo_detection.remote(
                 video_path=test_video,
-                out_dir=output_dir,
+                output_dir=output_dir,
                 shard_seconds=60,
                 model="yolo11m.pt",
                 conf=0.5,
@@ -437,9 +451,9 @@ def test_behavioral_yolo_detection_output_format():
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = os.path.join(temp_dir, "format_test")
             
-            result = ray.get(run_yolodetect_on_shard.remote(
+            result = ray.get(run_yolo_detection.remote(
                 video_path=test_video,
-                out_dir=output_dir,
+                output_dir=output_dir,
                 shard_seconds=30,  # Shorter for faster testing
                 conf=0.5,
                 frame_stride=15,  # Skip frames for speed
@@ -507,9 +521,9 @@ def test_behavioral_yolo_detection_parameter_consistency():
         # GIVEN: Test with two different confidence levels
         with tempfile.TemporaryDirectory() as temp_dir:
             # Low confidence detection
-            result_low = ray.get(run_yolodetect_on_shard.remote(
+            result_low = ray.get(run_yolo_detection.remote(
                 video_path=test_video,
-                out_dir=os.path.join(temp_dir, "low_conf"),
+                output_dir=os.path.join(temp_dir, "low_conf"),
                 shard_seconds=30,
                 conf=0.3,  # Low confidence
                 frame_stride=15,
@@ -518,9 +532,9 @@ def test_behavioral_yolo_detection_parameter_consistency():
             ))
             
             # High confidence detection
-            result_high = ray.get(run_yolodetect_on_shard.remote(
+            result_high = ray.get(run_yolo_detection.remote(
                 video_path=test_video,
-                out_dir=os.path.join(temp_dir, "high_conf"),
+                output_dir=os.path.join(temp_dir, "high_conf"),
                 shard_seconds=30,
                 conf=0.8,  # High confidence
                 frame_stride=15,

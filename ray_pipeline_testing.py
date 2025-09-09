@@ -45,7 +45,7 @@ except ImportError as e:
         return {"success": False, "error": "Scene detection not available"}
 
 from ray_jobs.domain_detection import process_scene_domain_classification, load_groq_config, process_video_level_domain_classification
-from ray_jobs.run_yolodetect_task import run_yolodetect_on_shard
+from ray_jobs.yolo_detection import run_yolo_detection, extract_yolo_people_data, generate_video_people_summary
 from ray_jobs.audio_diarization_pii import process_audio_diarization
 from ray_jobs.audio_sensitive_info import process_audio_sensitive_info
 from ray_jobs.clap_detector import detect_claps_in_media, detect_claps_in_audio_video_pair
@@ -62,9 +62,8 @@ from ray_jobs.labelstudio_tasks import (assign_views_to_labelstudio_positions, g
     update_labelstudio_tasks_with_video_domain_and_activity)
    
 from ray_jobs.video_unwarp_task import erp_unwarp_task
-
-# Test unwarp
 from ray_jobs.video_unwarp_task import insv_unwarp_task
+from ray_jobs.video_lighting_task import lighting_by_second_task
 
 logger = get_logger("SimplifiedUnifiedPipeline")
 # Global shutdown flag for graceful stopping
@@ -1277,15 +1276,24 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
     if process_unwarped_views and is_insv_file:
         logger.info("🎥 INSV file detected - enabling unwarped view processing")
 
+        #test for ERP pipline
+        # mp4_result = ray.get(insv_unwarp_task.remote(input_video_path, out_dir=os.path.join(output_dir, "4views")))
+        # erp_result = mp4_result.get('erp')
+        # print(f"erp_result: {erp_result}")
+        # yolo_ref  = run_yolo_detection.remote(erp_result, "out_4viewsERP")
+
         # Convert .insv to four.mp4 videos directly (single-output converter)
-        
         #viewsoutput_dir=os.path.join(output_dir, "4views"),
         if input_video_path.lower().endswith('.insv'):
             # Try the simpler single-output
             try:
-                mp4_result = ray.get(insv_unwarp_task.remote(input_video_path))#, viewsoutput_dir))
-                flat_result = mp4_result.get('views')
+                mp4_result = ray.get(insv_unwarp_task.remote(input_video_path, out_dir=os.path.join(output_dir, "4views")))
+                flat_result = mp4_result
                 logger.info(f"Using two 180 for unwarp:: {len(flat_result)} views under {flat_result}")
+                # mp4_result = ray.get(insv_unwarp_task.remote(input_video_path, out_dir=os.path.join(output_dir, "4views")))
+                # flat_result = mp4_result.get('erp')
+                # print(f"erp_result: {erp_result}")
+                # yolo_ref  = run_yolo_detection.remote(erp_result, "out_4viewsERP")
             except Exception:
                 flat_result = None
                 raise RuntimeError(f"Failed to convert two 180 INSV file: {mp4_result.get('error', 'Unknown error')}")
@@ -2350,8 +2358,244 @@ def create_multiview_consolidated_predictions(view_results):
             "from_name": "val_sensitive_video",
             "to_name": "video_left"
         })
+    # -----------------------------
+    # 7) PEOPLE COUNT (YOLO-based)
+    # -----------------------------
+    people_detected = False
+    total_unique_people = 0
+    max_simultaneous = 0
+    occupancy_timeline = []
+    
+    # Process YOLO results from any view (typically "erp")
+    for view_name, view_result in view_results.items():
+        if not view_result.get("success", True):
+            continue
+        
+        yolo_result = view_result.get("yolo", {})
+        if not yolo_result or yolo_result.get('__error__'):
+            continue
+        
+        # Extract people count data from JSON files (same logic as extract_yolo_people_data)
+        people_analytics = {}
+        if 'people_count_json' in yolo_result and yolo_result['people_count_json']:
+            try:
+                import json
+                with open(yolo_result['people_count_json'], 'r') as f:
+                    people_count_data = json.load(f)
+                people_analytics = {
+                    'count_summary': people_count_data.get('summary', {}),
+                    'timeline_bins': people_count_data.get('timeline_bins', []),
+                    'bin_size_sec': people_count_data.get('summary', {}).get('bin_size_sec', 1.0)
+                }
+            except Exception as e:
+                logger.warning(f"Failed to load people_count_json for {view_name}: {e}")
+                continue
+        if people_analytics and people_analytics.get('count_summary'):
+            people_detected = True
+            summary = people_analytics['count_summary']
+            total_unique_people = max(total_unique_people, summary.get('unique_people', 0))
+            max_simultaneous = max(max_simultaneous, summary.get('max_of_max', 0))
+            
+            # Extract timeline for visualization (first 60 seconds)
+            timeline_bins = people_analytics.get('timeline_bins', [])
+            for bin_data in timeline_bins[:60]:
+                occupancy_timeline.append({
+                    'start': bin_data.get('start', 0),
+                    'end': bin_data.get('end', 1),
+                    'avg_people': bin_data.get('avg_persons', 0),
+                    'max_people': bin_data.get('max_persons', 0)
+                })
+    
+    # Create people count predictions if people detected
+    if people_detected and total_unique_people > 0:
+        # Add people count summary as metadata prediction
+        predictions.append({
+            "id": _mk_id("people_count_summary"),
+            "type": "people_analytics",
+            "value": {
+                "unique_people": total_unique_people,
+                "max_simultaneous": max_simultaneous,
+                "processing_view": "erp",
+                "occupancy_timeline": occupancy_timeline[:20],  # Limit for Label Studio
+                "detection_approach": "erp_single_view_360"
+            },
+            "model_version": "yolo_people_counter_v1",
+            "from_name": "people_counter",
+            "to_name": "video_left"
+        })
+        
+        # Add occupancy timeline as separate prediction for visualization
+        if occupancy_timeline:
+            predictions.append({
+                "id": _mk_id("occupancy_timeline"),
+                "type": "occupancy_data",
+                "value": {
+                    "timeline": occupancy_timeline[:30],  # First 30 seconds for UI
+                    "bin_size_sec": 1.0,
+                    "total_bins": len(occupancy_timeline)
+                },
+                "model_version": "yolo_occupancy_tracker_v1", 
+                "from_name": "occupancy_timeline",
+                "to_name": "video_left"
+            })
+    
+    # -----------------------------
+    # 8) ABSENT PEOPLE DETECTION
+    # -----------------------------
+    absent_segments = []
+    video_duration = 60.0  # Default fallback duration
+    
+    # Extract video duration and analyze YOLO detections across all views
+    all_person_timestamps = set()
+    
+    motion_result = view_results['front'].get("motion", {})
+    if motion_result and motion_result.get("video_duration_seconds"):
+        video_duration = motion_result["video_duration_seconds"]
+    logger.info(f"Video duration:{video_duration}")
+    for view_name, view_result in view_results.items():
+        if not view_result.get("success", True):
+            continue
+        
+        # Try to get video duration from motion detection or other sources
+        
+            
+        yolo_result = view_result.get("yolo", {})
+        if not yolo_result:
+            continue
+            
+        # Parse YOLO events file to get person detection timestamps
+        events_file = yolo_result.get("events_jsonl")
+        if events_file:
+            try:
+                import json
+                with open(events_file, 'r') as f:
+                    for line_num, line in enumerate(f, 1):
+                        line = line.strip()
+                        if not line or line.startswith('{"_meta"'):
+                            continue
+                        
+                        try:
+                            event = json.loads(line)
+                            if event.get("cls") == "person":
+                                timestamp = event.get("t", 0)
+                                all_person_timestamps.add(timestamp)
+                        except json.JSONDecodeError:
+                            continue
+                            
+            except Exception as e:
+                logger.warning(f"Failed to parse YOLO events for {view_name}: {e}")
+                continue
+    
+    # Find gaps in person detection (absent segments)
+    if all_person_timestamps:
+        sorted_timestamps = sorted(all_person_timestamps)
+        
+        # Check for gaps in person detection (segments where no people detected)
+        gap_threshold = 10.0  # Consider 10+ second gaps as "absent" periods
+        
+        # Check beginning of video
+        if sorted_timestamps[0] > gap_threshold:
+            absent_segments.append((0.0, sorted_timestamps[0]))
+            
+        # Check gaps between detections
+        for i in range(len(sorted_timestamps) - 1):
+            gap_start = sorted_timestamps[i]
+            gap_end = sorted_timestamps[i + 1]
+            gap_duration = gap_end - gap_start
+            
+            if gap_duration > gap_threshold:
+                absent_segments.append((gap_start, gap_end))
+        
+        # Check end of video
+        if video_duration - sorted_timestamps[-1] > gap_threshold:
+            absent_segments.append((sorted_timestamps[-1], video_duration))
+    else:
+        # No people detected in entire video
+        absent_segments.append((0.0, video_duration))
+    
+    # Create absent people predictions if absent segments found
+    if absent_segments:
+        # Sort segments and use the first/longest significant segment
+        significant_segments = [(s, e) for s, e in absent_segments if e - s >= 1.0]  # At least 1 second
+        
+        if significant_segments:
+            significant_segments.sort(key=lambda x: x[1] - x[0], reverse=True)  # Sort by duration
+            start_time, end_time = significant_segments[0]  # Use longest segment
+            
+            start_min = int(start_time // 60)
+            start_sec = int(start_time % 60)
+            end_min = int(end_time // 60) 
+            end_sec = int(end_time % 60)
+            
+            # Add absent people detection - YES choice
+            predictions.append({
+                "id": _mk_id("absent_yes"),
+                "type": "choices",
+                "value": {
+                    "choices": ["Yes"]
+                },
+                "model_version": "auto_preannotator_v1",
+                "from_name": "val_absent",
+                "to_name": "video_left"
+            })
+            
+            # Add start time fields
+            predictions.extend([
+                {
+                    "id": _mk_id("absent_start_min"),
+                    "type": "taxonomy",
+                    "value": {
+                        "taxonomy": [[str(start_min).zfill(2)]]
+                    },
+                    "model_version": "auto_preannotator_v1",
+                    "from_name": "absent_start_minute",
+                    "to_name": "video_left"
+                },
+                {
+                    "id": _mk_id("absent_start_sec"),
+                    "type": "taxonomy",
+                    "value": {
+                        "taxonomy": [[str(start_sec).zfill(2)]]
+                    },
+                    "model_version": "auto_preannotator_v1",
+                    "from_name": "absent_start_second",
+                    "to_name": "video_left"
+                },
+                {
+                    "id": _mk_id("absent_end_min"),
+                    "type": "taxonomy",
+                    "value": {
+                        "taxonomy": [[str(end_min).zfill(2)]]
+                    },
+                    "model_version": "auto_preannotator_v1",
+                    "from_name": "absent_end_minute",
+                    "to_name": "video_left"
+                },
+                {
+                    "id": _mk_id("absent_end_sec"),
+                    "type": "taxonomy",
+                    "value": {
+                        "taxonomy": [[str(end_sec).zfill(2)]]
+                    },
+                    "model_version": "auto_preannotator_v1",
+                    "from_name": "absent_end_second",
+                    "to_name": "video_left"
+                }
+            ])
+    else:
+        # No absent segments found - people detected throughout
+        predictions.append({
+            "id": _mk_id("absent_no"),
+            "type": "choices",
+            "value": {
+                "choices": ["No"]
+            },
+            "model_version": "auto_preannotator_v1",
+            "from_name": "val_absent",
+            "to_name": "video_left"
+        })
 
-    # Done — PII/NSFW/Minors/Lighting/Sensitive predictions are returned.
+    # Done — PII/NSFW/Minors/Lighting/Sensitive/people counter/absent people predictions are returned.
     return predictions
 
 def generate_multiview_consolidated_model_results_json(shard_output_dir, shard_number, view_results, total_shards=None, video_name=None):
@@ -2410,12 +2654,13 @@ def generate_multiview_consolidated_model_results_json(shard_output_dir, shard_n
         consolidated_data["view_results"][view_name] = {
             "success": view_result.get('success', True),
             "audio": view_result.get('audio', {}),
-            "yolo": view_result.get('yolo', {}),
+            "yolo": extract_yolo_people_data(view_result.get('yolo', {})),
             "scene": view_result.get('scene', {}),
             "nsfw": view_result.get('nsfw', {}),
             "motion": view_result.get('motion', {}),
             "face": view_result.get('face', {}),
             "clap": view_result.get('clap', {}),
+            "sensitive": view_result.get('sensitive', {}),
             "signal_quality": view_result.get('signal_quality', {}),
             "flagged_segments": view_result.get('flagged_segments', [])
         }
@@ -2446,7 +2691,22 @@ def generate_multiview_consolidated_model_results_json(shard_output_dir, shard_n
             except Exception as e:
                 logger.warning(f"Failed to process lighting results for {view_name}: {e}")
                 consolidated_data["view_results"][view_name]["lighting"] = {"error": str(e)}
-
+    
+    # Generate video-level people summary from consolidated data (after extract_yolo_people_data enhancement)
+    video_people_summary = generate_video_people_summary(consolidated_data)
+    consolidated_data["people_summary"] = video_people_summary
+    
+    # Add sensitive analysis results from audio processing (shared across views)
+    sensitive_results = None
+    for view_name, view_result in view_results.items():
+        if view_result.get('success', True):
+            view_sensitive = view_result.get('sensitive')
+            if view_sensitive:
+                sensitive_results = view_sensitive
+                break  # Use first available sensitive results (audio is shared across views)
+    
+    if sensitive_results:
+        consolidated_data["sensitive"] = sensitive_results
     # Save consolidated JSON
     consolidated_json_path = os.path.join(shard_output_dir, f"shard_{shard_number}_consolidated_model_results.json")
     with open(consolidated_json_path, 'w') as f:
@@ -2483,7 +2743,7 @@ def process_video_level_domain_and_update_tasks(video_output_dir: str, video_nam
             return {"success": False, "error": f"Domain classification failed: {domain_result.get('error')}"}
         
         video_domain = domain_result.get("predicted_domain", "Unknown")
-        video_activity = domain_result.get("predicted_activity", "General Activity")
+        video_activity = domain_result.get("predicted_activity", "Unknown")
         logger.info(f" Video-level domain classification successful: '{video_domain}'")
         logger.info(f" Video-level activity detection successful: '{video_activity}'")
         
@@ -2582,7 +2842,7 @@ def process_time_aligned_shard_multiview(
         try:
             # Process each view through the full pipeline
             view_result = process_single_shard_through_pipeline(
-                view_shard_path, audio_shard_path, view_output_dir, shard_offset_sec, shard_index, total_shard_count
+                view_shard_path, audio_shard_path, view_output_dir, shard_offset_sec, shard_index, total_shard_count, view_name
             )
             view_results[view_name] = view_result
             logger.info(f"✅ Successfully processed {view_name} for shard {shard_index+1}")
@@ -2841,7 +3101,7 @@ def process_time_aligned_shard(
     logger.info(f"Processing view 1 of shard {shard_index+1}")
     view1_output_dir = os.path.join(shard_output_dir, "view_1")
     view1_results = process_single_shard_through_pipeline(
-        view1_shard_path, audio_shard_path, view1_output_dir, shard_offset_sec, shard_index, total_shard_count
+        view1_shard_path, audio_shard_path, view1_output_dir, shard_offset_sec, shard_index, total_shard_count, "view_1"
     )
 
     # --- View 2 (optional) ---
@@ -2849,7 +3109,7 @@ def process_time_aligned_shard(
         logger.info(f"Processing view 2 of shard {shard_index+1}")
         view2_output_dir = os.path.join(shard_output_dir, "view_2")
         view2_results = process_single_shard_through_pipeline(
-            view2_shard_path, audio_shard_path, view2_output_dir, shard_offset_sec, shard_index, total_shard_count
+            view2_shard_path, audio_shard_path, view2_output_dir, shard_offset_sec, shard_index, total_shard_count, "view_2"
         )
     else:
         logger.info(f"No view 2 for shard {shard_index+1} — running single-view consolidation")
@@ -3007,23 +3267,31 @@ def process_time_aligned_shard(
     }
 
 def process_single_shard_through_pipeline(video_shard_path, audio_shard_path, 
-                                         output_dir, shard_offset_sec, shard_index=0, total_shard_count=None):
+                                         output_dir, shard_offset_sec, shard_index=0, total_shard_count=None, view_name="view"):
     """
     Run single shard through all 7 AI models
     """
     os.makedirs(output_dir, exist_ok=True)
     results = {}
 
+    if view_name == "erp":
+        #Yolo people counter only for ERP view
+        logger.info(f"ERP view: only run yolo people counter")
+        yolo_output_dir = os.path.join(output_dir, "yolo_output")
+        yolo_ref  = run_yolo_detection.remote(video_shard_path, yolo_output_dir)
+        yolo_res = ray.get(yolo_ref)  
+        results = {'yolo': yolo_res}
+        logger.info(f"Yolo people counter results saved to yolo_output_dir: {yolo_output_dir}")
+        return results
+
     # Define output directories for models that need them
     audio_output_dir = os.path.join(output_dir, "audio_output")
-    yolo_output_dir = os.path.join(output_dir, "yolo_output")
     scene_output_dir = os.path.join(output_dir, "scene_output")
     clap_output_dir = os.path.join(output_dir, "clap_output")
     nsfw_output_dir = os.path.join(output_dir, "nsfw_output")
     motion_output_dir = os.path.join(output_dir, "motion_output")
     face_output_dir = os.path.join(output_dir, "face_output")
     signal_quality_output_dir = os.path.join(output_dir, "signal_quality_output")
-
     lighting_output_dir = os.path.join(output_dir, "lighting_output")
 
     # Create output directories
@@ -3044,7 +3312,6 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     is_last_shard = (total_shard_count and shard_index == total_shard_count - 1)
     
     audio_ref = process_audio_diarization.remote([audio_shard_path], audio_output_dir)
-    yolo_ref  = run_yolodetect_on_shard.remote(video_shard_path, yolo_output_dir)
     scene_ref = detect_scenes.remote(video_shard_path, prompt_path, scene_output_dir)
     nsfw_ref  = process_video_chunks_for_nsfw.remote([video_shard_path], confidence_threshold=0.5, chunk_duration_sec=60)
     motion_ref= compute_motion_energy.remote([video_shard_path], sensitivity_level="medium", save_detailed_data=False)
@@ -3068,8 +3335,8 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
 
     # Get results, handling conditional clap detection
     if clap_ref is not None:
-        (audio_res, yolo_res, nsfw_res, motion_res, face_res, clap_res, lighting_res, signal_quality_res) = ray.get(
-            [audio_ref, yolo_ref, nsfw_ref, motion_ref, face_ref, clap_ref, lighting_ref, signal_quality_ref]
+        (audio_res, nsfw_res, motion_res, face_res, clap_res, lighting_res, signal_quality_res) = ray.get(
+            [audio_ref, nsfw_ref, motion_ref, face_ref, clap_ref, lighting_ref, signal_quality_ref]
         )
     else:
         # Set empty clap result for middle shards
@@ -3086,7 +3353,7 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     # Store results from Ray tasks
     results = {
         'audio': audio_res,
-        'yolo': yolo_res,
+        #'yolo': yolo_res,
         'scene': scene_res,
         'nsfw': nsfw_res,
         'motion': motion_res,
