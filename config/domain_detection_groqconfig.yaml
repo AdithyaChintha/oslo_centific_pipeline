@@ -1,0 +1,60 @@
+# Groq API Configuration for Domain Detection
+# Note: API key is now loaded from .env file for security
+groq:
+  model: "openai/gpt-oss-20b"
+  temperature: 0.3
+  max_tokens: 50
+  top_p: 1
+  stream: false
+
+# Domain Classification Configuration
+domain_activity_detection:
+  # Predefined domains for classification
+  domains:
+    - "Food & Mealtime"
+    - "Personal Care & Hygiene"
+    - "Household Movement"
+    - "Cleaning & Maintenance"
+    - "Work & Study"
+    - "Leisure & Entertainment"
+    - "Exercise & Wellness"
+    - "Social & Family Life"
+    - "Pet Care"
+    - "Home & Garden Projects"
+    - "Shopping & Logistics"
+    - "Safety & Security"
+  
+  # Default fallback values
+  default_domain: "Unknown"
+  default_activity: "Unknown"
+  
+  # Video-level prompt template for both domain and activity classification
+  video_level_prompt_template: |
+    You are a video analysis expert. Analyze the scene descriptions from an entire video to classify both the PRIMARY DOMAIN and describe the MAIN ACTIVITY.
+
+    Available Domains (choose exactly ONE):
+    {domains_list}
+
+    Video Name: {video_name}
+
+    All Scene Descriptions (chronologically ordered):
+    {consolidated_description}
+
+    Based on the overall patterns across the entire video, provide:
+
+    1. PRIMARY DOMAIN: Choose exactly one domain from the list above that best represents the main category of activity
+    2. MAIN ACTIVITY: Describe the primary activity happening in the video (2-4 words, be specific and descriptive)
+
+    Respond in this EXACT format:
+    DOMAIN: [exact domain name from list]
+    ACTIVITY: [brief activity description]
+
+    Example responses:
+    DOMAIN: Food & Mealtime
+    ACTIVITY: Cooking pasta dinner
+
+    DOMAIN: Work & Study  
+    ACTIVITY: Programming on laptop
+
+    DOMAIN: Cleaning & Maintenance
+    ACTIVITY: Vacuuming living room

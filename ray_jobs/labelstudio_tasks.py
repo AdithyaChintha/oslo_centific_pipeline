@@ -792,6 +792,8 @@ def generate_multiview_4view_labelstudio_task(shard_output_dir, assigned_views,
     pii_prediction = extract_pii_prediction_from_consolidated(consolidated_results)
     nsfw_prediction = extract_nsfw_prediction_from_consolidated(consolidated_results)
     minor_prediction = extract_minor_prediction_from_consolidated(consolidated_results)
+    people_count_prediction = extract_people_count_prediction_from_consolidated(consolidated_results)
+    absent_participant_prediction = extract_absent_participant_prediction_from_consolidated(consolidated_results)
     # Extract URLs from assigned views, using fallbacks if positions are empty
     video_top = assigned_views.get('top', {}).get('url', '') if assigned_views.get('top') else ''
     video_left = assigned_views.get('left', {}).get('url', '') if assigned_views.get('left') else ''
@@ -822,6 +824,8 @@ def generate_multiview_4view_labelstudio_task(shard_output_dir, assigned_views,
             "AI_PII_prediction": pii_prediction,
             "AI_NSFW_prediction": nsfw_prediction,
             "AI_minor_prediction": minor_prediction,
+            "AI_prediction_participants_number": people_count_prediction,
+            "AI_prediction_absent_participant": str(absent_participant_prediction),
             # Multi-view specific metadata
             "shard_number": str(shard_number),
             "shard_id": shard_number,
@@ -1160,7 +1164,7 @@ def extract_pii_prediction_from_consolidated(consolidated_results):
         str: PII detection status
     """
     # Check predictions for PII detection
-    predictions = consolidated_results.get('predictions', [])
+    predictions = consolidated_results.get('consolidated_predictions_for_ls', [])
     for prediction in predictions:
         if (prediction.get('from_name') == 'val_pii_audio' and 
             prediction.get('type') == 'choices' and 
@@ -1177,7 +1181,7 @@ def extract_nsfw_prediction_from_consolidated(consolidated_results):
         str: NSFW detection status
     """
     # Check predictions for NSFW detection
-    predictions = consolidated_results.get('predictions', [])
+    predictions = consolidated_results.get('consolidated_predictions_for_ls', [])
     for prediction in predictions:
         if (prediction.get('from_name') == 'val_nudity_video' and 
             prediction.get('type') == 'choices' and 
@@ -1194,7 +1198,7 @@ def extract_minor_prediction_from_consolidated(consolidated_results):
         str: Minor detection status
     """
     # Check predictions for minor detection
-    predictions = consolidated_results.get('predictions', [])
+    predictions = consolidated_results.get('consolidated_predictions_for_ls', [])
     for prediction in predictions:
         if (prediction.get('from_name') == 'val_minors_video' and 
             prediction.get('type') == 'choices' and 
@@ -1202,3 +1206,60 @@ def extract_minor_prediction_from_consolidated(consolidated_results):
             return "Minors detected"
     
     return "No minors detected"
+
+def extract_absent_participant_prediction_from_consolidated(consolidated_results):
+    predictions = consolidated_results.get('consolidated_predictions_for_ls', [])
+    for prediction in predictions:
+        if (prediction.get('from_name') == 'val_absent' and 
+            prediction.get('type') == 'choices' and 
+            'Yes' in prediction.get('value', {}).get('choices', [])):
+            return True
+    
+    return False
+
+def extract_people_count_prediction_from_consolidated(consolidated_results):
+    """
+    Extract people count prediction from consolidated results for AI_prediction_participants_number field.
+    Updated to match the data structure from create_multiview_consolidated_predictions().
+    
+    Args:
+        consolidated_results: Consolidated results from pipeline processing
+        
+    Returns:
+        str: Number of unique people detected or "0" if none detected
+    """
+    if not consolidated_results or not isinstance(consolidated_results, dict):
+        return "0"
+    
+    # Check for people data in consolidated predictions (new structure)
+    predictions = consolidated_results.get('consolidated_predictions_for_ls', [])
+    
+    # Look for people_analytics prediction
+    for prediction in predictions:
+        if (prediction.get('type') == 'people_analytics' and 
+            prediction.get('from_name') == 'people_counter'):
+            unique_people = prediction.get('value', {}).get('unique_people', 0)
+            if unique_people > 0:
+                return str(unique_people)
+    
+    # Fallback: Check video-level people summary (legacy format)
+    people_summary = consolidated_results.get('people_summary', {})
+    if people_summary and people_summary.get('total_unique_people', 0) > 0:
+        return str(people_summary['total_unique_people'])
+    
+    # Fallback: Check view-level YOLO results directly
+    view_results = consolidated_results.get('view_results', {})
+    max_unique_people = 0
+    
+    for view_name, view_result in view_results.items():
+        if not view_result.get('success', True):
+            continue
+            
+        yolo_data = view_result.get('yolo', {})
+        people_analytics = yolo_data.get('people_analytics', {})
+        
+        if people_analytics and people_analytics.get('count_summary'):
+            unique_people = people_analytics['count_summary'].get('unique_people', 0)
+            max_unique_people = max(max_unique_people, unique_people)
+    
+    return str(max_unique_people) if max_unique_people > 0 else "0"
