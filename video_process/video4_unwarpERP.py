@@ -133,7 +133,7 @@ def insv_to_4viewsERP(
             "-map", "[erp]",
             "-map", "0:a?",
             "-c:v", encoder,
-            "-c:a", "aac",
+            "-c:a", "copy",
             "-crf" if encoder == "libx264" else "-cq", str(crf_or_cq),
             "-preset", preset,
             "-pix_fmt", "yuv420p",
@@ -153,7 +153,7 @@ def insv_to_4viewsERP(
             "-i", str(in_path),
             "-vf", vf,
             "-c:v", encoder,
-            "-c:a", "aac",
+            "-c:a", "copy",
             ("-crf" if encoder == "libx264" else "-cq"), str(crf_or_cq),
             "-preset", preset,
             "-pix_fmt", "yuv420p",
@@ -192,10 +192,10 @@ def insv_to_4viewsERP(
         "-i", str(erp_path),
         "-filter_complex", vf4,
         # map 4 labeled outputs
-        "-map", "[front]", "-map", "0:a?", "-c:v", encoder, ("-cq" if encoder == "h264_nvenc" else "-crf"), str(crf_or_cq), "-preset", preset, "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", str(out_front),
-        "-map", "[right]", "-map", "0:a?", "-c:v", encoder, ("-cq" if encoder == "h264_nvenc" else "-crf"), str(crf_or_cq), "-preset", preset, "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", str(out_right),
-        "-map", "[back]",  "-map", "0:a?", "-c:v", encoder, ("-cq" if encoder == "h264_nvenc" else "-crf"), str(crf_or_cq), "-preset", preset, "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", str(out_back),
-        "-map", "[left]",  "-map", "0:a?", "-c:v", encoder, ("-cq" if encoder == "h264_nvenc" else "-crf"), str(crf_or_cq), "-preset", preset, "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", str(out_left),
+        "-map", "[front]", "-map", "0:a?", "-c:v", encoder, ("-cq" if encoder == "h264_nvenc" else "-crf"), str(crf_or_cq), "-preset", preset, "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out_front),
+        "-map", "[right]", "-map", "0:a?", "-c:v", encoder, ("-cq" if encoder == "h264_nvenc" else "-crf"), str(crf_or_cq), "-preset", preset, "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out_right),
+        "-map", "[back]",  "-map", "0:a?", "-c:v", encoder, ("-cq" if encoder == "h264_nvenc" else "-crf"), str(crf_or_cq), "-preset", preset, "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out_back),
+        "-map", "[left]",  "-map", "0:a?", "-c:v", encoder, ("-cq" if encoder == "h264_nvenc" else "-crf"), str(crf_or_cq), "-preset", preset, "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out_left),
     ]
 
     _run(cmd_4, fallback_x264=True)
