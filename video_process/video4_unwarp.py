@@ -111,6 +111,8 @@ def make_true_erp_from_insv(insv: Path) -> Path:
             vf,
             "-map",
             "[v]",
+            "-map",
+            "0:a",  # Map audio streams
             "-c:v",
             "libx264",
             "-pix_fmt",
@@ -119,6 +121,8 @@ def make_true_erp_from_insv(insv: Path) -> Path:
             "18",
             "-preset",
             "veryfast",
+            "-c:a",
+            "copy",  # Copy audio
             "-movflags",
             "+faststart",
             str(out),
@@ -147,6 +151,8 @@ def make_true_erp_from_insv(insv: Path) -> Path:
             "18",
             "-preset",
             "veryfast",
+            "-c:a",
+            "copy",  # Copy audio
             "-movflags",
             "+faststart",
             str(out),
@@ -403,8 +409,9 @@ def video4views_unwarpF(
             "[0:v:0]scale=-1:ih,fps=30[va];"
             "[0:v:1]scale=-1:ih,fps=30[vb];"
             "[va][vb]hstack=inputs=2[sbs]",
-            "-map", "[sbs]",
-            "-c:v", "h264_nvenc", "-crf", "18", "-preset", "veryfast", "-an",
+            "-map", "[sbs]", "-map", "0:a",  # Map video and audio
+            "-c:v", "h264_nvenc", "-crf", "18", "-preset", "veryfast", 
+            "-c:a", "copy",  # Copy audio instead of removing it
             str(dual_path)
         ]
 
@@ -414,7 +421,7 @@ def video4views_unwarpF(
             # NVENC failed (commonly driver/API mismatch). Retry with libx264 as fallback.
             try:
                 fallback_cmd = cmd_sbs.copy()
-                # replace codec and keep other flags
+                # replace codec and keep other flags including audio
                 for i, v in enumerate(fallback_cmd):
                     if v == 'h264_nvenc':
                         fallback_cmd[i] = 'libx264'
@@ -448,10 +455,10 @@ def video4views_unwarpF(
             "ffmpeg", "-y", "-hide_banner",
             "-i", str(dual_path),
             "-filter_complex", filter_complex,
-            "-map", "[front]", str(front),
-            "-map", "[left]",  str(left),
-            "-map", "[right]", str(right),
-            "-map", "[back]",  str(back),
+            "-map", "[front]", "-map", "0:a", "-c:a", "copy", str(front),
+            "-map", "[left]", "-map", "0:a", "-c:a", "copy", str(left),
+            "-map", "[right]", "-map", "0:a", "-c:a", "copy", str(right),
+            "-map", "[back]", "-map", "0:a", "-c:a", "copy", str(back),
         ]
         subprocess.run(cmd_views, check=True)
 

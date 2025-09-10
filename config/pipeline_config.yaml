@@ -4,9 +4,9 @@
 # Azure Blob Storage Configuration
 azure_storage:
   # Input directory configuration
-  input_blob_prefix: "test/input_videos"  # Default blob prefix to search for videos  
-  # Output directory configuration  
-  output_blob_prefix: "output_test/video_domain_testing"  # Base prefix for uploading processed results
+  input_blob_prefix: "azure_directory_path/Oslo/test2"  # Default blob prefix to search for videos
+  # Output directory configuration
+  output_blob_prefix: "output_test/video_domsting"  # Base prefix for uploading processed results
   
   # Container settings (these can override blobfuse2_config.yaml if needed)
   # container_name: "instavideo"  # Uncomment to override

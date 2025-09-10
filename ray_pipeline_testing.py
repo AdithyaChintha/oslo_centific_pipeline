@@ -22,7 +22,8 @@ from utils.blob_utils import (
     detect_stuck_videos, reset_stuck_videos,
     poll_azure_videos_with_checklist, poll_azure_videos, find_corresponding_audio,
     download_video_audio_pair, download_video_audio_pair_simple, cleanup_downloaded_files,
-    generate_azure_shard_urls, upload_output_directory_to_blob, load_pipeline_config,
+    upload_output_directory_to_blob, upload_output_directory_with_sas, 
+    update_labelstudio_tasks_with_new_urls, validate_shard_urls, load_pipeline_config,
     save_video_list_progress
 )
 from azure.storage.blob import generate_blob_sas, BlobSasPermissions, BlobServiceClient
@@ -48,7 +49,7 @@ from ray_jobs.domain_detection import process_scene_domain_classification, load_
 from ray_jobs.yolo_detection import run_yolo_detection, extract_yolo_people_data, generate_video_people_summary
 from ray_jobs.audio_diarization_pii import process_audio_diarization
 from ray_jobs.audio_sensitive_info import process_audio_sensitive_info
-from ray_jobs.clap_detector import detect_claps_in_media
+from ray_jobs.clap_detector import detect_claps_in_media, detect_claps_in_audio_video_pair
 from ray_jobs.signal_quality_check_blur_black_screen import detect_blur_and_black_segments
 from ray_jobs.video_lighting_task import lighting_by_second_task
 
@@ -565,6 +566,7 @@ def integrated_blob_polling_and_pipeline_task(
                         
                         # Get output prefix from config
                         output_prefix = pipeline_config['azure_storage']['output_blob_prefix']
+                        timestamped_video_name = os.path.basename(video_output_dir)
                         
                         pipeline_results = pipeline_main(
                             input_video_path=video_path,
@@ -574,7 +576,7 @@ def integrated_blob_polling_and_pipeline_task(
                             process_unwarped_views=True,
                             azure_blob_client=blob_service_client,
                             azure_container=container_name,
-                            azure_output_prefix=f"{output_prefix}/{video_name}",
+                            azure_output_prefix=f"{output_prefix}/{timestamped_video_name}",
                             azure_account_name=account_name,
                             azure_account_key=account_key,
                             pipeline_config=pipeline_config
@@ -1316,14 +1318,16 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
         ))
 
         # Optionally upload audio shards for LS streaming
-        if azure_blob_client and azure_container and azure_output_prefix and azure_account_name and azure_account_key:
-            audio_urls = generate_azure_shard_urls(
-                azure_blob_client, azure_container, audio_shards,
-                f"{azure_output_prefix}/audio_shards",
-                azure_account_name, azure_account_key
-            )
-        else:
-            audio_urls = {}
+        # if azure_blob_client and azure_container and azure_output_prefix and azure_account_name and azure_account_key:
+        #     audio_urls = generate_azure_shard_urls(
+        #         azure_blob_client, azure_container, audio_shards,
+        #         f"{azure_output_prefix}/audio_shards",
+        #         azure_account_name, azure_account_key
+        #     )
+        # else:
+        #     audio_urls = {}
+        audio_urls = {}
+
 
         # Split each unwarped view into shards and stage per-view shard lists
         view_shards = {}
@@ -1338,14 +1342,15 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
             view_shards[view_name] = shards
 
             # Upload shards if Azure is configured
-            if azure_blob_client and azure_container and azure_output_prefix and azure_account_name and azure_account_key:
-                view_shard_urls[view_name] = generate_azure_shard_urls(
-                    azure_blob_client, azure_container, shards,
-                    f"{azure_output_prefix}/unwarped_shards/{view_name}",
-                    azure_account_name, azure_account_key
-                )
-            else:
-                view_shard_urls[view_name] = {}
+            # if azure_blob_client and azure_container and azure_output_prefix and azure_account_name and azure_account_key:
+            #     view_shard_urls[view_name] = generate_azure_shard_urls(
+            #         azure_blob_client, azure_container, shards,
+            #         f"{azure_output_prefix}/unwarped_shards/{view_name}",
+            #         azure_account_name, azure_account_key
+            #     )
+            # else:
+            #     view_shard_urls[view_name] = {}
+            view_shard_urls[view_name] = {}
 
         # Find the minimum shard count across all views to avoid index errors
         min_shards = min(len(shards) for shards in view_shards.values()) if view_shards else 0
@@ -1410,16 +1415,48 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
         else:
             logger.error(f"❌ Video-level domain processing failed: {domain_result.get('error', 'Unknown error')}")
         
-        import_consolidated_tasks_to_labelstudio(label_studio_tasks,pipeline_config)
         if azure_blob_client and azure_container:
             video_name_for_upload = os.path.basename(output_dir)
-            upload_result = upload_output_directory_to_blob(
+            upload_result = upload_output_directory_with_sas(
                 output_dir, azure_blob_client, azure_container,
-                azure_output_prefix, video_name_for_upload
+                azure_output_prefix, video_name_for_upload,
+                azure_account_name, azure_account_key
             )
-            logger.info(f"📤 Multi-view upload result: {'✅ Success' if upload_result['success'] else '❌ Failed'}")
-            if not upload_result['success']:
+            logger.info(f" Multi-view upload result: {' Success' if upload_result['success'] else '❌ Failed'}")
+            
+            if upload_result['success']:
+                # Extract URLs from upload result
+                shard_urls = upload_result['shard_urls']
+                audio_urls = shard_urls['audio_urls']
+                view_shard_urls = shard_urls['view_urls']
+                
+                logger.info(f" Generated {len(audio_urls)} audio URLs and {sum(len(urls) for urls in view_shard_urls.values())} view URLs with SAS tokens")
+                
+                # CRITICAL: Update Label Studio tasks with real URLs
+                logger.info(" Updating Label Studio tasks with uploaded URLs...")
+                updated_count = update_labelstudio_tasks_with_new_urls(label_studio_tasks, shard_urls, "multi_view")
+                if updated_count != len(label_studio_tasks):
+                    logger.warning(f" Only {updated_count}/{len(label_studio_tasks)} Label Studio tasks were updated with URLs")
+                
+            else:
                 logger.error(f"Upload error: {upload_result.get('error', 'Unknown error')}")
+                audio_urls = {}
+                view_shard_urls = {}
+        else:
+            logger.warning("⚠️ Azure configuration missing - Label Studio tasks will have placeholder URLs")
+            audio_urls = {}
+            view_shard_urls = {}
+
+        import_consolidated_tasks_to_labelstudio(label_studio_tasks,pipeline_config)
+        # if azure_blob_client and azure_container:
+        #     video_name_for_upload = os.path.basename(output_dir)
+        #     upload_result = upload_output_directory_to_blob(
+        #         output_dir, azure_blob_client, azure_container,
+        #         azure_output_prefix, video_name_for_upload
+        #     )
+        #     logger.info(f"📤 Multi-view upload result: {'✅ Success' if upload_result['success'] else '❌ Failed'}")
+        #     if not upload_result['success']:
+        #         logger.error(f"Upload error: {upload_result.get('error', 'Unknown error')}")
         return create_consolidated_summary(label_studio_tasks, output_dir)
         
     elif process_dual_views and is_insv_file:
@@ -1438,25 +1475,27 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
         audio_shards = ray.get(split_audio_into_shards.remote(input_audio_path, output_dir=os.path.join(output_dir, "audio_shards"), duration_sec=60))
         
         # Upload shards to Azure for both views
-        if azure_blob_client and azure_container and azure_output_prefix and azure_account_name and azure_account_key:
-            view1_shard_urls = generate_azure_shard_urls(
-                azure_blob_client, azure_container, view1_shards,
-                f"{azure_output_prefix}/view_1_shards",
-                azure_account_name, azure_account_key
-            )
-            view2_shard_urls = generate_azure_shard_urls(
-                azure_blob_client, azure_container, view2_shards,
-                f"{azure_output_prefix}/view_2_shards",
-                azure_account_name, azure_account_key
-            )
-            audio_shard_urls = generate_azure_shard_urls(
-                azure_blob_client, azure_container, audio_shards,
-                f"{azure_output_prefix}/audio_shards",
-                azure_account_name, azure_account_key
-            )
-        else:
-            logger.warning("Azure client/prefix or account key missing — LS URLs will be local and likely won't stream.")
-            view1_shard_urls, view2_shard_urls, audio_shard_urls = {}, {}, {}
+        # if azure_blob_client and azure_container and azure_output_prefix and azure_account_name and azure_account_key:
+        #     view1_shard_urls = generate_azure_shard_urls(
+        #         azure_blob_client, azure_container, view1_shards,
+        #         f"{azure_output_prefix}/view_1_shards",
+        #         azure_account_name, azure_account_key
+        #     )
+        #     view2_shard_urls = generate_azure_shard_urls(
+        #         azure_blob_client, azure_container, view2_shards,
+        #         f"{azure_output_prefix}/view_2_shards",
+        #         azure_account_name, azure_account_key
+        #     )
+        #     audio_shard_urls = generate_azure_shard_urls(
+        #         azure_blob_client, azure_container, audio_shards,
+        #         f"{azure_output_prefix}/audio_shards",
+        #         azure_account_name, azure_account_key
+        #     )
+        # else:
+        #     logger.warning("Azure client/prefix or account key missing — LS URLs will be local and likely won't stream.")
+        #     view1_shard_urls, view2_shard_urls, audio_shard_urls = {}, {}, {}
+        view1_shard_urls, view2_shard_urls, audio_shard_urls = {}, {}, {}
+
         
         min_len = min(len(view1_shards), len(view2_shards), len(audio_shards))
         if min_len < len(view1_shards) or min_len < len(view2_shards) or min_len < len(audio_shards):
@@ -1500,19 +1539,50 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
         else:
             logger.error(f"❌ Video-level domain processing failed: {domain_result.get('error', 'Unknown error')}")
 
+
+        if azure_blob_client and azure_container:
+            video_name = os.path.basename(output_dir)
+            upload_result = upload_output_directory_with_sas(
+                output_dir, azure_blob_client, azure_container,
+                azure_output_prefix, video_name,
+                azure_account_name, azure_account_key
+            )
+            logger.info(f"📤 Dual-view upload result: {'✅ Success' if upload_result['success'] else '❌ Failed'}")
+            
+            if upload_result['success']:
+                # Extract URLs from upload result for dual-view
+                dual_view_urls = upload_result['shard_urls']['dual_view_urls']
+                view1_shard_urls = dual_view_urls['view1_urls']
+                view2_shard_urls = dual_view_urls['view2_urls'] 
+                audio_shard_urls = dual_view_urls['audio_urls']
+                
+                logger.info(f"🔗 Generated {len(view1_shard_urls)} view1, {len(view2_shard_urls)} view2, {len(audio_shard_urls)} audio URLs with SAS tokens")
+                
+                # CRITICAL: Update Label Studio tasks with real URLs
+                logger.info("🔄 Updating Label Studio tasks with uploaded URLs...")
+                updated_count = update_labelstudio_tasks_with_new_urls(label_studio_tasks, upload_result['shard_urls'], "dual_view")
+                if updated_count != len(label_studio_tasks):
+                    logger.warning(f"⚠️ Only {updated_count}/{len(label_studio_tasks)} Label Studio tasks were updated with URLs")
+                
+            else:
+                logger.error(f"Upload error: {upload_result.get('error', 'Unknown error')}")
+                view1_shard_urls, view2_shard_urls, audio_shard_urls = {}, {}, {}
+        else:
+            logger.warning("⚠️ Azure configuration missing - Label Studio tasks will have placeholder URLs")
+            view1_shard_urls, view2_shard_urls, audio_shard_urls = {}, {}, {}
         # Import consolidated tasks to Label Studio
         import_consolidated_tasks_to_labelstudio(label_studio_tasks,pipeline_config)
         
         # Upload output directory to Azure blob storage
-        if azure_blob_client and azure_container:
-            video_name = os.path.basename(output_dir)
-            upload_result = upload_output_directory_to_blob(
-                output_dir, azure_blob_client, azure_container,
-                azure_output_prefix, video_name
-            )
-            logger.info(f"📤 Upload result: {'✅ Success' if upload_result['success'] else '❌ Failed'}")
-            if not upload_result['success']:
-                logger.error(f"Upload error: {upload_result.get('error', 'Unknown error')}")
+        # if azure_blob_client and azure_container:
+        #     video_name = os.path.basename(output_dir)
+        #     upload_result = upload_output_directory_to_blob(
+        #         output_dir, azure_blob_client, azure_container,
+        #         azure_output_prefix, video_name
+        #     )
+        #     logger.info(f"📤 Upload result: {'✅ Success' if upload_result['success'] else '❌ Failed'}")
+        #     if not upload_result['success']:
+        #         logger.error(f"Upload error: {upload_result.get('error', 'Unknown error')}")
         
         return create_consolidated_summary(label_studio_tasks, output_dir)
         
@@ -1524,7 +1594,7 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
             mp4_result = ray.get(mp4_result_ref)
             
             if mp4_result.get('success', False):
-                mp4_path = mp4_result['output_view_1']  # Use the first view for processing
+                mp4_path = mp4_result['output_view_1']  # Use the upload_output_directory_to_blob view for processing
                 logger.info(f"Using view 1 path for processing: {mp4_path}")
             else:
                 raise RuntimeError(f"Failed to convert INSV file: {mp4_result.get('error', 'Unknown error')}")
@@ -2710,7 +2780,8 @@ def generate_multiview_consolidated_model_results_json(shard_output_dir, shard_n
     # Save consolidated JSON
     consolidated_json_path = os.path.join(shard_output_dir, f"shard_{shard_number}_consolidated_model_results.json")
     with open(consolidated_json_path, 'w') as f:
-        json.dump(consolidated_data, f, indent=2)
+        import json as json_module  # Avoid any potential variable shadowing
+        json_module.dump(consolidated_data, f, indent=2)
     
     logger.info(f"💾 Saved multi-view consolidated results: {consolidated_json_path}")
     return consolidated_json_path
@@ -2842,7 +2913,7 @@ def process_time_aligned_shard_multiview(
         try:
             # Process each view through the full pipeline
             view_result = process_single_shard_through_pipeline(
-                view_shard_path, audio_shard_path, view_output_dir, shard_offset_sec, shard_index, view_name
+                view_shard_path, audio_shard_path, view_output_dir, shard_offset_sec, shard_index, total_shard_count, view_name
             )
             view_results[view_name] = view_result
             logger.info(f"✅ Successfully processed {view_name} for shard {shard_index+1}")
@@ -3101,7 +3172,7 @@ def process_time_aligned_shard(
     logger.info(f"Processing view 1 of shard {shard_index+1}")
     view1_output_dir = os.path.join(shard_output_dir, "view_1")
     view1_results = process_single_shard_through_pipeline(
-        view1_shard_path, audio_shard_path, view1_output_dir, shard_offset_sec, shard_index, "view_1"
+        view1_shard_path, audio_shard_path, view1_output_dir, shard_offset_sec, shard_index, total_shard_count, "view_1"
     )
 
     # --- View 2 (optional) ---
@@ -3109,7 +3180,7 @@ def process_time_aligned_shard(
         logger.info(f"Processing view 2 of shard {shard_index+1}")
         view2_output_dir = os.path.join(shard_output_dir, "view_2")
         view2_results = process_single_shard_through_pipeline(
-            view2_shard_path, audio_shard_path, view2_output_dir, shard_offset_sec, shard_index, "view_2"
+            view2_shard_path, audio_shard_path, view2_output_dir, shard_offset_sec, shard_index, total_shard_count, "view_2"
         )
     else:
         logger.info(f"No view 2 for shard {shard_index+1} — running single-view consolidation")
@@ -3267,7 +3338,7 @@ def process_time_aligned_shard(
     }
 
 def process_single_shard_through_pipeline(video_shard_path, audio_shard_path, 
-                                         output_dir, shard_offset_sec, shard_index=0, view_name="view"):
+                                         output_dir, shard_offset_sec, shard_index=0, total_shard_count=None, view_name="view"):
     """
     Run single shard through all 7 AI models
     """
@@ -3307,12 +3378,27 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     # Verify prompt file exists
     ensure_prompt_file_exists(prompt_path)
     
+    # Determine if this is first or last shard for clap detection
+    is_first_shard = (shard_index == 0)
+    is_last_shard = (total_shard_count and shard_index == total_shard_count - 1)
+    
     audio_ref = process_audio_diarization.remote([audio_shard_path], audio_output_dir)
     scene_ref = detect_scenes.remote(video_shard_path, prompt_path, scene_output_dir)
+    # yolo_output_dir = os.path.join(output_dir, "yolo_output")
+    # yolo_ref  = run_yolo_detection.remote(video_shard_path, yolo_output_dir)
     nsfw_ref  = process_video_chunks_for_nsfw.remote([video_shard_path], confidence_threshold=0.5, chunk_duration_sec=60)
     motion_ref= compute_motion_energy.remote([video_shard_path], sensitivity_level="medium", save_detailed_data=False)
     face_ref  = process_video_chunks_for_face_detection.remote([video_shard_path], config=None, frame_interval=30, save_frames=False, chunk_duration_sec=60)
-    clap_ref  = detect_claps_in_media.remote(audio_shard_path, clap_output_dir, threshold_bias=6000, lowcut=200, highcut=3200)
+    
+    # Only run clap detection for first and last shards
+    clap_ref = None
+    if is_first_shard or is_last_shard:
+        shard_type = "first" if is_first_shard else "last" 
+        logger.info(f"🔍 Running clap detection for {shard_type} shard {shard_index+1}")
+        clap_ref = detect_claps_in_audio_video_pair.remote(audio_shard_path, video_shard_path, clap_output_dir, search_window_sec=30.0)
+    else:
+        logger.info(f"ℹ️ Skipping clap detection for middle shard {shard_index+1}")
+    
     signal_quality_ref = detect_blur_and_black_segments.remote(video_shard_path)
 
     # Testing lighting
@@ -3320,9 +3406,17 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
 
     scene_res = ray.get(scene_ref)
 
-    (audio_res, nsfw_res, motion_res, face_res, clap_res, lighting_res, signal_quality_res) = ray.get(
-        [audio_ref, nsfw_ref, motion_ref, face_ref, clap_ref, lighting_ref, signal_quality_ref]
-    )
+    # Get results, handling conditional clap detection
+    if clap_ref is not None:
+        (audio_res, nsfw_res, motion_res, face_res, clap_res, lighting_res, signal_quality_res) = ray.get(
+            [audio_ref, nsfw_ref, motion_ref, face_ref, clap_ref, lighting_ref, signal_quality_ref]
+        )
+    else:
+        # Set empty clap result for middle shards
+        (audio_res, nsfw_res, motion_res, face_res, lighting_res, signal_quality_res) = ray.get(
+            [audio_ref, nsfw_ref, motion_ref, face_ref, lighting_ref, signal_quality_ref]
+        )
+        clap_res = {"success": True, "clap_count": 0, "clap_timestamps": [], "message": "Clap detection skipped for middle shard"}
     
     # Run sensitive information analysis after audio_diarization_pii completes
     sensitive_output_dir = os.path.join(output_dir, "sensitive_output")
@@ -3332,7 +3426,6 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     # Store results from Ray tasks
     results = {
         'audio': audio_res,
-        #'yolo': yolo_res,
         'scene': scene_res,
         'nsfw': nsfw_res,
         'motion': motion_res,
@@ -3865,22 +3958,22 @@ def _process_single_view(
     logger.info(f"Audio split into {len(audio_shards)} shards → {shards_audio_dir}")
 
     # --- Upload shards to Azure (optional, recommended for LS streaming) ---
-    if azure_blob_client and azure_container and azure_output_prefix and azure_account_name and azure_account_key:
-        logger.info("Uploading single-view video shards to Azure Blob Storage...")
-        video_urls = generate_azure_shard_urls(
-            azure_blob_client, azure_container, video_shards,
-            f"{azure_output_prefix}/video_shards",
-            azure_account_name, azure_account_key
-        )
-        audio_urls = generate_azure_shard_urls(
-            azure_blob_client, azure_container, audio_shards,
-            f"{azure_output_prefix}/audio_shards",
-            azure_account_name, azure_account_key
-        )
-    else:
-        logger.warning("Azure client/prefix or account credentials missing — LS URLs will be local and likely won't stream.")
-        video_urls, audio_urls = {}, {}
-
+    # if azure_blob_client and azure_container and azure_output_prefix and azure_account_name and azure_account_key:
+    #     logger.info("Uploading single-view video shards to Azure Blob Storage...")
+    #     video_urls = generate_azure_shard_urls(
+    #         azure_blob_client, azure_container, video_shards,
+    #         f"{azure_output_prefix}/video_shards",
+    #         azure_account_name, azure_account_key
+    #     )
+    #     audio_urls = generate_azure_shard_urls(
+    #         azure_blob_client, azure_container, audio_shards,
+    #         f"{azure_output_prefix}/audio_shards",
+    #         azure_account_name, azure_account_key
+    #     )
+    # else:
+    #     logger.warning("Azure client/prefix or account credentials missing — LS URLs will be local and likely won't stream.")
+    #     video_urls, audio_urls = {}, {}
+    video_urls, audio_urls = {}, {}
     # --- Process time-aligned shards using the SAME per-shard function as dual-view ---
     label_studio_tasks = []
     consolidated_json_paths = []
@@ -3928,18 +4021,47 @@ def _process_single_view(
     else:
         logger.error(f"❌ Video-level domain processing failed: {domain_result.get('error', 'Unknown error')}")
     
-    import_consolidated_tasks_to_labelstudio(label_studio_tasks, pipeline_config)
-
-    # Upload output directory to Azure blob storage
     if azure_blob_client and azure_container:
         video_name = os.path.basename(output_dir)
-        upload_result = upload_output_directory_to_blob(
+        upload_result = upload_output_directory_with_sas(
             output_dir, azure_blob_client, azure_container,
-            azure_output_prefix, video_name
+            azure_output_prefix, video_name,
+            azure_account_name, azure_account_key
         )
-        logger.info(f"📤 Upload result: {'✅ Success' if upload_result['success'] else '❌ Failed'}")
-        if not upload_result['success']:
+        logger.info(f" Single-view upload result: {' Success' if upload_result['success'] else '❌ Failed'}")
+        
+        if upload_result['success']:
+            # Extract URLs from upload result for single-view
+            single_view_urls = upload_result['shard_urls']['single_view_urls']
+            video_urls = single_view_urls['video_urls']
+            audio_urls = single_view_urls['audio_urls']
+            
+            logger.info(f" Generated {len(video_urls)} video and {len(audio_urls)} audio URLs with SAS tokens")
+            
+            # CRITICAL: Update Label Studio tasks with real URLs
+            logger.info(" Updating Label Studio tasks with uploaded URLs...")
+            updated_count = update_labelstudio_tasks_with_new_urls(label_studio_tasks, upload_result['shard_urls'], "single_view")
+            if updated_count != len(label_studio_tasks):
+                logger.warning(f"⚠️ Only {updated_count}/{len(label_studio_tasks)} Label Studio tasks were updated with URLs")
+            
+        else:
             logger.error(f"Upload error: {upload_result.get('error', 'Unknown error')}")
+            video_urls, audio_urls = {}, {}
+    else:
+        logger.warning(" Azure configuration missing - Label Studio tasks will have placeholder URLs")  
+        video_urls, audio_urls = {}, {}
+        import_consolidated_tasks_to_labelstudio(label_studio_tasks, pipeline_config)
+
+    # Upload output directory to Azure blob storage
+    # if azure_blob_client and azure_container:
+    #     video_name = os.path.basename(output_dir)
+    #     upload_result = upload_output_directory_to_blob(
+    #         output_dir, azure_blob_client, azure_container,
+    #         azure_output_prefix, video_name
+    #     )
+    #     logger.info(f"📤 Upload result: {'✅ Success' if upload_result['success'] else '❌ Failed'}")
+    #     if not upload_result['success']:
+    #         logger.error(f"Upload error: {upload_result.get('error', 'Unknown error')}")
 
     # --- Return consolidated summary (SAME function as dual-view) ---
     return create_consolidated_summary(label_studio_tasks, output_dir)
