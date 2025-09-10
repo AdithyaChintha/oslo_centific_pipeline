@@ -103,13 +103,29 @@ def run_yolo_detection(
         spans_written = None
         if enable_count and enable_tracking:
             person_classes = {"person"}
-            counts = people_count_bins_from_events(events=events, bin_size_sec=bin_size_sec, person_classes=person_classes)
-            json_path = save_people_count_bins_json(counts, video_path=video_path, output_dir=output_dir)
-            print("People count saved to:", json_path)
-
+            
             presence = people_presence_spans_from_events(events, gap_sec=gap_sec, person_classes=person_classes)
             spans_written = save_people_presence_json(presence, video_path, output_dir)
             print("Person presence saved to:", spans_written)
+
+            counts = people_count_bins_from_events(events=events, bin_size_sec=bin_size_sec, person_classes=person_classes)
+
+            # Override counts summary unique_people with presence-derived people_number
+            try:
+                if isinstance(counts, dict) and 'summary' in counts and isinstance(presence, dict) and 'summary' in presence:
+                    people_num = int(presence['summary'].get('people_number', counts['summary'].get('unique_people', 0)))
+                    counts['summary']['unique_id'] =  counts['summary']['unique_people']
+                    counts['summary']['unique_people'] = people_num
+                    # propagate min_duration_sec from presence summary into counts summary
+                    if 'min_duration_sec' in presence['summary']:
+                        counts['summary']['min_duration_sec'] = float(presence['summary']['min_duration_sec'])
+            except Exception:
+                # best-effort; if anything goes wrong, keep original counts
+                pass
+
+            json_path = save_people_count_bins_json(counts, video_path=video_path, output_dir=output_dir)
+            print("People count saved to:", json_path)
+
 
         # compute aggregate stats
         num_events = len(events) if isinstance(events, list) else 0
