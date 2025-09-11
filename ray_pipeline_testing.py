@@ -1263,6 +1263,30 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
         print(f"\n📦 video_name: {session_id}")
         os.makedirs(output_dir, exist_ok=True)
         
+        # Session metadata from JSON
+        session_metadata = None
+        if session_result.get("success") and session_result.get("session_metadata"):
+            session_metadata = session_result["session_metadata"]
+            logger.info(f"📋 Session metadata extracted for {session_id}")
+            logger.info(f"   Home ID: {session_metadata.get('home_id', 'Unknown')}")
+            logger.info(f"   Activity: {session_metadata.get('activity', 'Unknown')}")
+            logger.info(f"   Domain: {session_metadata.get('domain', 'Unknown')}")
+            logger.info(f"   Duration: {session_metadata.get('duration_minutes', 'Unknown')} minutes")
+        else:
+            logger.warning(f"⚠️ No session metadata available for session: {session_id}")
+            # Create default metadata structure
+            session_metadata = {
+                "home_id": "",
+                "participant_id": "",
+                "activity": "Unknown",
+                "domain": "production",
+                "start_datetime": "",
+                "end_datetime": "", 
+                "duration_minutes": None,
+                "room": "",
+                "day_night": ""
+            }
+
         # Initialize comprehensive tracking for this session
         tracker = initialize_global_tracker(session_id, output_dir)
         logger.info(f"🔍 Initialized comprehensive tracking for session: {session_id}")
@@ -1433,7 +1457,8 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                 audio_url={},
                 total_shard_count=min_shards,
                 video_name=session_id,
-                multi_chunk_process=True
+                multi_chunk_process=True,
+                session_metadata=session_metadata
             )
             
             label_studio_tasks.append(shard_results['label_studio_task'])
@@ -2916,6 +2941,110 @@ def create_multiview_consolidated_predictions(view_results):
             "from_name": "val_absent",
             "to_name": "video_left"
         })
+    
+    # -----------------------------
+    # 4) CLAP DETECTION (New Addition)
+    # -----------------------------
+    
+    # Extract detection flags - prioritize passed parameter, fallback to view_results
+    # if detection_flags is None:
+    detection_flags = view_results['front'].get("detection_flags", {})
+    # for view_name, view_result in view_results.items():
+    #     if view_result.get("success", True) and view_result.get("detection_flags"):
+    #         detection_flags = view_result["detection_flags"]
+    #         break
+    
+    if detection_flags:
+        # Determine if this shard is first or last
+        is_first_shard = detection_flags.get("is_first_shard", False)
+        is_last_shard = detection_flags.get("is_last_shard", False)
+        
+        # Get clap detection results from the detection flags or view results
+        clap_detected_in_first = detection_flags.get("is_first_shard_processed", False) and is_first_shard
+        clap_detected_in_last = detection_flags.get("is_last_shard_processed", False) and is_last_shard
+        
+        # Alternative: Extract clap detection from actual clap results
+        clap_detected_current_shard = False
+        for view_name, view_result in view_results.items():
+            if view_result.get("success", True):
+                clap_result = view_result.get("clap", {})
+                if clap_result.get("success") and clap_result.get("clap_count", 0) > 0:
+                    clap_detected_current_shard = True
+                    break
+        
+        # 4.1) val_first_video - Is this the first shard of the session?
+        predictions.append({
+            "id": _mk_id("first_video"),
+            "type": "choices",
+            "value": {
+                "choices": ["Yes" if is_first_shard else "No"]
+            },
+            "model_version": "auto_preannotator_v1",
+            "from_name": "val_first_video",
+            "to_name": "video_left"
+        })
+        
+        # 4.2) val_clap_first_video - Was clap detected in first shard?
+        # Only add this prediction if this IS the first shard
+        if is_first_shard:
+            predictions.append({
+                "id": _mk_id("clap_first"),
+                "type": "choices", 
+                "value": {
+                    "choices": ["No" if clap_detected_current_shard else "Yes"]
+                },
+                "model_version": "auto_preannotator_v1",
+                "from_name": "val_clap_first_video",
+                "to_name": "video_left"
+            })
+        
+        # 4.3) val_last_video - Is this the last shard of the session?
+        predictions.append({
+            "id": _mk_id("last_video"),
+            "type": "choices",
+            "value": {
+                "choices": ["Yes" if is_last_shard else "No"]
+            },
+            "model_version": "auto_preannotator_v1", 
+            "from_name": "val_last_video",
+            "to_name": "video_left"
+        })
+        
+        # 4.4) val_clap_last_video - Was clap detected in last shard?
+        # Only add this prediction if this IS the last shard
+        if is_last_shard:
+            predictions.append({
+                "id": _mk_id("clap_last"),
+                "type": "choices",
+                "value": {
+                    "choices": ["No" if clap_detected_current_shard else "Yes"]
+                },
+                "model_version": "auto_preannotator_v1",
+                "from_name": "val_clap_last_video", 
+                "to_name": "video_left"
+            })
+    
+    # If no detection flags available, add default "No" values
+    else:
+        # Default predictions when detection_flags not available
+        predictions.extend([
+            {
+                "id": _mk_id("first_video_default"),
+                "type": "choices",
+                "value": {"choices": ["No"]},
+                "model_version": "auto_preannotator_v1",
+                "from_name": "val_first_video",
+                "to_name": "video_left"
+            },
+            {
+                "id": _mk_id("last_video_default"), 
+                "type": "choices",
+                "value": {"choices": ["No"]},
+                "model_version": "auto_preannotator_v1",
+                "from_name": "val_last_video",
+                "to_name": "video_left"
+            }
+        ])
 
     # Done — PII/NSFW/Minors/Lighting/Sensitive/people counter/absent people predictions are returned.
     return predictions
@@ -3106,7 +3235,8 @@ def process_time_aligned_shard_multiview(
     audio_url,
     total_shard_count=None,
     video_name=None,
-    multi_chunk_process=False
+    multi_chunk_process=False,
+    session_metadata=None
 ):
     """
     Process one time-aligned shard across multiple views (4+).
@@ -3354,7 +3484,8 @@ def process_time_aligned_shard_multiview(
         audio_url,
         total_shard_count,
         video_name,
-        all_view_urls=view_azure_urls  # Pass all view URLs for metadata
+        all_view_urls=view_azure_urls,  # Pass all view URLs for metadata
+        session_metadata=session_metadata
     )
     
 
@@ -4774,7 +4905,8 @@ if __name__ == "__main__":
             container_name = az_config['container']
             account_name = az_config['account-name']
             account_key = az_config['account-key']
-            input_prefix = "test/input_videos/multi_chunk_test/"      # Update this
+            input_prefix = pipeline_config['azure_storage']['input_blob_prefix']
+            # input_prefix = "one-data-platform/11-515fb09c-f12f-48ee-91e7-b21c9f4ac5ab-watching-tv/"      # Update this
             # local_download_dir = "./mulmti_chunk_test_downloads"
 
             # print("📥 Testing Phase 2: Basic Download")
