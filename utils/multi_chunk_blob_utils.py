@@ -7,6 +7,7 @@ from azure.storage.blob import BlobServiceClient
 from azure.core.exceptions import ResourceNotFoundError
 import time
 from datetime import datetime
+import ray
 logger = get_logger("ChunkFilenameParser")
 
 def parse_chunk_filename_complete(filename: str) -> Optional[Dict]:
@@ -683,6 +684,137 @@ class BasicDownloadManager:
         
         return download_results
     
+    def download_session_chunks_parallel(self, session_data: Dict) -> Dict:
+        """
+        Download all chunks for a session in parallel using Ray.
+        
+        Args:
+            session_data: Session information from discovery
+            
+        Returns:
+            Dict with download results for all chunks
+        """
+        session_id = session_data["session_id"]
+        video_chunks = session_data.get("video_chunks", [])
+        audio_chunks = session_data.get("audio_chunks", [])
+        
+        logger.info(f"📦 Downloading session in PARALLEL: {session_id}")
+        logger.info(f"   📹 Video chunks: {len(video_chunks)}")
+        logger.info(f"   🎵 Audio chunks: {len(audio_chunks)}")
+        
+        # Ensure Ray is initialized
+        if not ray.is_initialized():
+            logger.warning("⚠️ Ray not initialized, initializing now...")
+            ray.init()
+        
+        # Reset stats
+        self.download_stats = {
+            "total_downloads": 0,
+            "successful_downloads": 0,
+            "failed_downloads": 0,
+            "total_bytes": 0,
+            "start_time": time.time(),
+            "end_time": None
+        }
+        
+        download_results = {
+            "session_id": session_id,
+            "video_downloads": {},
+            "audio_downloads": {},
+            "success": False,
+            "download_stats": None
+        }
+        
+        # Prepare all chunk download tasks
+        all_chunks = []
+        chunk_types = []
+        
+        # Add video chunks
+        for chunk_info in video_chunks:
+            chunk_download_info = {
+                **chunk_info["chunk_data"],
+                "blob_name": chunk_info["chunk_data"]["blob_name"],
+                "size": chunk_info["chunk_data"].get("size", 0),
+            }
+            all_chunks.append(chunk_download_info)
+            chunk_types.append("video")
+        
+        # Add audio chunks
+        for chunk_info in audio_chunks:
+            chunk_download_info = {
+                **chunk_info["chunk_data"],
+                "blob_name": chunk_info["chunk_data"]["blob_name"],
+                "size": chunk_info["chunk_data"].get("size", 0),
+            }
+            all_chunks.append(chunk_download_info)
+            chunk_types.append("audio")
+        
+        logger.info(f"🚀 Launching {len(all_chunks)} parallel chunk download tasks")
+        
+        # Launch all download tasks in parallel
+        download_tasks = []
+        for chunk_info in all_chunks:
+            task = download_single_chunk_ray.remote(
+                self.blob_service_client, self.container_name, chunk_info, self.local_download_dir
+            )
+            download_tasks.append(task)
+        
+        # Wait for all downloads to complete
+        logger.info(f"⏳ Waiting for {len(download_tasks)} parallel chunk downloads to complete...")
+        chunk_results = ray.get(download_tasks)
+        
+        # Organize results by type
+        video_downloads = {}
+        audio_downloads = {}
+        
+        for i, result in enumerate(chunk_results):
+            chunk_type = chunk_types[i]
+            chunk_id = result["chunk_id"]
+            
+            if chunk_type == "video":
+                video_downloads[chunk_id] = result
+            else:
+                audio_downloads[chunk_id] = result
+            
+            # Update stats
+            self.download_stats["total_downloads"] += 1
+            if result["success"]:
+                self.download_stats["successful_downloads"] += 1
+                self.download_stats["total_bytes"] += result.get("size_bytes", 0)
+            else:
+                self.download_stats["failed_downloads"] += 1
+        
+        # Finalize stats
+        self.download_stats["end_time"] = time.time()
+        download_time = self.download_stats["end_time"] - self.download_stats["start_time"]
+        
+        # Determine overall success
+        total_chunks = len(all_chunks)
+        success_rate = self.download_stats["successful_downloads"] / max(total_chunks, 1)
+        download_results["success"] = success_rate >= 0.8  # 80% success rate threshold
+        
+        # Add stats to result
+        download_results["download_stats"] = {
+            **self.download_stats,
+            "download_time": download_time,
+            "success_rate": success_rate,
+            "mb_per_second": (self.download_stats["total_bytes"] / (1024 * 1024)) / max(download_time, 1),
+            "parallel_processing": True
+        }
+        
+        # Update results
+        download_results["video_downloads"] = video_downloads
+        download_results["audio_downloads"] = audio_downloads
+        
+        logger.info(f"📊 PARALLEL Session download complete: {session_id}")
+        logger.info(f"   ✅ Success: {self.download_stats['successful_downloads']}/{total_chunks}")
+        logger.info(f"   📈 Rate: {success_rate:.1%}")
+        logger.info(f"   💾 Data: {self.download_stats['total_bytes'] / (1024 * 1024):.1f} MB")
+        logger.info(f"   ⏱️ Time: {download_time:.1f}s")
+        logger.info(f"   🚀 Parallel processing: ENABLED")
+        
+        return download_results
+    
     def cleanup_downloads(self, keep_successful: bool = True):
         """
         Clean up downloaded files.
@@ -887,7 +1019,8 @@ def download_ready_sessions(blob_service_client: BlobServiceClient,
                           container_name: str,
                           input_prefix: str,
                           local_download_dir: str,
-                          max_sessions: int = None) -> Dict:
+                          max_sessions: int = None,
+                          use_parallel_chunks: bool = True) -> Dict:
     """
     Complete workflow: Discover sessions and download chunks.
     This combines Phase 1 (discovery) and Phase 2 (download).
@@ -940,8 +1073,11 @@ def download_ready_sessions(blob_service_client: BlobServiceClient,
         progress_tracker.initialize_session(session_data)
         
         try:
-            # Download session
-            download_result = download_manager.download_session_chunks(session_data)
+            # Download session (sequential or parallel chunks)
+            if use_parallel_chunks:
+                download_result = download_manager.download_session_chunks_parallel(session_data)
+            else:
+                download_result = download_manager.download_session_chunks(session_data)
             
             # Update progress tracker
             for chunk_id, chunk_result in download_result["video_downloads"].items():
@@ -1005,3 +1141,126 @@ def download_ready_sessions(blob_service_client: BlobServiceClient,
     logger.info(f"   ⏱️ Time: {total_time:.1f}s")
     
     return result
+
+
+# =============================================================================
+# RAY PARALLEL DOWNLOAD FUNCTIONS
+# =============================================================================
+
+@ray.remote
+def download_single_chunk_ray(blob_service_client: BlobServiceClient, 
+                            container_name: str, 
+                            chunk_info: Dict, 
+                            local_download_dir: str,
+                            max_retries: int = 3) -> Dict:
+    """
+    Ray remote task to download a single chunk file with retry logic.
+    
+    Args:
+        blob_service_client: Azure blob service client
+        container_name: Azure container name
+        chunk_info: Chunk information from discovery
+        local_download_dir: Local directory to download files
+        max_retries: Maximum retry attempts
+        
+    Returns:
+        Dict with download result
+    """
+    try:
+        import ray
+        ray_worker_id = ray.get_runtime_context().get_worker_id()
+        
+        blob_name = chunk_info["blob_name"]
+        file_name = chunk_info["file_name"]
+        num = chunk_info.get("chunk_number")
+        num_str = f"{num:02d}" if isinstance(num, int) else "NA"
+        chunk_id = f"{num_str}-{chunk_info['chunk_type']}"
+        
+        # Create local file path
+        local_file_path = os.path.join(local_download_dir, file_name)
+        
+        logger.info(f"📥 RAY WORKER {ray_worker_id} - Downloading {file_name} (chunk {chunk_id})")
+        
+        # Check if file already exists and is complete
+        if os.path.exists(local_file_path):
+            local_size = os.path.getsize(local_file_path)
+            remote_size = chunk_info.get("size", 0)
+            
+            if local_size == remote_size and local_size > 0:
+                logger.info(f"⏭️ RAY WORKER {ray_worker_id} - File already exists and complete: {file_name}")
+                return {
+                    "success": True,
+                    "chunk_id": chunk_id,
+                    "local_path": local_file_path,
+                    "size_bytes": local_size,
+                    "message": "File already exists and complete",
+                    "ray_worker_id": ray_worker_id
+                }
+        
+        # Download with retry logic
+        for attempt in range(max_retries):
+            try:
+                # Get blob client
+                blob_client = blob_service_client.get_blob_client(
+                    container=container_name, 
+                    blob=blob_name
+                )
+                
+                # Download blob
+                with open(local_file_path, "wb") as download_file:
+                    download_stream = blob_client.download_blob()
+                    download_file.write(download_stream.readall())
+                
+                # Verify download
+                local_size = os.path.getsize(local_file_path)
+                remote_size = chunk_info.get("size", 0)
+                
+                if remote_size > 0 and local_size != remote_size:
+                    raise Exception(f"Size mismatch: local={local_size}, remote={remote_size}")
+                
+                logger.info(f"✅ RAY WORKER {ray_worker_id} - Successfully downloaded {file_name} ({local_size} bytes)")
+                
+                return {
+                    "success": True,
+                    "chunk_id": chunk_id,
+                    "local_path": local_file_path,
+                    "size_bytes": local_size,
+                    "attempts": attempt + 1,
+                    "ray_worker_id": ray_worker_id
+                }
+                
+            except Exception as e:
+                logger.warning(f"⚠️ RAY WORKER {ray_worker_id} - Download attempt {attempt + 1} failed for {file_name}: {e}")
+                
+                # Clean up partial file
+                if os.path.exists(local_file_path):
+                    try:
+                        os.remove(local_file_path)
+                    except:
+                        pass
+                
+                if attempt == max_retries - 1:
+                    # Final attempt failed
+                    logger.error(f"❌ RAY WORKER {ray_worker_id} - All download attempts failed for {file_name}")
+                    return {
+                        "success": False,
+                        "chunk_id": chunk_id,
+                        "error": str(e),
+                        "attempts": max_retries,
+                        "ray_worker_id": ray_worker_id
+                    }
+                
+                # Wait before retry
+                time.sleep(2 ** attempt)  # Exponential backoff
+        
+    except Exception as e:
+        logger.error(f"❌ RAY WORKER - Unexpected error downloading {chunk_info.get('file_name', 'unknown')}: {e}")
+        return {
+            "success": False,
+            "chunk_id": chunk_info.get("chunk_id", "unknown"),
+            "error": str(e),
+            "ray_worker_id": ray.get_runtime_context().get_worker_id() if ray.is_initialized() else "unknown"
+        }
+
+
+

@@ -55,6 +55,10 @@ from ray_jobs.clap_detector import detect_claps_in_media, detect_claps_in_audio_
 from ray_jobs.signal_quality_check_blur_black_screen import detect_blur_and_black_segments
 from ray_jobs.video_lighting_task import lighting_by_second_task
 
+# Import comprehensive tracking system
+from utils.comprehensive_tracker import initialize_global_tracker, update_tracking, get_global_tracker
+from utils.chunk_id_extractor import extract_chunk_id_from_path, extract_sequence_number_from_path, extract_chunk_type_from_path
+
 # Import new ray jobs
 from ray_jobs.nsfw_det_final import process_video_chunks_for_nsfw
 from ray_jobs.motion_energy import compute_motion_energy
@@ -1258,43 +1262,119 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
         output_dir = output_dir + f"/{session_id}"
         print(f"\n📦 video_name: {session_id}")
         os.makedirs(output_dir, exist_ok=True)
+        
+        # Initialize comprehensive tracking for this session
+        tracker = initialize_global_tracker(session_id, output_dir)
+        logger.info(f"🔍 Initialized comprehensive tracking for session: {session_id}")
 
         if session_result["success"]:
+            # Collect all video and audio chunks first, then process with sequential part numbering
             video_downloads = session_result.get('download_result',{}).get('video_downloads',{}).items()
+            audio_downloads = session_result.get('download_result',{}).get('audio_downloads',{}).items()
+            
+            # Process video chunks with sequential part numbering
+            view_shards = {}
+            view_shard_urls = {}
+            global_part_idx = 0  # Track global part number across all chunks
+            
             for video_id, video_download_result in video_downloads:
                 local_video_path = video_download_result['local_path']
                 logger.info(f"local_video_path:{local_video_path}")
+                
+                # Initialize tracking for this video chunk
+                chunk_id = extract_chunk_id_from_path(local_video_path) or f"{video_id}-video"
+                sequence_number = extract_sequence_number_from_path(local_video_path) or video_id
+                chunk_type = extract_chunk_type_from_path(local_video_path) or "video"
+                
+                tracker.initialize_chunk_tracking(chunk_id, chunk_type, local_video_path, sequence_number)
+                update_tracking(chunk_id, "download", "completed")
+                
                 if local_video_path.lower().endswith('.insv'):
-                # Try the simpler single-output
+                    # Try the simpler single-output
+                    update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "processing")
                     try:
                         mp4_result = ray.get(insv_unwarp_task.remote(local_video_path, out_dir=os.path.join(output_dir, "4views")))
                         flat_result = mp4_result
+                        update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "completed", 
+                                       output_path=mp4_result.get('output_path'))
+                        update_tracking(chunk_id, "video_processing.view_unwarping", "completed", 
+                                       views_created=flat_result)
                     except Exception as e:
                         logger.error(f"Exception raised in video conversion to mp4: {e}")
+                        update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "error", 
+                                       error_message=str(e))
                 else:
                     flat_result = local_video_path
-                view_shards = {}
-                view_shard_urls = {}
+                    update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "skipped")
+                    update_tracking(chunk_id, "video_processing.view_unwarping", "skipped")
+                
                 for view_name, view_path in flat_result.items():
-                    # Split this view into 60s shards
-                    logger.info(f"Processing sharding for view:{view_name} at {view_path}")
-                    shards = ray.get(split_video_into_shards.remote(
-                        view_path, 
-                        output_dir=os.path.join(output_dir, f"{view_name}_shards"), 
-                        duration_sec=60
-                    ))
-                    view_shards[view_name] = shards
+                    # Split this view into 60s shards with sequential part numbering
+                    logger.info(f"Processing sharding for view:{view_name} at {view_path} starting from part{global_part_idx}")
+                    update_tracking(chunk_id, f"view_sharding.{view_name}", "processing")
+                    try:
+                        shards = ray.get(split_video_into_shards.remote(
+                            view_path, 
+                            output_dir=os.path.join(output_dir, f"{view_name}_shards"), 
+                            duration_sec=60,
+                            start_idx=global_part_idx  # Pass the global part index
+                        ))
+                        view_shards[view_name] = view_shards.get(view_name, []) + shards
+                        update_tracking(chunk_id, f"view_sharding.{view_name}", "completed",
+                                       shard_count=len(shards), shard_paths=shards)
+                    except Exception as e:
+                        logger.error(f"Error sharding {view_name}: {e}")
+                        update_tracking(chunk_id, f"view_sharding.{view_name}", "error",
+                                       error_message=str(e))
+                
+                # Update global part index based on the number of shards created
+                if flat_result:
+                    # Get the number of shards from the first view (all views should have same count)
+                    first_view = list(flat_result.keys())[0]
+                    if first_view in view_shards:
+                        # Count only the new shards added in this iteration
+                        existing_count = len(view_shards[first_view]) - len(shards) if first_view in view_shards else 0
+                        new_shard_count = len(shards)
+                        global_part_idx += new_shard_count
+                        logger.info(f"Added {new_shard_count} shards for chunk {video_id}, global_part_idx now: {global_part_idx}")
+            
             logger.info(view_shards)
                 
-            audio_downloads = session_result.get('download_result',{}).get('audio_downloads',{}).items()
+            # Process audio chunks with sequential part numbering
+            audio_shards = []
+            global_part_idx = 0  # Reset for audio processing
+            
             for audio_id, audio_download_result in audio_downloads:
                 local_audio_path = audio_download_result['local_path']
                 logger.info(f"local_audio_path:{local_audio_path}")
-                audio_shards = ray.get(split_audio_into_shards.remote(
-                    local_audio_path,
-                    output_dir=os.path.join(output_dir, "audio_shards"),
-                    duration_sec=60
-                ))
+                
+                # Initialize tracking for this audio chunk
+                audio_chunk_id = extract_chunk_id_from_path(local_audio_path) or f"{audio_id}-audio"
+                audio_sequence_number = extract_sequence_number_from_path(local_audio_path) or audio_id
+                audio_chunk_type = extract_chunk_type_from_path(local_audio_path) or "audio"
+                
+                tracker.initialize_chunk_tracking(audio_chunk_id, audio_chunk_type, local_audio_path, audio_sequence_number)
+                update_tracking(audio_chunk_id, "download", "completed")
+                
+                try:
+                    chunk_audio_shards = ray.get(split_audio_into_shards.remote(
+                        local_audio_path,
+                        output_dir=os.path.join(output_dir, "audio_shards"),
+                        duration_sec=60,
+                        start_idx=global_part_idx  # Pass the global part index
+                    ))
+                    audio_shards.extend(chunk_audio_shards)
+                    global_part_idx += len(chunk_audio_shards)
+                    logger.info(f"Added {len(chunk_audio_shards)} audio shards for chunk {audio_id}, global_part_idx now: {global_part_idx}")
+                    
+                    # Update tracking for audio sharding (using a generic view name for audio)
+                    update_tracking(audio_chunk_id, "view_sharding.audio", "completed",
+                                   shard_count=len(chunk_audio_shards), shard_paths=chunk_audio_shards)
+                except Exception as e:
+                    logger.error(f"Error processing audio chunk {audio_id}: {e}")
+                    update_tracking(audio_chunk_id, "view_sharding.audio", "error",
+                                   error_message=str(e))
+            
             logger.info(audio_shards)
             # Compare shard counts
             audio_count = len(audio_shards)
@@ -3054,28 +3134,23 @@ def process_time_aligned_shard_multiview(
     logger.info(f"🎬 Processing shard {shard_index+1} with {len(view_shard_paths)} views: {list(view_shard_paths.keys())}")
 
     # --- ENHANCED FIRST/LAST SHARD CLAP DETECTION (REUSE EXISTING LOGIC) ---
-    if not multi_chunk_process:
-        is_first_shard = (shard_index == 0)
-        is_last_shard = (total_shard_count and shard_index == total_shard_count - 1)
-        
-        clap_detected_in_first_shard = False
-        clap_detected_in_last_shard = False
+    # Always determine first/last shard status regardless of multi_chunk_process
+    is_first_shard = (shard_index == 0)
+    is_last_shard = (total_shard_count and shard_index == total_shard_count - 1)
+    
+    clap_detected_in_first_shard = False
+    clap_detected_in_last_shard = False
 
-        if is_first_shard or is_last_shard:
-            shard_type = "first" if is_first_shard else "last"
-            logger.info(f"🔍 CLAP DETECTION for {shard_type} shard {shard_index+1}")
-            
-            if is_first_shard:
-                logger.info(f"🎬 FIRST SHARD - will check clap detection results from all views")
-            else:
-                logger.info(f"🎬 LAST SHARD - will check clap detection results from all views")
+    if is_first_shard or is_last_shard:
+        shard_type = "first" if is_first_shard else "last"
+        logger.info(f"🔍 CLAP DETECTION for {shard_type} shard {shard_index+1}")
+        
+        if is_first_shard:
+            logger.info(f"🎬 FIRST SHARD - will check clap detection results from all views")
         else:
-            logger.info(f"ℹ️ Shard {shard_index+1} is middle shard - no special clap processing")
+            logger.info(f"🎬 LAST SHARD - will check clap detection results from all views")
     else:
-        is_first_shard = False
-        is_last_shard = False
-        clap_detected_in_first_shard = False
-        clap_detected_in_last_shard = False
+        logger.info(f"ℹ️ Shard {shard_index+1} is middle shard - no special clap processing")
 
     # --- PROCESS ALL VIEWS EQUALLY ---
     view_results = {}
@@ -3523,15 +3598,26 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     """
     os.makedirs(output_dir, exist_ok=True)
     results = {}
+    
+    # Extract chunk ID for tracking
+    chunk_id = extract_chunk_id_from_path(video_shard_path) or f"shard-{shard_index}-{view_name}"
 
     if view_name == "erp":
         #Yolo people counter only for ERP view
         logger.info(f"ERP view: only run yolo people counter")
         yolo_output_dir = os.path.join(output_dir, "yolo_output")
-        yolo_ref  = run_yolo_detection.remote(video_shard_path, yolo_output_dir)
-        yolo_res = ray.get(yolo_ref)  
-        results = {'yolo': yolo_res}
-        logger.info(f"Yolo people counter results saved to yolo_output_dir: {yolo_output_dir}")
+        update_tracking(chunk_id, "model_processing.yolo_detection.erp", "processing")
+        try:
+            yolo_ref  = run_yolo_detection.remote(video_shard_path, yolo_output_dir)
+            yolo_res = ray.get(yolo_ref)  
+            results = {'yolo': yolo_res}
+            update_tracking(chunk_id, "model_processing.yolo_detection.erp", "completed",
+                           results_path=yolo_output_dir)
+            logger.info(f"Yolo people counter results saved to yolo_output_dir: {yolo_output_dir}")
+        except Exception as e:
+            update_tracking(chunk_id, "model_processing.yolo_detection.erp", "error",
+                           error_message=str(e))
+            logger.error(f"YOLO detection failed: {e}")
         return results
 
     # Define output directories for models that need them
@@ -3558,19 +3644,24 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     ensure_prompt_file_exists(prompt_path)
     
     # Determine if this is first or last shard for clap detection
-    if not multi_chunk_process:
-        is_first_shard = (shard_index == 0)
-        is_last_shard = (total_shard_count and shard_index == total_shard_count - 1)
-    else:
-        is_first_shard = False
-        is_last_shard = False
+    # Always determine first/last shard status regardless of multi_chunk_process
+    is_first_shard = (shard_index == 0)
+    is_last_shard = (total_shard_count and shard_index == total_shard_count - 1)
     
+    # Start all model processing with tracking
+    update_tracking(chunk_id, "model_processing.audio_diarization", "processing")
     audio_ref = process_audio_diarization.remote([audio_shard_path], audio_output_dir)
+    
+    update_tracking(chunk_id, "model_processing.scene_detection.front", "processing")
     scene_ref = detect_scenes.remote(video_shard_path, prompt_path, scene_output_dir)
-    # yolo_output_dir = os.path.join(output_dir, "yolo_output")
-    # yolo_ref  = run_yolo_detection.remote(video_shard_path, yolo_output_dir)
+    
+    update_tracking(chunk_id, "model_processing.nsfw_detection.front", "processing")
     nsfw_ref  = process_video_chunks_for_nsfw.remote([video_shard_path], confidence_threshold=0.5, chunk_duration_sec=60)
+    
+    update_tracking(chunk_id, "model_processing.motion_detection.front", "processing")
     motion_ref= compute_motion_energy.remote([video_shard_path], sensitivity_level="medium", save_detailed_data=False)
+    
+    update_tracking(chunk_id, "model_processing.face_detection.front", "processing")
     face_ref  = process_video_chunks_for_face_detection.remote([video_shard_path], config=None, frame_interval=30, save_frames=False, chunk_duration_sec=60)
     
     # Only run clap detection for first and last shards
@@ -3578,13 +3669,17 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     if is_first_shard or is_last_shard:
         shard_type = "first" if is_first_shard else "last" 
         logger.info(f"🔍 Running clap detection for {shard_type} shard {shard_index+1}")
+        update_tracking(chunk_id, "model_processing.clap_detection", "processing")
         clap_ref = detect_claps_in_audio_video_pair.remote(audio_shard_path, video_shard_path, clap_output_dir, search_window_sec=30.0)
     else:
         logger.info(f"ℹ️ Skipping clap detection for middle shard {shard_index+1}")
+        update_tracking(chunk_id, "model_processing.clap_detection", "skipped")
     
+    update_tracking(chunk_id, "model_processing.signal_quality_check", "processing")
     signal_quality_ref = detect_blur_and_black_segments.remote(video_shard_path)
 
     # Testing lighting
+    update_tracking(chunk_id, "model_processing.lighting_analysis", "processing")
     lighting_ref = lighting_by_second_task.remote(video_shard_path, output_dir = lighting_output_dir)
 
     scene_res = ray.get(scene_ref)
@@ -3594,18 +3689,37 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
         (audio_res, nsfw_res, motion_res, face_res, clap_res, lighting_res, signal_quality_res) = ray.get(
             [audio_ref, nsfw_ref, motion_ref, face_ref, clap_ref, lighting_ref, signal_quality_ref]
         )
+        # Update tracking for completed models
+        update_tracking(chunk_id, "model_processing.audio_diarization", "completed", results_path=audio_output_dir)
+        update_tracking(chunk_id, "model_processing.scene_detection.front", "completed", results_path=scene_output_dir)
+        update_tracking(chunk_id, "model_processing.nsfw_detection.front", "completed", results_path=nsfw_output_dir)
+        update_tracking(chunk_id, "model_processing.motion_detection.front", "completed", results_path=motion_output_dir)
+        update_tracking(chunk_id, "model_processing.face_detection.front", "completed", results_path=face_output_dir)
+        update_tracking(chunk_id, "model_processing.clap_detection", "completed", results_path=clap_output_dir)
+        update_tracking(chunk_id, "model_processing.signal_quality_check", "completed", results_path=signal_quality_output_dir)
+        update_tracking(chunk_id, "model_processing.lighting_analysis", "completed", results_path=lighting_output_dir)
     else:
         # Set empty clap result for middle shards
         (audio_res, nsfw_res, motion_res, face_res, lighting_res, signal_quality_res) = ray.get(
             [audio_ref, nsfw_ref, motion_ref, face_ref, lighting_ref, signal_quality_ref]
         )
         clap_res = {"success": True, "clap_count": 0, "clap_timestamps": [], "message": "Clap detection skipped for middle shard"}
+        # Update tracking for completed models (except clap)
+        update_tracking(chunk_id, "model_processing.audio_diarization", "completed", results_path=audio_output_dir)
+        update_tracking(chunk_id, "model_processing.scene_detection.front", "completed", results_path=scene_output_dir)
+        update_tracking(chunk_id, "model_processing.nsfw_detection.front", "completed", results_path=nsfw_output_dir)
+        update_tracking(chunk_id, "model_processing.motion_detection.front", "completed", results_path=motion_output_dir)
+        update_tracking(chunk_id, "model_processing.face_detection.front", "completed", results_path=face_output_dir)
+        update_tracking(chunk_id, "model_processing.signal_quality_check", "completed", results_path=signal_quality_output_dir)
+        update_tracking(chunk_id, "model_processing.lighting_analysis", "completed", results_path=lighting_output_dir)
     
     # Run sensitive information analysis after audio_diarization_pii completes
     sensitive_output_dir = os.path.join(output_dir, "sensitive_output")
     os.makedirs(sensitive_output_dir, exist_ok=True)
+    update_tracking(chunk_id, "model_processing.sensitive_info_detection", "processing")
     sensitive_ref = process_audio_sensitive_info.remote([audio_shard_path], audio_output_dir, sensitive_output_dir)
     sensitive_res = ray.get(sensitive_ref)
+    update_tracking(chunk_id, "model_processing.sensitive_info_detection", "completed", results_path=sensitive_output_dir)
     # Store results from Ray tasks
     results = {
         'audio': audio_res,
@@ -4612,6 +4726,10 @@ if __name__ == "__main__":
                        help="Enable dual view processing")
     parser.add_argument("--unwarped-views", action="store_true",
                        help="Enable unwarped view processing")
+    parser.add_argument("--parallel-chunks", action="store_true", default=True,
+                       help="Enable parallel chunk downloading using Ray (default: True)")
+    parser.add_argument("--sequential-chunks", action="store_true", default=False,
+                       help="Use sequential chunk downloading (overrides parallel-chunks)")
 
     # Standalone mode arguments
     parser.add_argument("--input-video", 
@@ -4657,17 +4775,36 @@ if __name__ == "__main__":
             account_name = az_config['account-name']
             account_key = az_config['account-key']
             input_prefix = "test/input_videos/multi_chunk_test/"      # Update this
-            # local_download_dir = "./multi_chunk_test_downloads"
+            # local_download_dir = "./mulmti_chunk_test_downloads"
 
-            print("📥 Testing Phase 2: Basic Download")
-            print("=" * 50)
+            # print("📥 Testing Phase 2: Basic Download")
+            # print("=" * 50)
+            
+            # result = download_ready_sessions(
+            #     blob_service_client=blob_client,
+            #     container_name=container_name,
+            #     input_prefix=input_prefix,
+            #     local_download_dir=local_download_dir,
+            #     max_sessions=1  # Test with just 1 session
+            # )
+
+            # Determine if we should use parallel chunk downloads
+            use_parallel_chunks = args.parallel_chunks and not args.sequential_chunks
+            
+            if use_parallel_chunks:
+                print("📥 Testing Phase 2: PARALLEL Chunk Download with Ray")
+                print("=" * 50)
+            else:
+                print("📥 Testing Phase 2: Sequential Chunk Download")
+                print("=" * 50)
             
             result = download_ready_sessions(
                 blob_service_client=blob_client,
                 container_name=container_name,
                 input_prefix=input_prefix,
                 local_download_dir=local_download_dir,
-                max_sessions=1  # Test with just 1 session
+                max_sessions=1,  # Test with just 1 session
+                use_parallel_chunks=use_parallel_chunks
             )
             print(result)
             print(f"\n📊 DOWNLOAD RESULTS:")
