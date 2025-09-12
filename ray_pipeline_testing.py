@@ -2900,15 +2900,15 @@ def create_multiview_consolidated_predictions(view_results):
     #     if view_result.get("success", True) and view_result.get("detection_flags"):
     #         detection_flags = view_result["detection_flags"]
     #         break
-    
+    logger.info(f"Detection_flags:{detection_flags}")
     if detection_flags:
         # Determine if this shard is first or last
         is_first_shard = detection_flags.get("is_first_shard", False)
         is_last_shard = detection_flags.get("is_last_shard", False)
         
         # Get clap detection results from the detection flags or view results
-        clap_detected_in_first = detection_flags.get("is_first_shard_processed", False) and is_first_shard
-        clap_detected_in_last = detection_flags.get("is_last_shard_processed", False) and is_last_shard
+        clap_detected_in_first = detection_flags.get("clap_detected_in_first_shard", False) and is_first_shard
+        clap_detected_in_last = detection_flags.get("clap_detected_in_last_shard", False) and is_last_shard
         
         # Alternative: Extract clap detection from actual clap results
         clap_detected_current_shard = False
@@ -2938,7 +2938,7 @@ def create_multiview_consolidated_predictions(view_results):
                 "id": _mk_id("clap_first"),
                 "type": "choices", 
                 "value": {
-                    "choices": ["No" if clap_detected_current_shard else "Yes"]
+                    "choices": ["No" if clap_detected_in_first else "Yes"]
                 },
                 "model_version": "auto_preannotator_v1",
                 "from_name": "val_clap_first_video",
@@ -2964,7 +2964,7 @@ def create_multiview_consolidated_predictions(view_results):
                 "id": _mk_id("clap_last"),
                 "type": "choices",
                 "value": {
-                    "choices": ["No" if clap_detected_current_shard else "Yes"]
+                    "choices": ["No" if clap_detected_in_last else "Yes"]
                 },
                 "model_version": "auto_preannotator_v1",
                 "from_name": "val_clap_last_video", 
@@ -3397,8 +3397,8 @@ def process_time_aligned_shard_multiview(
 
     # --- CREATE ENHANCED DETECTION FLAGS ---
     detection_flags = {
-        "is_first_shard": clap_detected_in_first_shard,
-        "is_last_shard": clap_detected_in_last_shard,
+        "is_first_shard": is_first_shard,
+        "is_last_shard": is_last_shard,
         "is_intro_statement_there": is_intro_statement_there,
         "intro_transcript": intro_transcript,
         "shard_index": shard_index,
@@ -3407,7 +3407,9 @@ def process_time_aligned_shard_multiview(
         "is_last_shard_processed": is_last_shard,
         "total_views_processed": len(view_results),
         "successful_views": len([v for v in view_results.values() if v.get('success', True)]),
-        "processing_type": "multi_view_equal_processing"
+        "processing_type": "multi_view_equal_processing",
+        "clap_detected_in_first_shard": clap_detected_in_first_shard,
+        "clap_detected_in_last_shard": clap_detected_in_last_shard,
     }
     
     # Add detection flags to all view results
@@ -3593,14 +3595,16 @@ def process_time_aligned_shard(
 
     # --- CREATE CLAP DETECTION FLAGS ---
     detection_flags = {
-        "is_first_shard": clap_detected_in_first_shard,
-        "is_last_shard": clap_detected_in_last_shard,
+        "is_first_shard": is_first_shard,
+        "is_last_shard": is_last_shard,
         "is_intro_statement_there": is_intro_statement_there,
         "intro_transcript": intro_transcript,
         "shard_index": shard_index,
         "shard_type": "first" if is_first_shard else ("last" if is_last_shard else "middle"),
         "is_first_shard_processed": is_first_shard,
-        "is_last_shard_processed": is_last_shard
+        "is_last_shard_processed": is_last_shard,
+        "clap_detected_in_first_shard": clap_detected_in_first_shard,  # ✅ Clap result
+        "clap_detected_in_last_shard": clap_detected_in_last_shard,    # ✅ Clap result
     }
     
     # Add flags to view1_results for inclusion in consolidated JSON
