@@ -1096,11 +1096,12 @@ def download_ready_sessions(blob_service_client: BlobServiceClient,
                     error=chunk_result.get("error")
                 )
             
-            # Store result
+            # Store result with session metadata
             download_results[session_id] = {
                 "success": download_result["success"],
                 "download_result": download_result,
-                "progress_summary": progress_tracker.get_progress_summary()
+                "progress_summary": progress_tracker.get_progress_summary(),
+                "session_metadata": session_data.get("session_metadata")  # ← ADD SESSION METADATA
             }
             
             if download_result["success"]:
@@ -1116,7 +1117,8 @@ def download_ready_sessions(blob_service_client: BlobServiceClient,
             download_results[session_id] = {
                 "success": False,
                 "error": str(e),
-                "progress_summary": progress_tracker.get_progress_summary()
+                "progress_summary": progress_tracker.get_progress_summary(),
+                "session_metadata": session_data.get("session_metadata")  # ← ADD SESSION METADATA
             }
     
     # Final summary
