@@ -1975,12 +1975,12 @@ def generate_final_combined_model_results_json(output_dir, consolidated_json_pat
                     
                     # Update summary counters
                     if is_first_shard_processed:
-                        first_shard_clap_detected = clap_flags.get('is_first_shard', False)
+                        first_shard_clap_detected = clap_flags.get('clap_detected_in_first_shard', False)
                         intro_statement_detected = clap_flags.get('is_intro_statement_there', False)
                         intro_transcript_text = clap_flags.get('intro_transcript', '')
                     
                     if is_last_shard_processed:
-                        last_shard_clap_detected = clap_flags.get('is_last_shard', False)
+                        last_shard_clap_detected = clap_flags.get('clap_detected_in_last_shard', False)
                     
                     logger.info(f"📊 Including detection_flags for {shard_type} shard {shard_number}")
                 
@@ -2911,13 +2911,13 @@ def create_multiview_consolidated_predictions(view_results):
         clap_detected_in_last = detection_flags.get("clap_detected_in_last_shard", False) and is_last_shard
         
         # Alternative: Extract clap detection from actual clap results
-        clap_detected_current_shard = False
-        for view_name, view_result in view_results.items():
-            if view_result.get("success", True):
-                clap_result = view_result.get("clap", {})
-                if clap_result.get("success") and clap_result.get("clap_count", 0) > 0:
-                    clap_detected_current_shard = True
-                    break
+        # clap_detected_current_shard = False
+        # for view_name, view_result in view_results.items():
+        #     if view_result.get("success", True):
+        #         clap_result = view_result.get("clap", {})
+        #         if clap_result.get("success") and clap_result.get("clap_count", 0) > 0:
+        #             clap_detected_current_shard = True
+        #             break
         
         # 4.1) val_first_video - Is this the first shard of the session?
         predictions.append({
@@ -3323,12 +3323,12 @@ def process_time_aligned_shard_multiview(
         for view_name, view_result in view_results.items():
             if view_result.get('success', True):  # Only process successful views
                 clap_results = view_result.get('clap', {})
-                if clap_results.get('success'):
-                    clap_count = clap_results.get('clap_count', 0)
+                if clap_results.get('overall_success'):
+                    clap_count = clap_results.get('detected_clap', {}).get('timestamp')
                     clap_detections.append({
                         'view': view_name,
                         'clap_count': clap_count,
-                        'clap_detected': clap_count > 0
+                        'clap_detected': clap_timestamp is not None
                     })
                 
                 # Collect transcripts from all views
@@ -3544,8 +3544,8 @@ def process_time_aligned_shard(
     if is_first_shard or is_last_shard:
         # Extract clap detection results from the normal pipeline processing
         clap_results = view1_results.get('clap', {})
-        clap_count = clap_results.get('clap_count', 0) if clap_results else 0
-        clap_detected = clap_count > 0
+        clap_count = clap_results.get('detected_clap', {}).get('timestamp') if clap_results else 0
+        clap_detected = clap_timestamp is not None
         
         if is_first_shard:
             clap_detected_in_first_shard = clap_detected
