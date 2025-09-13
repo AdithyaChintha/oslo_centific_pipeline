@@ -1194,6 +1194,10 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
         
         os.makedirs(output_dir, exist_ok=True)
         
+        #check walkthrough
+        if session_result.get('processing_type') == 'walkthrough':
+            is_walkthrough = True
+
         # Session metadata from JSON
         session_metadata = None
         if session_result.get("success") and session_result.get("session_metadata"):
@@ -1268,15 +1272,18 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                     logger.info(f"Processing sharding for view:{view_name} at {view_path} starting from part{global_part_idx}")
                     update_tracking(chunk_id, f"view_sharding.{view_name}", "processing")
                     try:
-                        shards = ray.get(split_video_into_shards.remote(
-                            view_path, 
-                            output_dir=os.path.join(output_dir, f"{view_name}_shards"), 
-                            duration_sec=60,
-                            start_idx=global_part_idx  # Pass the global part index
-                        ))
-                        view_shards[view_name] = view_shards.get(view_name, []) + shards
-                        update_tracking(chunk_id, f"view_sharding.{view_name}", "completed",
-                                       shard_count=len(shards), shard_paths=shards)
+                        if not is_walkthrough:
+                            shards = ray.get(split_video_into_shards.remote(
+                                view_path, 
+                                output_dir=os.path.join(output_dir, f"{view_name}_shards"), 
+                                duration_sec=60,
+                                start_idx=global_part_idx  # Pass the global part index
+                            ))
+                            view_shards[view_name] = view_shards.get(view_name, []) + shards
+                            update_tracking(chunk_id, f"view_sharding.{view_name}", "completed",
+                                        shard_count=len(shards), shard_paths=shards)
+                        else:
+                            #TODO: Implement sharding with sliding window overlap
                     except Exception as e:
                         logger.error(f"Error sharding {view_name}: {e}")
                         update_tracking(chunk_id, f"view_sharding.{view_name}", "error",
