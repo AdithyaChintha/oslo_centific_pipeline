@@ -39,9 +39,9 @@ _SIGNAL_KEYWORDS = {
     "minors": ["minor", "minors", "child", "juvenile"],
     "nsfw": ["nsfw", "nudity", "adult"],
     "domain": ["domain", "domain_issue", "domain_prediction", "video_domain", "audio_domain"],
-    "motion": ["motion", "movement", "energy", "signal_issue", "signal"],
+    "signal": ["signal issue" "signal_issue", "signal"],
     "people": ["person", "people", "face", "participant"],
-    "lighting": ["light", "lighting", "low-light", "low_light", "underexposed"],
+    "lighting": ["light", "lighting","low light","low-light", "low_light", "underexposed"],
     "sensitive_audio": ["sensitive_audio", "sensitive_audio_comment", "sensitive_audio", "sensitive"],
     "scene": ["scene", "scenes", "shot"]
 }
@@ -78,6 +78,9 @@ MASTER_JSONS_CONTAINER = config["azure_storage"]["intermediate_master_json_conta
 FINAL_MASTER_JSONS_CONTAINER = config["azure_storage"]["final_master_json_container"]
 
 POLL_INTERVAL_SEC = int(config["polling"]["interval_seconds"])
+SUMMARY_CONTAINER="summary-jsons"
+CONTAINER_CONTAINING_VIDEOS="instavideo"
+CONTAINER_CONTAINING_AUDIOS="instavideo"
 
 
 # ==================================
@@ -117,6 +120,24 @@ def _safe_get(d: Dict, path: List[str]):
             return None
         cur = cur[k]
     return cur
+
+def _is_negative_text(text: str) -> bool:
+    if not text:
+        return False
+    t = text.strip().lower()
+    for neg in _NEGATIVE_KEYWORDS:
+        if neg in t:
+            return True
+    return False
+
+def _matches_any_keyword(name_or_text: str, keywords: Iterable[str]) -> bool:
+    if not name_or_text:
+        return False
+    s = str(name_or_text).lower()
+    for kw in keywords:
+        if kw in s:
+            return True
+    return False
 
 
 # 🔹 Create log file path in current directory
@@ -1139,7 +1160,7 @@ class ConsolidationPipeline:
                 local_video_path = self.download_blob_to_local(
                     blob_path=video_blob_url,
                     connection_string=AZURE_STORAGE_CONNECTION_STRING,
-                    container_name="instavideo",              # 👈 adjust container name if needed
+                    container_name=CONTAINER_CONTAINING_VIDEOS,              # 👈 adjust container name if needed
                     dest_dir=downloads_dir,
                     overwrite=overwrite_downloads
                 )
@@ -1150,7 +1171,7 @@ class ConsolidationPipeline:
                 local_audio_path = self.download_blob_to_local(
                     blob_path=audio_blob_url,
                     connection_string=AZURE_STORAGE_CONNECTION_STRING,
-                    container_name="instavideo",              # 👈 adjust container name if needed
+                    container_name=CONTAINER_CONTAINING_AUDIOS,              # 👈 adjust container name if needed
                     dest_dir=downloads_dir,
                     overwrite=overwrite_downloads
                 )
@@ -1291,6 +1312,7 @@ class ConsolidationPipeline:
                         for res in p.get("result", []) if isinstance(p.get("result", []), list) else []:
                             val = res.get("value") if isinstance(res, dict) else None
                             if val and isinstance(val, dict):
+                                # view_results -> back -> clap -> combined_analysis
                                 comb = val.get("view_results", {}).get("back", {}).get("clap", {}).get("combined_analysis")
                                 if comb:
                                     audio_clap = comb.get("audio_clap")
@@ -1301,6 +1323,20 @@ class ConsolidationPipeline:
             except Exception:
                 pass
 
+            # --- NEW: extract metadata and AI predictions ---
+            try:
+                raw_data = dict(shard_entry.get("data") or {})
+                meta_pred_keys = [k for k in raw_data.keys() if k.lower().startswith("meta")]
+                meta_summary = {k: raw_data[k] for k in meta_pred_keys}
+
+                # Collect AI_* keys into a compact dict
+                ai_pred_keys = [k for k in raw_data.keys() if k.upper().startswith("AI_")]
+                ai_predictions_summary = {k: raw_data[k] for k in ai_pred_keys}
+
+            except Exception:
+                metadata = {}
+                ai_predictions_summary = {"error": "failed to extract ai predictions safely"}
+
             shard_obj = {
                 "shard_key": shard_key,
                 "shard_idx": shard_idx,
@@ -1308,10 +1344,14 @@ class ConsolidationPipeline:
                 "consolidated_shards_after_merge": consolidated_list,
                 "shards_consolidated_count_for_video": len(consolidated_list),
                 "annotation_signals": annotation_signals,
-                "model_signals": model_signals,
+                # "model_signals": model_signals,
                 "audio_clap": audio_clap,
                 "video_clap": video_clap,
+                # NEW fields
+                "metadata": meta_summary,
+                "ai_predictions": ai_predictions_summary,
             }
+
 
             # replace any previous entry for this shard (dedupe) — remove old then append
             per_video["shards"] = [s for s in per_video["shards"] if s.get("shard_key") != shard_key]
@@ -1401,53 +1441,79 @@ class ConsolidationPipeline:
         video_signals = set()
         detected_signals = set()
 
+        # keep track of domain choices / comments per channel (two-pass style)
+        domain_choice_by_channel = {"audio": False, "video": False, "unknown": False}
+        domain_comment_by_channel = {"audio": None, "video": None, "unknown": None}
+
         # helpers for identifying channel: check to_name/from_name and value context
         def classify_channel(item: Dict[str, Any]) -> str:
             """Return 'audio', 'video', or 'unknown'"""
             to_name = (item.get("to_name") or "") or ""
             from_name = (item.get("from_name") or "") or ""
-            # prefer explicit to_name values
             tn = str(to_name).lower()
             fn = str(from_name).lower()
             if "audio" in tn or "audio" in fn or "audio_main" in tn or "audio_main" in fn:
                 return "audio"
             if any(v in tn for v in ("video", "video_left", "video_right", "video_top", "video_front", "video_back")) or "video" in fn:
                 return "video"
-            # some labels like audio_labels_* or audio_labels_pii in from_name
             if fn.startswith("audio_") or fn.startswith("audio") or "audio" in fn:
                 return "audio"
             if fn.startswith("video_") or "video" in fn:
                 return "video"
             return "unknown"
 
-        # iterate all annotation entries
+        # helper to test "meaningful" domain comments
+        def _is_comment_meaningful(text: str) -> bool:
+            if not text:
+                return False
+            t = text.strip().lower()
+            if t == "" or t in ("unknown", "n/a", "na"):
+                return False
+            return True
+
+        # iterate all annotation entries (first pass: collect data & non-domain signals)
         for ann in ann_list:
-            # each ann has a "result" list of items
             results = ann.get("result", []) if isinstance(ann, dict) else []
             for item in results:
                 typ = (item.get("type") or "").lower()
                 channel = classify_channel(item)
 
-                # gather candidate text for textarea or choices
                 value = item.get("value", {})
-                # choices: value["choices"] is a list like ["Yes"] or similar
                 choices = value.get("choices") if isinstance(value, dict) else None
                 labels = value.get("labels") if isinstance(value, dict) else None
-                # taxonomy: value.get("taxonomy")
                 taxonomy = value.get("taxonomy") if isinstance(value, dict) else None
+
                 textarea_text = None
                 if typ == "textarea" and isinstance(value, dict):
                     txt_list = value.get("text")
                     if isinstance(txt_list, list) and txt_list:
-                        textarea_text = " ".join([str(t) for t in txt_list])
+                        textarea_text = " ".join([str(t) for t in txt_list]).strip()
                     elif isinstance(value.get("text"), str):
-                        textarea_text = value.get("text")
+                        textarea_text = value.get("text").strip()
 
-                # derive a normalized positive flag for this item
+                # --- collect domain choice info (do not immediately add 'domain' as a signal here) ---
+                fn = (item.get("from_name") or "") or ""
+                tn = (item.get("to_name") or "") or ""
+                fn_lower = str(fn).lower()
+                tn_lower = str(tn).lower()
+
+                if typ == "choices" and ("domain" in fn_lower or "domain" in tn_lower):
+                    # if any choice contains 'yes', treat as positive domain choice
+                    if choices and any(isinstance(c, str) and "yes" == c.strip().lower() for c in choices):
+                        domain_choice_by_channel[channel] = True
+                    # explicit "no" can set to False (keeps default False otherwise)
+                    elif choices and any(isinstance(c, str) and c.strip().lower().startswith("no") for c in choices):
+                        domain_choice_by_channel[channel] = False
+
+                # --- collect domain textarea comments ---
+                if typ == "textarea" and ("domain" in fn_lower or "domain" in tn_lower):
+                    # store last seen comment for that channel (if multiple, last one wins)
+                    if textarea_text is not None:
+                        domain_comment_by_channel[channel] = textarea_text
+
+                # --- derive normalized positive flag for this item (same as before) ---
                 positive = False
-                # choices with "Yes" -> positive
                 if choices:
-                    # treat any choice containing "yes" (case-insensitive) as positive
                     for c in choices:
                         if isinstance(c, str) and "yes" == c.strip().lower():
                             positive = True
@@ -1455,39 +1521,33 @@ class ConsolidationPipeline:
                         if isinstance(c, str) and "yes" in c.strip().lower():
                             positive = True
                             break
-                # labels present -> positive
                 if labels:
                     positive = True
-                # taxonomy present -> positive
                 if taxonomy:
                     positive = True
-                # type==choices but choices say "No" -> negative
                 if choices and any(isinstance(c, str) and c.strip().lower().startswith("no") for c in choices):
                     positive = False
-                # textarea: check for negation words
                 if textarea_text:
-                    if self._is_negative_text(textarea_text):
+                    # assume existence of explicit negative phrase implies negative
+                    if _is_negative_text(textarea_text):
                         positive = False
                     else:
                         # if contains meaningful words that match our signals, consider positive for matching keywords
-                        positive = positive or self._matches_any_keyword(textarea_text, sum(_SIGNAL_KEYWORDS.values(), []))
+                        positive = positive or _matches_any_keyword(textarea_text, sum(_SIGNAL_KEYWORDS.values(), []))
 
-                # if not positive and type not textarea, but some `origin` may be 'manual' with 'Yes' as choice etc.
-                # Now map item to signal buckets using from_name / to_name / item id / value text
-                from_name = (item.get("from_name") or "") or ""
-                to_name = (item.get("to_name") or "") or ""
-                # create combined string to search
-                combined = " ".join([str(from_name), str(to_name), str(item.get("id", ""))]).lower()
-                # include textarea_text/choices/labels into combined text for keyword scanning
+                # build combined text for keyword scanning (exclude domain decision here)
+                combined = " ".join([str(fn), str(tn), str(item.get("id", ""))]).lower()
                 if textarea_text:
                     combined += " " + textarea_text.lower()
                 if choices:
                     combined += " " + " ".join([str(c).lower() for c in choices])
 
-                # check each signal keyword group
+                # --- check each signal keyword group, BUT skip adding domain here ---
                 for signal, kws in _SIGNAL_KEYWORDS.items():
-                    if self._matches_any_keyword(combined, kws):
-                        # mark positive only if we believe item is positive (to avoid "No PII detected" false positives)
+                    if signal == "domain":
+                        # skip domain additions in first pass; we'll decide after collecting comment + choice.
+                        continue
+                    if _matches_any_keyword(combined, kws):
                         if positive:
                             detected_signals.add(signal)
                             if channel == "audio":
@@ -1499,6 +1559,28 @@ class ConsolidationPipeline:
                                 audio_signals.add(signal)
                                 video_signals.add(signal)
 
+        # ---- After processing all items: decide domain detection per channel (second pass) ----
+        for ch in ("audio", "video", "unknown"):
+            comment = domain_comment_by_channel.get(ch)
+            choice_flag = domain_choice_by_channel.get(ch, False)
+            # Add domain only when there is a meaningful comment.
+            # If comment is not meaningful (e.g., "unknown", empty) we DO NOT add domain,
+            # even if a choice said "Yes".
+            if _is_comment_meaningful(comment):
+                # add domain signal for this channel
+                if ch == "audio":
+                    audio_signals.add("domain")
+                elif ch == "video":
+                    video_signals.add("domain")
+                else:
+                    audio_signals.add("domain")
+                    video_signals.add("domain")
+                detected_signals.add("domain")
+            else:
+                # comment not meaningful: do NOT add domain even if choice_flag is True
+                # (exactly the behaviour you requested)
+                pass
+
         # build model_level_signals_detected as sorted list
         model_level_signals_detected = sorted(detected_signals)
 
@@ -1508,27 +1590,18 @@ class ConsolidationPipeline:
 
         summary = {
             "run_time": run_time_pst,
-            # "videos_processed": max(1, len(videos_seen)) if videos_seen else 0,
-            # "audios_processed": max(1, len(audios_seen)) if audios_seen else 0,
-            # "model_level_signals_detected": model_level_signals_detected,
             "audio_pii_detected": y_n("pii" in audio_signals),
             "minor_detected": y_n("minors" in audio_signals or "minors" in video_signals),
             "nsfw_content": y_n("nsfw" in audio_signals or "nsfw" in video_signals),
             "domain_detected": "yes" if ("domain" in audio_signals or "domain" in video_signals) else "no",
-            "motion_energy_detected": y_n("motion" in audio_signals or "motion" in video_signals),
+            "signal_detected": y_n("signal" in audio_signals or "signal" in video_signals),
             "people_detected": y_n("people" in audio_signals or "people" in video_signals),
             "lighting_detected": y_n("lighting" in audio_signals or "lighting" in video_signals),
             "audio_sensitive_info_detected": y_n("sensitive_audio" in audio_signals or "sensitive_audio" in video_signals or "sensitive" in audio_signals),
             "scene_detected": "yes",
-            # counts
-            # "model_level_signals_count": len(model_level_signals_detected),
-            # # lightweight per-channel detail (optional)
-            # "audio_signals": sorted(list(audio_signals)),
-            # "video_signals": sorted(list(video_signals)),
         }
 
         return summary
-    # add inside ConsolidationPipeline class
     def get_current_run_summary(self):
         """Debug helper - returns the in-memory run summary (or None)."""
         return self._current_run_summary
@@ -1549,7 +1622,7 @@ def _graceful_shutdown(actor_handle):
 
 
 if __name__ == "__main__":
-    SUMMARY_CONTAINER="summary-jsons"
+    
     ray.init(ignore_reinit_error=True)
 
     # If LS_CLIENT.fetch_all_tasks isn't picklable, make actor create its own LS client.
