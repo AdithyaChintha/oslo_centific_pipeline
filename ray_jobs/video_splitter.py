@@ -38,7 +38,7 @@ def _ffprobe_duration(path: str) -> float:
 def split_video_into_shards(
     video_path: str,
     output_dir: str = "/tmp/shards",
-    duration_sec: int = 60,
+    duration_sec: int = 180,
     target_height: int = 480,
     use_gpu: bool = True,
     shards_per_gpu: float = 2.0,   # e.g., 2 shards per GPU => num_gpus=0.5
@@ -75,6 +75,58 @@ def split_video_into_shards(
             use_gpu=use_gpu,
         ))
         t += duration_sec
+        idx += 1
+
+    results = ray.get(futures)
+    return [r for r in results if r is not None]
+
+@ray.remote(num_gpus=0.5)
+def split_video_into_shards_with_overlap(
+    video_path: str,
+    output_dir: str = "/tmp/shards",
+    duration_sec: int = 180,
+    overlap_sec: int = 60,
+    target_height: int = 480,
+    use_gpu: bool = True,
+    shards_per_gpu: float = 2.0,
+    start_idx: int = 0,
+) -> List[str]:
+    """
+    Shard a large video with sliding window overlap.
+    Creates overlapping segments: 180s duration with 60s overlap = 120s step size
+    
+    Example for 15min video:
+    - Normal: (0-3min, 3-6min, 6-9min, 9-12min, 12-15min)
+    - Overlap: (0-3min, 2-5min, 4-7min, 6-9min, 8-11min, 10-13min, 12-15min)
+    """
+    p = str(Path(video_path))
+    if not os.path.exists(p):
+        raise FileNotFoundError(p)
+    _ensure_dir(output_dir)
+
+    total_duration = _ffprobe_duration(p)
+    step_size = duration_sec - overlap_sec  # 180 - 60 = 120 seconds
+
+    # Submit per-shard Ray tasks
+    futures = []
+    t = 0.0
+    idx = start_idx
+    num_gpus_per_task = max(1.0 / max(shards_per_gpu, 0.01), 0.01) if use_gpu else 0.0
+
+    while t < total_duration - 1e-6:
+        outp = os.path.join(output_dir, f"{_basename_noext(p)}_part{idx}.mp4")
+        dur = min(duration_sec, max(0.0, total_duration - t))
+        opts = {"num_gpus": num_gpus_per_task} if use_gpu else {}
+
+        futures.append(_shard_task.options(**opts).remote(
+            video_path=p,
+            start_time=t,
+            duration=dur,
+            output_path=outp,
+            target_height=target_height,
+            use_gpu=use_gpu,
+        ))
+        t += step_size  # Move by step size (120s) instead of full duration (180s)
         idx += 1
 
     results = ray.get(futures)
@@ -162,7 +214,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Shard + downscale using H100-safe pipeline")
     ap.add_argument("video", type=str)
     ap.add_argument("out", type=str)
-    ap.add_argument("--dur", type=int, default=60)
+    ap.add_argument("--dur", type=int, default=180)
     ap.add_argument("--h", type=int, default=480)
     ap.add_argument("--gpu", action="store_true", help="Use GPU decode/scale")
     ap.add_argument("--shards-per-gpu", type=float, default=2.0, help="Parallel shards per GPU (default 2)")

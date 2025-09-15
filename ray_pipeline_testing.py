@@ -33,8 +33,8 @@ from azure.core.exceptions import ResourceNotFoundError
 
 # Import setup and all necessary Ray tasks
 from setup.cosmos.setup import setup_cosmos
-from ray_jobs.video_splitter import split_video_into_shards
-from ray_jobs.audio_splitter import split_audio_into_shards
+from ray_jobs.video_splitter import split_video_into_shards, split_video_into_shards_with_overlap
+from ray_jobs.audio_splitter import split_audio_into_shards, split_audio_into_shards_with_overlap
 #from ray_jobs.insv_to_mp4 import convert_insv_to_dual_mp4
 # Import scene detection with error handling
 try:
@@ -1109,7 +1109,7 @@ def consolidate_dual_view_outputs(all_results, local_outputs_dir, conv_time, loc
     overall_success_rate = (successful_tasks / total_possible * 100) if total_possible else 0.0
     consolidated_stats["processing_summary"]["overall_success_rate"] = f"{overall_success_rate:.1f}%"
 
-    SHARD_SEC = 60
+    SHARD_SEC = 180
     total_duration = per_view_shards * SHARD_SEC * num_views
 
     # Recompute flagged duration from the merged cross-view timeline (no double count)
@@ -1160,6 +1160,565 @@ def consolidate_dual_view_outputs(all_results, local_outputs_dir, conv_time, loc
                 consolidated_data["consolidated_annotation_summary"]["annotation_workload_reduction"])
     return consolidated_data
 
+def pipeline_main_multichunks_sequential_sessions(session_paths: list, output_base_dir: str, azure_config: dict, pipeline_config: dict):
+    """
+    Process multiple sessions sequentially - complete one session fully before starting the next.
+    
+    Args:
+        session_paths: List of session paths like ['/one-data-platform/10-ca98a947-4f4b-4903-be80-f3d0fdc553ef-working-in-office', ...]
+        output_base_dir: Base output directory for all sessions
+        azure_config: Azure configuration
+        pipeline_config: Pipeline configuration
+    """
+    logger.info(f"🚀 Starting sequential multi-session processing for {len(session_paths)} sessions")
+    
+    # Initialize tracking
+    all_sessions_summary = {
+        "total_sessions": len(session_paths),
+        "completed_sessions": 0,
+        "failed_sessions": 0,
+        "skipped_sessions": 0,
+        "session_results": {},
+        "start_time": datetime.now().isoformat(),
+        "end_time": None
+    }
+    
+    # Process each session sequentially
+    for session_idx, session_info in enumerate(session_paths, 1):
+        session_id = session_info["session_id"]
+        session_path = session_info["session_path"]
+        is_walkthrough = session_info["is_walkthrough"]
+        
+        logger.info(f"\n{'='*80}")
+        logger.info(f"🎬 PROCESSING SESSION {session_idx}/{len(session_paths)}: {session_id}")
+        logger.info(f"📁 Session Path: {session_path}")
+        logger.info(f"🔄 Walkthrough Mode: {is_walkthrough}")
+        logger.info(f"📋 Domain: {session_info.get('domain', 'Unknown')}")
+        logger.info(f"📋 Activity: {session_info.get('activity', 'Unknown')}")
+        logger.info(f"{'='*80}")
+        
+        try:
+            # Check if session is already completed
+            session_output_dir = os.path.join(output_base_dir, session_id)
+            session_status = check_session_completion_status(session_id, output_base_dir)
+            
+            if session_status.get("completion_status") == "completed":
+                logger.info(f"⏭️  Session {session_id} already completed - skipping")
+                all_sessions_summary["skipped_sessions"] += 1
+                all_sessions_summary["session_results"][session_id] = {
+                    "status": "skipped",
+                    "reason": "already_completed",
+                    "completion_time": session_status.get("completion_time")
+                }
+                continue
+            
+            # Download and process this single session
+            session_result = process_single_session(
+                session_path=session_path,
+                session_id=session_id,
+                output_base_dir=output_base_dir,
+                azure_config=azure_config,
+                pipeline_config=pipeline_config,
+                is_walkthrough=is_walkthrough
+            )
+            
+            # Track results
+            if session_result.get("success"):
+                all_sessions_summary["completed_sessions"] += 1
+                all_sessions_summary["session_results"][session_id] = {
+                    "status": "completed",
+                    "processing_time": session_result.get("processing_time"),
+                    "shards_processed": session_result.get("shards_processed", 0)
+                }
+                logger.info(f"✅ Session {session_id} completed successfully")
+            else:
+                all_sessions_summary["failed_sessions"] += 1
+                all_sessions_summary["session_results"][session_id] = {
+                    "status": "failed",
+                    "error": session_result.get("error", "Unknown error")
+                }
+                logger.error(f"❌ Session {session_id} failed: {session_result.get('error', 'Unknown error')}")
+                
+        except Exception as e:
+            all_sessions_summary["failed_sessions"] += 1
+            all_sessions_summary["session_results"][session_id] = {
+                "status": "failed",
+                "error": str(e)
+            }
+            logger.error(f"❌ Session {session_id} failed with exception: {e}")
+        
+        # Log progress
+        logger.info(f"📊 Progress: {session_idx}/{len(session_paths)} sessions processed")
+        logger.info(f"   ✅ Completed: {all_sessions_summary['completed_sessions']}")
+        logger.info(f"   ❌ Failed: {all_sessions_summary['failed_sessions']}")
+        logger.info(f"   ⏭️  Skipped: {all_sessions_summary['skipped_sessions']}")
+    
+    # Final summary
+    all_sessions_summary["end_time"] = datetime.now().isoformat()
+    logger.info(f"\n{'='*80}")
+    logger.info(f"🏁 ALL SESSIONS PROCESSING COMPLETE")
+    logger.info(f"{'='*80}")
+    logger.info(f"📊 Final Summary:")
+    logger.info(f"   Total Sessions: {all_sessions_summary['total_sessions']}")
+    logger.info(f"   ✅ Completed: {all_sessions_summary['completed_sessions']}")
+    logger.info(f"   ❌ Failed: {all_sessions_summary['failed_sessions']}")
+    logger.info(f"   ⏭️  Skipped: {all_sessions_summary['skipped_sessions']}")
+    
+    return all_sessions_summary
+
+def load_processed_sessions_tracking(tracking_file: str) -> set:
+    """
+    Load the set of processed sessions from a JSON file.
+    
+    Args:
+        tracking_file: Path to the tracking JSON file
+        
+    Returns:
+        Set of processed session IDs
+    """
+    try:
+        if os.path.exists(tracking_file):
+            with open(tracking_file, 'r') as f:
+                data = json.load(f)
+                processed_sessions = set(data.get('processed_sessions', []))
+                logger.info(f"📋 Loaded {len(processed_sessions)} previously processed sessions from: {tracking_file}")
+                return processed_sessions
+        else:
+            logger.info(f"📋 No existing tracking file found at: {tracking_file}")
+            return set()
+    except Exception as e:
+        logger.warning(f"⚠️ Could not load tracking file {tracking_file}: {e}")
+        return set()
+
+def save_processed_sessions_tracking(tracking_file: str, processed_sessions: set):
+    """
+    Save the set of processed sessions to a JSON file.
+    
+    Args:
+        tracking_file: Path to the tracking JSON file
+        processed_sessions: Set of processed session IDs
+    """
+    try:
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(tracking_file), exist_ok=True)
+        
+        # Save tracking data
+        tracking_data = {
+            "processed_sessions": list(processed_sessions),
+            "last_updated": datetime.now().isoformat(),
+            "total_processed": len(processed_sessions)
+        }
+        
+        with open(tracking_file, 'w') as f:
+            json.dump(tracking_data, f, indent=2)
+        
+        logger.info(f"💾 Saved tracking data for {len(processed_sessions)} sessions to: {tracking_file}")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not save tracking file {tracking_file}: {e}")
+
+def pipeline_main_with_blob_polling(base_prefix: str, output_base_dir: str, azure_config: dict, pipeline_config: dict, polling_interval_minutes: int = 5):
+    """
+    Main pipeline function with blob polling - continuously polls for new sessions.
+    
+    Args:
+        base_prefix: Base prefix to search for sessions (e.g., "test_mulitsession/")
+        output_base_dir: Base output directory for all sessions
+        azure_config: Azure configuration
+        pipeline_config: Pipeline configuration
+        polling_interval_minutes: How long to wait between polling attempts (default: 5 minutes)
+    """
+    logger.info("=" * 100)
+    logger.info("🔄🔄🔄 STARTING BLOB POLLING MODE 🔄🔄🔄")
+    logger.info("🔄🔄🔄 STARTING BLOB POLLING MODE 🔄🔄🔄")
+    logger.info("🔄🔄🔄 STARTING BLOB POLLING MODE 🔄🔄🔄")
+    logger.info(f"🔄 Base Prefix: {base_prefix}")
+    logger.info(f"🔄 Polling Interval: {polling_interval_minutes} minutes")
+    logger.info(f"🔄 Output Directory: {output_base_dir}")
+    logger.info("🔄🔄🔄 STARTING BLOB POLLING MODE 🔄🔄🔄")
+    logger.info("🔄🔄🔄 STARTING BLOB POLLING MODE 🔄🔄🔄")
+    logger.info("🔄🔄🔄 STARTING BLOB POLLING MODE 🔄🔄🔄")
+    logger.info("=" * 100)
+    
+    # Initialize blob client
+    blob_client = create_azure_blob_client(azure_config)
+    container_name = azure_config.get('container')
+    
+    # Track all processed sessions to avoid reprocessing
+    # Create persistent tracking file
+    tracking_file = os.path.join(output_base_dir, "processed_sessions_tracking.json")
+    all_processed_sessions = load_processed_sessions_tracking(tracking_file)
+    polling_cycle = 0
+    
+    while True:
+        polling_cycle += 1
+        logger.info("=" * 100)
+        logger.info(f"🔍🔍🔍 POLLING CYCLE #{polling_cycle} 🔍🔍🔍")
+        logger.info(f"🔍 Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"🔍 Searching for sessions under: {base_prefix}")
+        logger.info("🔍🔍🔍 POLLING CYCLE #{polling_cycle} 🔍🔍🔍")
+        logger.info("=" * 100)
+        
+        try:
+            # Discover all sessions in the directory
+            all_sessions = discover_multiple_sessions(blob_client, container_name, base_prefix)
+            
+            # Filter out already processed sessions
+            new_sessions = []
+            for session_info in all_sessions:
+                session_id = session_info["session_id"]
+                if session_id not in all_processed_sessions:
+                    new_sessions.append(session_info)
+                    all_processed_sessions.add(session_id)
+                else:
+                    logger.info(f"⏭️  Session {session_id} already processed - skipping")
+            
+            if new_sessions:
+                logger.info("=" * 100)
+                logger.info(f"🎉🎉🎉 FOUND {len(new_sessions)} NEW SESSIONS! 🎉🎉🎉")
+                logger.info(f"🎉🎉🎉 FOUND {len(new_sessions)} NEW SESSIONS! 🎉🎉🎉")
+                logger.info(f"🎉🎉🎉 FOUND {len(new_sessions)} NEW SESSIONS! 🎉🎉🎉")
+                for i, session in enumerate(new_sessions, 1):
+                    walkthrough_status = "🔄 WALKTHROUGH" if session["is_walkthrough"] else "📹 NORMAL"
+                    logger.info(f"   {i}. {session['session_id']} - {walkthrough_status}")
+                logger.info("🎉🎉🎉 FOUND NEW SESSIONS! 🎉🎉🎉")
+                logger.info("🎉🎉🎉 FOUND NEW SESSIONS! 🎉🎉🎉")
+                logger.info("🎉🎉🎉 FOUND NEW SESSIONS! 🎉🎉🎉")
+                logger.info("=" * 100)
+                
+                # Process the new sessions
+                logger.info("🚀 Starting processing of new sessions...")
+                processing_result = pipeline_main_multichunks_sequential_sessions(
+                    new_sessions, 
+                    output_base_dir, 
+                    azure_config, 
+                    pipeline_config
+                )
+                
+                logger.info("=" * 100)
+                logger.info("✅✅✅ SESSION PROCESSING COMPLETED! ✅✅✅")
+                logger.info("✅✅✅ SESSION PROCESSING COMPLETED! ✅✅✅")
+                logger.info("✅✅✅ SESSION PROCESSING COMPLETED! ✅✅✅")
+                logger.info(f"✅ Total Sessions: {processing_result['total_sessions']}")
+                logger.info(f"✅ Completed: {processing_result['completed_sessions']}")
+                logger.info(f"✅ Failed: {processing_result['failed_sessions']}")
+                logger.info(f"✅ Skipped: {processing_result['skipped_sessions']}")
+                logger.info("✅✅✅ SESSION PROCESSING COMPLETED! ✅✅✅")
+                logger.info("✅✅✅ SESSION PROCESSING COMPLETED! ✅✅✅")
+                logger.info("✅✅✅ SESSION PROCESSING COMPLETED! ✅✅✅")
+                logger.info("=" * 100)
+                
+                # Save updated tracking data
+                save_processed_sessions_tracking(tracking_file, all_processed_sessions)
+            else:
+                logger.info("=" * 100)
+                logger.info("😴😴😴 NO NEW SESSIONS FOUND 😴😴😴")
+                logger.info("😴😴😴 NO NEW SESSIONS FOUND 😴😴😴")
+                logger.info("😴😴😴 NO NEW SESSIONS FOUND 😴😴😴")
+                logger.info(f"😴 Total sessions in directory: {len(all_sessions)}")
+                logger.info(f"😴 Already processed: {len(all_processed_sessions)}")
+                logger.info("😴😴😴 NO NEW SESSIONS FOUND 😴😴😴")
+                logger.info("😴😴😴 NO NEW SESSIONS FOUND 😴😴😴")
+                logger.info("😴😴😴 NO NEW SESSIONS FOUND 😴😴😴")
+                logger.info("=" * 100)
+            
+        except Exception as e:
+            logger.error(f"❌ Error during polling cycle #{polling_cycle}: {e}")
+            logger.error(f"❌ Will retry in {polling_interval_minutes} minutes...")
+        
+        # Wait before next polling cycle
+        logger.info("=" * 100)
+        logger.info(f"⏰⏰⏰ WAITING {polling_interval_minutes} MINUTES FOR NEXT POLL ⏰⏰⏰")
+        logger.info(f"⏰⏰⏰ WAITING {polling_interval_minutes} MINUTES FOR NEXT POLL ⏰⏰⏰")
+        logger.info(f"⏰⏰⏰ WAITING {polling_interval_minutes} MINUTES FOR NEXT POLL ⏰⏰⏰")
+        logger.info(f"⏰ Next poll at: {(datetime.now() + timedelta(minutes=polling_interval_minutes)).strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info("⏰⏰⏰ WAITING FOR NEXT POLL ⏰⏰⏰")
+        logger.info("⏰⏰⏰ WAITING FOR NEXT POLL ⏰⏰⏰")
+        logger.info("⏰⏰⏰ WAITING FOR NEXT POLL ⏰⏰⏰")
+        logger.info("=" * 100)
+        
+        # Sleep for the polling interval
+        time.sleep(polling_interval_minutes * 60)
+
+def read_session_metadata(blob_client, container_name: str, session_path: str) -> dict:
+    """
+    Read metadata from Azure Blob Storage for a session to determine walkthrough status.
+    Searches for JSON files within the session directory.
+    
+    Args:
+        blob_client: Azure blob service client
+        container_name: Container name
+        session_path: Session path like "one-data-platform/10-ca98a947-4f4b-4903-be80-f3d0fdc553ef-working-in-office"
+    
+    Returns:
+        Dictionary with metadata and walkthrough status
+    """
+    try:
+        # Get container client
+        container_client = blob_client.get_container_client(container_name)
+        
+        # BIG DEBUG STATEMENT FOR METADATA SEARCH
+        logger.info("=" * 100)
+        logger.info("🔍🔍🔍 METADATA SEARCH DEBUG 🔍🔍🔍")
+        logger.info(f"🔍 Searching for JSON files in session: {session_path}")
+        logger.info("🔍🔍🔍 METADATA SEARCH DEBUG 🔍🔍🔍")
+        logger.info("=" * 100)
+        
+        # List all blobs in the session directory
+        blobs = container_client.list_blobs(name_starts_with=session_path)
+        
+        # Find JSON files in the session
+        json_files = []
+        for blob in blobs:
+            if blob.name.endswith('.json'):
+                json_files.append(blob.name)
+                logger.info(f"🔍 Found JSON file: {blob.name}")
+        
+        if not json_files:
+            logger.warning(f"⚠️ No JSON files found in session: {session_path}")
+            return {
+                "metadata": {},
+                "is_walkthrough": False,
+                "domain": "",
+                "activity": "",
+                "specific_activity": ""
+            }
+        
+        # Try to read each JSON file to find metadata
+        for json_file in json_files:
+            try:
+                logger.info(f"🔍 Attempting to read JSON file: {json_file}")
+                
+                # Download the JSON file
+                blob_data = container_client.download_blob(json_file).readall()
+                metadata = json.loads(blob_data.decode('utf-8'))
+                
+                # BIG DEBUG STATEMENT FOR METADATA CONTENT
+                logger.info("=" * 100)
+                logger.info("🔍🔍🔍 METADATA CONTENT DEBUG 🔍🔍🔍")
+                logger.info(f"🔍 JSON file: {json_file}")
+                logger.info(f"🔍 Raw metadata: {json.dumps(metadata, indent=2)}")
+                logger.info("🔍🔍🔍 METADATA CONTENT DEBUG 🔍🔍🔍")
+                logger.info("=" * 100)
+                
+                # Determine walkthrough status based on metadata fields
+                domain = metadata.get('domain', '').lower()
+                activity = metadata.get('activity', '').lower()
+                specific_activity = metadata.get('specific_activity', '').lower()
+                
+                # Check if any field indicates walkthrough
+                is_walkthrough = (
+                    'walkthrough' in domain or 
+                    'walkthrough' in activity or 
+                    'walkthrough' in specific_activity
+                )
+                
+                # BIG DEBUG STATEMENT FOR WALKTHROUGH DETECTION
+                logger.info("=" * 100)
+                logger.info("🔍🔍🔍 WALKTHROUGH DETECTION RESULT 🔍🔍🔍")
+                logger.info(f"🔍 JSON file: {json_file}")
+                logger.info(f"🔍 Domain: '{domain}' -> Contains 'walkthrough': {'walkthrough' in domain}")
+                logger.info(f"🔍 Activity: '{activity}' -> Contains 'walkthrough': {'walkthrough' in activity}")
+                logger.info(f"🔍 Specific Activity: '{specific_activity}' -> Contains 'walkthrough': {'walkthrough' in specific_activity}")
+                logger.info(f"🔍 Final is_walkthrough: {is_walkthrough}")
+                logger.info("🔍🔍🔍 WALKTHROUGH DETECTION RESULT 🔍🔍🔍")
+                logger.info("=" * 100)
+                
+                logger.info(f"📋 Session metadata for {os.path.basename(session_path)}:")
+                logger.info(f"   Domain: {metadata.get('domain', 'Unknown')}")
+                logger.info(f"   Activity: {metadata.get('activity', 'Unknown')}")
+                logger.info(f"   Walkthrough: {is_walkthrough}")
+                
+                # BIG DEBUG STATEMENT FOR WALKTHROUGH DETECTION
+                if is_walkthrough:
+                    logger.info("=" * 100)
+                    logger.info("🔄🔄🔄 WALKTHROUGH VIDEO DETECTED! 🔄🔄🔄")
+                    logger.info("🔄🔄🔄 WALKTHROUGH VIDEO DETECTED! 🔄🔄🔄")
+                    logger.info("🔄🔄🔄 WALKTHROUGH VIDEO DETECTED! 🔄🔄🔄")
+                    logger.info(f"🔄 Session: {os.path.basename(session_path)}")
+                    logger.info(f"🔄 Domain: {metadata.get('domain', 'Unknown')}")
+                    logger.info(f"🔄 Activity: {metadata.get('activity', 'Unknown')}")
+                    logger.info("🔄 This video will use 3-minute segments with 60-second overlap!")
+                    logger.info("🔄🔄🔄 WALKTHROUGH VIDEO DETECTED! 🔄🔄🔄")
+                    logger.info("🔄🔄🔄 WALKTHROUGH VIDEO DETECTED! 🔄🔄🔄")
+                    logger.info("🔄🔄🔄 WALKTHROUGH VIDEO DETECTED! 🔄🔄🔄")
+                    logger.info("=" * 100)
+                else:
+                    logger.info("=" * 100)
+                    logger.info("📹📹📹 NORMAL VIDEO DETECTED! 📹📹📹")
+                    logger.info("📹📹📹 NORMAL VIDEO DETECTED! 📹📹📹")
+                    logger.info("📹📹📹 NORMAL VIDEO DETECTED! 📹📹📹")
+                    logger.info(f"📹 Session: {os.path.basename(session_path)}")
+                    logger.info(f"📹 Domain: {metadata.get('domain', 'Unknown')}")
+                    logger.info(f"📹 Activity: {metadata.get('activity', 'Unknown')}")
+                    logger.info("📹 This video will use 3-minute segments WITHOUT overlap!")
+                    logger.info("📹📹📹 NORMAL VIDEO DETECTED! 📹📹📹")
+                    logger.info("📹📹📹 NORMAL VIDEO DETECTED! 📹📹📹")
+                    logger.info("📹📹📹 NORMAL VIDEO DETECTED! 📹📹📹")
+                    logger.info("=" * 100)
+                
+                return {
+                    "metadata": metadata,
+                    "is_walkthrough": is_walkthrough,
+                    "domain": metadata.get('domain', ''),
+                    "activity": metadata.get('activity', ''),
+                    "specific_activity": metadata.get('specific_activity', ''),
+                    "json_file": json_file
+                }
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Could not read JSON file {json_file}: {e}")
+                continue
+        
+        # If no JSON file could be read successfully
+        logger.warning(f"⚠️ Could not read any JSON files in session: {session_path}")
+        return {
+            "metadata": {},
+            "is_walkthrough": False,
+            "domain": "",
+            "activity": "",
+            "specific_activity": ""
+        }
+        
+    except Exception as e:
+        logger.warning(f"⚠️ Could not search for JSON files in {session_path}: {e}")
+        return {
+            "metadata": {},
+            "is_walkthrough": False,
+            "domain": "",
+            "activity": "",
+            "specific_activity": ""
+        }
+
+def discover_multiple_sessions(blob_client, container_name: str, base_prefix: str) -> list:
+    """
+    Discover multiple session directories under a base prefix and read their metadata.
+    
+    Args:
+        blob_client: Azure blob service client
+        container_name: Container name
+        base_prefix: Base prefix like "one-data-platform/"
+    
+    Returns:
+        List of session info dictionaries with metadata and walkthrough status
+    """
+    logger.info(f"🔍 Discovering sessions under prefix: {base_prefix}")
+    
+    session_info_list = []
+    try:
+        # Get container client and list all blobs under the base prefix
+        container_client = blob_client.get_container_client(container_name)
+        blobs = container_client.list_blobs(name_starts_with=base_prefix)
+        
+        # Extract unique session directories
+        session_dirs = set()
+        for blob in blobs:
+            # Get the relative path from base_prefix
+            relative_path = blob.name[len(base_prefix):] if blob.name.startswith(base_prefix) else blob.name
+            
+            # Extract session directory (first part before any file)
+            if '/' in relative_path:
+                session_dir = relative_path.split('/')[0]
+                if session_dir:  # Skip empty strings
+                    session_dirs.add(session_dir)
+        
+        # Process each session directory
+        for session_dir in sorted(session_dirs):
+            session_path = f"{base_prefix.rstrip('/')}/{session_dir}"
+            
+            # Read metadata for this session
+            metadata_info = read_session_metadata(blob_client, container_name, session_path)
+            
+            session_info = {
+                "session_path": session_path,
+                "session_id": session_dir,
+                "is_walkthrough": metadata_info["is_walkthrough"],
+                "metadata": metadata_info["metadata"],
+                "domain": metadata_info["domain"],
+                "activity": metadata_info["activity"],
+                "specific_activity": metadata_info["specific_activity"]
+            }
+            
+            session_info_list.append(session_info)
+        
+        logger.info(f"📋 Found {len(session_info_list)} session directories:")
+        for i, session_info in enumerate(session_info_list, 1):
+            walkthrough_status = "🔄 WALKTHROUGH" if session_info["is_walkthrough"] else "📹 NORMAL"
+            logger.info(f"   {i}. {session_info['session_path']} - {walkthrough_status}")
+            
+    except Exception as e:
+        logger.error(f"❌ Error discovering sessions: {e}")
+    
+    return session_info_list
+
+def process_single_session(session_path: str, session_id: str, output_base_dir: str, azure_config: dict, pipeline_config: dict, is_walkthrough: bool = False):
+    """
+    Process a single session through the complete pipeline.
+    """
+    start_time = time.time()
+    
+    try:
+        # Download session
+        logger.info(f"📥 Downloading session: {session_id}")
+        download_result = download_ready_sessions(
+            blob_service_client=create_azure_blob_client(azure_config),
+            container_name=azure_config.get('container'),
+            input_prefix=session_path,
+            local_download_dir=pipeline_config['local_storage']['temp_download_dir'],
+            max_sessions=1,
+            use_parallel_chunks=True
+        )
+        
+        if not download_result.get("success") or not download_result.get("download_results"):
+            return {"success": False, "error": "Failed to download session"}
+        
+        # Read metadata to determine walkthrough status
+        session_metadata_info = read_session_metadata(
+            create_azure_blob_client(azure_config), 
+            azure_config.get('container'), 
+            session_path
+        )
+        actual_is_walkthrough = session_metadata_info["is_walkthrough"]
+        
+        # BIG DEBUG: Show what we determined from metadata
+        logger.info("=" * 100)
+        logger.info("🔍🔍🔍 PROCESS_SINGLE_SESSION WALKTHROUGH DETECTION 🔍🔍🔍")
+        logger.info(f"🔍 Parameter is_walkthrough: {is_walkthrough}")
+        logger.info(f"🔍 Metadata determined is_walkthrough: {actual_is_walkthrough}")
+        logger.info(f"🔍 Domain: {session_metadata_info.get('domain', 'Unknown')}")
+        logger.info(f"🔍 Activity: {session_metadata_info.get('activity', 'Unknown')}")
+        logger.info("🔍🔍🔍 PROCESS_SINGLE_SESSION WALKTHROUGH DETECTION 🔍🔍🔍")
+        logger.info("=" * 100)
+        
+        # Add walkthrough status to download results based on metadata
+        for session_result in download_result.get("download_results", {}).values():
+            session_result["processing_type"] = "walkthrough" if actual_is_walkthrough else "normal"
+        
+        # Process the downloaded session
+        logger.info(f"🔄 Processing session: {session_id} (Walkthrough: {actual_is_walkthrough})")
+        session_output_dir = os.path.join(output_base_dir, session_id)
+        
+        pipeline_result = pipeline_main_multichunks(
+            download_results=download_result,
+            output_dir=session_output_dir,
+            azure_output_prefix=f"processed/{session_id}",
+            blob_client=create_azure_blob_client(azure_config),
+            container_name=azure_config.get('container'),
+            account_name=azure_config.get('account-name'),
+            account_key=azure_config.get('account-key')
+        )
+        
+        processing_time = time.time() - start_time
+        
+        return {
+            "success": True,
+            "processing_time": processing_time,
+            "shards_processed": pipeline_result.get("total_shards_processed", 0),
+            "pipeline_result": pipeline_result
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_output_prefix: str=None, blob_client:str = None, container_name:str = None, account_name: str = None, account_key: str = None):
     
     try:
@@ -1195,8 +1754,18 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
         os.makedirs(output_dir, exist_ok=True)
         
         #check walkthrough
+        is_walkthrough = False  # Initialize to False by default
         if session_result.get('processing_type') == 'walkthrough':
             is_walkthrough = True
+        
+        # BIG DEBUG: Show what processing_type we got and what is_walkthrough is set to
+        logger.info("=" * 100)
+        logger.info("🔍🔍🔍 PIPELINE WALKTHROUGH CHECK DEBUG 🔍🔍🔍")
+        logger.info(f"🔍 Session Result Processing Type: '{session_result.get('processing_type', 'NOT_SET')}'")
+        logger.info(f"🔍 is_walkthrough variable: {is_walkthrough}")
+        logger.info(f"🔍 Processing Type == 'walkthrough': {session_result.get('processing_type') == 'walkthrough'}")
+        logger.info("🔍🔍🔍 PIPELINE WALKTHROUGH CHECK DEBUG 🔍🔍🔍")
+        logger.info("=" * 100)
 
         # Session metadata from JSON
         session_metadata = None
@@ -1268,23 +1837,64 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                     update_tracking(chunk_id, "video_processing.view_unwarping", "skipped")
                 
                 for view_name, view_path in flat_result.items():
-                    # Split this view into 60s shards with sequential part numbering
+                    # Split this view into 180s shards with sequential part numbering
                     logger.info(f"Processing sharding for view:{view_name} at {view_path} starting from part{global_part_idx}")
                     update_tracking(chunk_id, f"view_sharding.{view_name}", "processing")
                     try:
                         if not is_walkthrough:
+                            # BIG DEBUG STATEMENT FOR NORMAL SPLITTING
+                            logger.info("=" * 120)
+                            logger.info("📹📹📹 NORMAL VIDEO SPLITTING TRIGGERED! 📹📹📹")
+                            logger.info("📹📹📹 NORMAL VIDEO SPLITTING TRIGGERED! 📹📹📹")
+                            logger.info("📹📹📹 NORMAL VIDEO SPLITTING TRIGGERED! 📹📹📹")
+                            logger.info(f"📹 View: {view_name}")
+                            logger.info(f"📹 Video Path: {view_path}")
+                            logger.info("📹 Using: split_video_into_shards (NORMAL MODE)")
+                            logger.info("📹 Duration: 180 seconds per segment")
+                            logger.info("📹 Overlap: 0 seconds (NO OVERLAP)")
+                            logger.info("📹 Method: Discrete 3-minute segments")
+                            logger.info("📹📹📹 NORMAL VIDEO SPLITTING TRIGGERED! 📹📹📹")
+                            logger.info("📹📹📹 NORMAL VIDEO SPLITTING TRIGGERED! 📹📹📹")
+                            logger.info("📹📹📹 NORMAL VIDEO SPLITTING TRIGGERED! 📹📹📹")
+                            logger.info("=" * 120)
+                            
                             shards = ray.get(split_video_into_shards.remote(
                                 view_path, 
                                 output_dir=os.path.join(output_dir, f"{view_name}_shards"), 
-                                duration_sec=60,
+                                duration_sec=180,
                                 start_idx=global_part_idx  # Pass the global part index
                             ))
                             view_shards[view_name] = view_shards.get(view_name, []) + shards
                             update_tracking(chunk_id, f"view_sharding.{view_name}", "completed",
                                         shard_count=len(shards), shard_paths=shards)
                         else:
-                            #TODO: Implement sharding with sliding window overlap
-                            continue
+                            # BIG DEBUG STATEMENT FOR WALKTHROUGH SPLITTING
+                            logger.info("=" * 120)
+                            logger.info("🔄🔄🔄 WALKTHROUGH VIDEO SPLITTING TRIGGERED! 🔄🔄🔄")
+                            logger.info("🔄🔄🔄 WALKTHROUGH VIDEO SPLITTING TRIGGERED! 🔄🔄🔄")
+                            logger.info("🔄🔄🔄 WALKTHROUGH VIDEO SPLITTING TRIGGERED! 🔄🔄🔄")
+                            logger.info(f"🔄 View: {view_name}")
+                            logger.info(f"🔄 Video Path: {view_path}")
+                            logger.info("🔄 Using: split_video_into_shards_with_overlap (WALKTHROUGH MODE)")
+                            logger.info("🔄 Duration: 180 seconds per segment")
+                            logger.info("🔄 Overlap: 60 seconds (WITH OVERLAP)")
+                            logger.info("🔄 Step Size: 120 seconds (180 - 60)")
+                            logger.info("🔄 Method: Sliding window with 60-second overlap")
+                            logger.info("🔄🔄🔄 WALKTHROUGH VIDEO SPLITTING TRIGGERED! 🔄🔄🔄")
+                            logger.info("🔄🔄🔄 WALKTHROUGH VIDEO SPLITTING TRIGGERED! 🔄🔄🔄")
+                            logger.info("🔄🔄🔄 WALKTHROUGH VIDEO SPLITTING TRIGGERED! 🔄🔄🔄")
+                            logger.info("=" * 120)
+                            
+                            shards = ray.get(split_video_into_shards_with_overlap.remote(
+                                view_path, 
+                                output_dir=os.path.join(output_dir, f"{view_name}_shards"), 
+                                duration_sec=180,
+                                overlap_sec=60,  # 60 seconds overlap
+                                start_idx=global_part_idx  # Pass the global part index
+                            ))
+                            view_shards[view_name] = view_shards.get(view_name, []) + shards
+                            update_tracking(chunk_id, f"view_sharding.{view_name}", "completed",
+                                        shard_count=len(shards), shard_paths=shards)
                     except Exception as e:
                         logger.error(f"Error sharding {view_name}: {e}")
                         update_tracking(chunk_id, f"view_sharding.{view_name}", "error",
@@ -1320,12 +1930,54 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                 update_tracking(audio_chunk_id, "download", "completed")
                 
                 try:
-                    chunk_audio_shards = ray.get(split_audio_into_shards.remote(
-                        local_audio_path,
-                        output_dir=os.path.join(output_dir, "audio_shards"),
-                        duration_sec=60,
-                        start_idx=global_part_idx  # Pass the global part index
-                    ))
+                    if is_walkthrough:
+                        # BIG DEBUG STATEMENT FOR WALKTHROUGH AUDIO SPLITTING
+                        logger.info("=" * 120)
+                        logger.info("🎵🎵🎵 WALKTHROUGH AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
+                        logger.info("🎵🎵🎵 WALKTHROUGH AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
+                        logger.info("🎵🎵🎵 WALKTHROUGH AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
+                        logger.info(f"🎵 Audio Path: {local_audio_path}")
+                        logger.info("🎵 Using: split_audio_into_shards_with_overlap (WALKTHROUGH MODE)")
+                        logger.info("🎵 Duration: 180 seconds per segment")
+                        logger.info("🎵 Overlap: 60 seconds (WITH OVERLAP)")
+                        logger.info("🎵 Step Size: 120 seconds (180 - 60)")
+                        logger.info("🎵 Method: Sliding window with 60-second overlap")
+                        logger.info("🎵🎵🎵 WALKTHROUGH AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
+                        logger.info("🎵🎵🎵 WALKTHROUGH AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
+                        logger.info("🎵🎵🎵 WALKTHROUGH AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
+                        logger.info("=" * 120)
+                        
+                        # Use sliding window overlap for audio as well
+                        chunk_audio_shards = ray.get(split_audio_into_shards_with_overlap.remote(
+                            local_audio_path,
+                            output_dir=os.path.join(output_dir, "audio_shards"),
+                            duration_sec=180,
+                            overlap_sec=60,  # 60 seconds overlap
+                            start_idx=global_part_idx  # Pass the global part index
+                        ))
+                    else:
+                        # BIG DEBUG STATEMENT FOR NORMAL AUDIO SPLITTING
+                        logger.info("=" * 120)
+                        logger.info("🎵🎵🎵 NORMAL AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
+                        logger.info("🎵🎵🎵 NORMAL AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
+                        logger.info("🎵🎵🎵 NORMAL AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
+                        logger.info(f"🎵 Audio Path: {local_audio_path}")
+                        logger.info("🎵 Using: split_audio_into_shards (NORMAL MODE)")
+                        logger.info("🎵 Duration: 180 seconds per segment")
+                        logger.info("🎵 Overlap: 0 seconds (NO OVERLAP)")
+                        logger.info("🎵 Method: Discrete 3-minute segments")
+                        logger.info("🎵🎵🎵 NORMAL AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
+                        logger.info("🎵🎵🎵 NORMAL AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
+                        logger.info("🎵🎵🎵 NORMAL AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
+                        logger.info("=" * 120)
+                        
+                        # Normal processing without overlap
+                        chunk_audio_shards = ray.get(split_audio_into_shards.remote(
+                            local_audio_path,
+                            output_dir=os.path.join(output_dir, "audio_shards"),
+                            duration_sec=180,
+                            start_idx=global_part_idx  # Pass the global part index
+                        ))
                     audio_shards.extend(chunk_audio_shards)
                     global_part_idx += len(chunk_audio_shards)
                     logger.info(f"Added {len(chunk_audio_shards)} audio shards for chunk {audio_id}, global_part_idx now: {global_part_idx}")
@@ -4816,8 +5468,8 @@ if __name__ == "__main__":
     
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Ray Pipeline with Integrated Blob Polling")
-    parser.add_argument("--mode", choices=["integrated", "standalone", "multi_chunks"], default="multi_chunks",
-                       help="Run mode: 'integrated' for blob polling + pipeline, 'standalone' for direct pipeline, multi_chunks for new directory format")
+    parser.add_argument("--mode", choices=["integrated", "standalone", "multi_chunks", "multi_sessions", "blob_polling"], default="multi_chunks",
+                       help="Run mode: 'integrated' for blob polling + pipeline, 'standalone' for direct pipeline, 'multi_chunks' for single session, 'multi_sessions' for multiple sessions, 'blob_polling' for continuous blob polling")
     parser.add_argument("--azure-config", default="blobfuse2_config.yaml",
                        help="Azure configuration file path")
     parser.add_argument("--pipeline-config", default="config/pipeline_config.yaml",
@@ -4836,6 +5488,8 @@ if __name__ == "__main__":
                        help="Enable parallel chunk downloading using Ray (default: True)")
     parser.add_argument("--sequential-chunks", action="store_true", default=False,
                        help="Use sequential chunk downloading (overrides parallel-chunks)")
+    parser.add_argument("--polling-interval", type=int, default=5,
+                       help="Polling interval in minutes for blob_polling mode (default: 5)")
 
     # Standalone mode arguments
     parser.add_argument("--input-video", 
@@ -4943,6 +5597,104 @@ if __name__ == "__main__":
                     print(f"   📄 {file} ({size_mb:.1f} MB)")
             output_prefix = pipeline_config['azure_storage']['output_blob_prefix']
             pipeline_main_multichunks(result, output_base_dir, f"{output_prefix}", blob_client, container_name, account_name, account_key)
+
+        elif args.mode == "multi_sessions":
+            # =================================================================
+            # MULTI-SESSIONS MODE: Process multiple sessions sequentially
+            # =================================================================
+            logger.info("🚀 Starting MULTI-SESSIONS MODE: Sequential session processing")
+            logger.info("=" * 80)
+            
+            pipeline_config = load_pipeline_config(args.pipeline_config)
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            output_base_dir = os.path.join(current_dir, pipeline_config['local_storage']['output_base_dir'].lstrip('./'))
+            
+            # Load Azure config
+            config = load_azure_config("blobfuse2_config.yaml")
+            blob_client = create_azure_blob_client(config)
+            
+            if 'azstorage' in config:
+                az_config = config['azstorage']
+            else:
+                az_config = config
+            
+            container_name = az_config['container']
+            account_name = az_config['account-name']
+            account_key = az_config['account-key']
+            
+            # Base prefix for discovering sessions
+            base_prefix = args.blob_prefix  # e.g., "one-data-platform/"
+            
+            logger.info(f"🔍 Discovering sessions under: {base_prefix}")
+            
+            # Discover all session directories
+            session_paths = discover_multiple_sessions(blob_client, container_name, base_prefix)
+            
+            if not session_paths:
+                logger.warning(f"⚠️ No sessions found under prefix: {base_prefix}")
+                exit(0)
+            
+            logger.info(f"📋 Found {len(session_paths)} sessions to process")
+            
+            # Process all sessions sequentially
+            all_results = pipeline_main_multichunks_sequential_sessions(
+                session_paths=session_paths,
+                output_base_dir=output_base_dir,
+                azure_config=az_config,
+                pipeline_config=pipeline_config
+            )
+            
+            # Save final summary
+            summary_file = os.path.join(output_base_dir, "multi_sessions_summary.json")
+            with open(summary_file, 'w') as f:
+                json.dump(all_results, f, indent=2)
+            
+            logger.info(f"📊 Multi-sessions processing complete! Summary saved to: {summary_file}")
+
+        elif args.mode == "blob_polling":
+            # =================================================================
+            # BLOB POLLING MODE: Continuous polling for new sessions
+            # =================================================================
+            logger.info("🚀 Starting BLOB POLLING MODE: Continuous session discovery and processing")
+            logger.info("=" * 80)
+            
+            # Load configurations
+            pipeline_config = load_pipeline_config(args.pipeline_config)
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            output_base_dir = os.path.join(current_dir, pipeline_config['local_storage']['output_base_dir'].lstrip('./'))
+            
+            # Load Azure config
+            config = load_azure_config("blobfuse2_config.yaml")
+            
+            if 'azstorage' in config:
+                az_config = config['azstorage']
+            else:
+                az_config = config
+            
+            # Base prefix for discovering sessions
+            base_prefix = args.blob_prefix  # e.g., "test_mulitsession/"
+            polling_interval = args.polling_interval
+            
+            logger.info(f"🔄 Blob Polling Configuration:")
+            logger.info(f"   📁 Base Prefix: {base_prefix}")
+            logger.info(f"   ⏰ Polling Interval: {polling_interval} minutes")
+            logger.info(f"   📂 Output Directory: {output_base_dir}")
+            logger.info("=" * 80)
+            
+            # Start continuous blob polling
+            try:
+                pipeline_main_with_blob_polling(
+                    base_prefix=base_prefix,
+                    output_base_dir=output_base_dir,
+                    azure_config=az_config,
+                    pipeline_config=pipeline_config,
+                    polling_interval_minutes=polling_interval
+                )
+            except KeyboardInterrupt:
+                logger.info("🛑 Blob polling stopped by user (Ctrl+C)")
+            except Exception as e:
+                logger.error(f"❌ Error in blob polling mode: {e}")
+                raise
 
         if args.mode == "integrated":
             # =================================================================
