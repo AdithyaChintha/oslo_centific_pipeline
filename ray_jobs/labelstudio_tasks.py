@@ -753,7 +753,7 @@ def assign_views_to_labelstudio_positions(view_results, view_azure_urls):
 
 def generate_multiview_4view_labelstudio_task(shard_output_dir, assigned_views, 
                                             consolidated_results, shard_number, shard_offset_sec, 
-                                            audio_url, total_shards=None, video_name=None, all_view_urls=None):
+                                            audio_url, total_shards=None, video_name=None, all_view_urls=None, session_metadata=None):
     """
     Generate Label Studio task with 4-view display: video_top, video_left, video_right, video_bottom.
     Follows the format from complete-tast.txt for 4-view UI support.
@@ -792,12 +792,69 @@ def generate_multiview_4view_labelstudio_task(shard_output_dir, assigned_views,
     pii_prediction = extract_pii_prediction_from_consolidated(consolidated_results)
     nsfw_prediction = extract_nsfw_prediction_from_consolidated(consolidated_results)
     minor_prediction = extract_minor_prediction_from_consolidated(consolidated_results)
+    people_count_prediction = extract_people_count_prediction_from_consolidated(consolidated_results)
+    absent_participant_prediction = extract_absent_participant_prediction_from_consolidated(consolidated_results)
     # Extract URLs from assigned views, using fallbacks if positions are empty
     video_top = assigned_views.get('top', {}).get('url', '') if assigned_views.get('top') else ''
     video_left = assigned_views.get('left', {}).get('url', '') if assigned_views.get('left') else ''
     video_right = assigned_views.get('right', {}).get('url', '') if assigned_views.get('right') else ''
     video_bottom = assigned_views.get('bottom', {}).get('url', '') if assigned_views.get('bottom') else ''
     
+    # Extract metadata fields with fallbacks
+    if session_metadata:
+        home_id = session_metadata.get("home_id", "")
+        start_datetime = session_metadata.get("start_datetime", "")
+        end_datetime = session_metadata.get("end_datetime", "")
+        
+        # Format duration
+        duration_minutes = session_metadata.get("duration_minutes")
+        if duration_minutes:
+            hours, minutes = divmod(int(duration_minutes), 60)
+            if hours > 0:
+                total_duration = f"{hours}h {minutes}m"
+            else:
+                total_duration = f"{minutes}m"
+        else:
+            total_duration = ""
+        
+        # Combine activity fields
+        activity = session_metadata.get("activity", "")
+        specific_activity = session_metadata.get("specific_activity", "")
+        if activity and specific_activity:
+            metadata_activity = specific_activity
+        elif activity:
+            metadata_activity = activity
+        else:
+            metadata_activity = ""
+        
+        # Extract other metadata fields
+        metadata_domain = session_metadata.get("domain", "production")
+        metadata_participants = len(session_metadata.get("participants", []))
+        metadata_room = session_metadata.get("room", "")
+        metadata_lighting = session_metadata.get("day_night", "")
+        
+        logger.info(f"🏷️ Metadata integrated for Label Studio task:")
+        logger.info(f"   Home ID: {home_id}")
+        logger.info(f"   Activity: {metadata_activity}")
+        logger.info(f"   Domain: {metadata_domain}")
+        logger.info(f"   Duration: {total_duration}")
+    else:
+        # Default values when no metadata available
+        home_id = ""
+        start_datetime = ""
+        end_datetime = ""
+        total_duration = ""
+        metadata_domain = "production"
+        metadata_activity = ""
+        metadata_participant = ""
+        metadata_room = ""
+        metadata_lighting = ""
+        logger.warning("⚠️ No session metadata available, using default values")
+    
+    # TODO: Extract files_deleted from delete_files_request if available
+    # For now, using empty array as default
+    files_deleted = []
+
     # Create task with 4-view display format
 
     task = {
@@ -811,34 +868,41 @@ def generate_multiview_4view_labelstudio_task(shard_output_dir, assigned_views,
             
             # Metadata (following complete-tast.txt structure)
             "meta": "",  # Required empty meta field
+            
+            # ========================
+            # METADATA FIELDS - UPDATED
+            # ========================
+            "home_id": home_id,                           # ← NEW: From metadata.home_id
+            "start_datetime": start_datetime,             # ← NEW: From metadata.start_datetime
+            "end_datetime": end_datetime,                 # ← NEW: From metadata.end_datetime
+            "total_duration": total_duration,             # ← NEW: From metadata.duration_minutes (formatted)
+            "files_deleted": files_deleted,               # ← NEW: From delete_files_request (future)
+            "metadata_domain": metadata_domain,           # ← UPDATED: From metadata.domain
+            "metadata_activity": metadata_activity,       # ← NEW: From metadata.activity + specific_activity
+            "metadata_participant": metadata_participants, # ← NEW: From metadata.participant_id
+            "metadata_room": metadata_room,               # ← NEW: From metadata.room
+            "metadata_lighting": metadata_lighting,       # ← NEW: From metadata.day_night
+            
+            # Existing fields (keep as-is)
+            "meta.actions": "",
             "meta.home_identifier": f"Shard_{shard_number}",
             "meta.recording_datetime": current_time,
-            "metadata_domain": "production",  # Required by Label Studio API
-            "meta.actions": "",
-            
             "AI_lighting_prediction": lighting_prediction,
             "AI_signal_prediction": signal_quality_prediction,
             "AI_sensitive_prediction": sensitive_prediction,
             "AI_PII_prediction": pii_prediction,
             "AI_NSFW_prediction": nsfw_prediction,
             "AI_minor_prediction": minor_prediction,
-            # Multi-view specific metadata
+            "AI_prediction_participants_number": people_count_prediction,
+            "AI_prediction_absent_participant": str(absent_participant_prediction),
             "shard_number": str(shard_number),
-            "shard_id": shard_number,
-            "total_shards": total_shards,
-            "video_name": video_name,
-            "timestamp": current_time,
-            "processing_type": "multi_view_4view_equal",
-            "shard_offset_seconds": str(shard_offset_sec),
+            "shard_offset_seconds": str(shard_offset_sec), 
+            "total_shards": total_shards or 1,
+            "video_name": video_name or "",
             "segments_detected": str(len(raw_predictions)),
-            "total_views_processed": consolidated_results.get('total_views', 0),
-            "successful_views": consolidated_results.get('cross_view_analysis', {}).get('successful_views', 0),
-            "home_id": "",
-            "start_datetime": "",
-            "end_datetime": "",
-            "total_duration": "",
-            "files_deleted": [],
-
+            "processing_type": "multi_view_4view_equal",
+            "successful_views": len([v for v in assigned_views.values() if v.get('url')]),
+            "total_views_processed": len(assigned_views)
         },
         "predictions": [{
             "model_version": "multi_view_4view_v1.0",
@@ -1160,7 +1224,7 @@ def extract_pii_prediction_from_consolidated(consolidated_results):
         str: PII detection status
     """
     # Check predictions for PII detection
-    predictions = consolidated_results.get('predictions', [])
+    predictions = consolidated_results.get('consolidated_predictions_for_ls', [])
     for prediction in predictions:
         if (prediction.get('from_name') == 'val_pii_audio' and 
             prediction.get('type') == 'choices' and 
@@ -1177,7 +1241,7 @@ def extract_nsfw_prediction_from_consolidated(consolidated_results):
         str: NSFW detection status
     """
     # Check predictions for NSFW detection
-    predictions = consolidated_results.get('predictions', [])
+    predictions = consolidated_results.get('consolidated_predictions_for_ls', [])
     for prediction in predictions:
         if (prediction.get('from_name') == 'val_nudity_video' and 
             prediction.get('type') == 'choices' and 
@@ -1194,7 +1258,7 @@ def extract_minor_prediction_from_consolidated(consolidated_results):
         str: Minor detection status
     """
     # Check predictions for minor detection
-    predictions = consolidated_results.get('predictions', [])
+    predictions = consolidated_results.get('consolidated_predictions_for_ls', [])
     for prediction in predictions:
         if (prediction.get('from_name') == 'val_minors_video' and 
             prediction.get('type') == 'choices' and 
@@ -1202,3 +1266,60 @@ def extract_minor_prediction_from_consolidated(consolidated_results):
             return "Minors detected"
     
     return "No minors detected"
+
+def extract_absent_participant_prediction_from_consolidated(consolidated_results):
+    predictions = consolidated_results.get('consolidated_predictions_for_ls', [])
+    for prediction in predictions:
+        if (prediction.get('from_name') == 'val_absent' and 
+            prediction.get('type') == 'choices' and 
+            'Yes' in prediction.get('value', {}).get('choices', [])):
+            return True
+    
+    return False
+
+def extract_people_count_prediction_from_consolidated(consolidated_results):
+    """
+    Extract people count prediction from consolidated results for AI_prediction_participants_number field.
+    Updated to match the data structure from create_multiview_consolidated_predictions().
+    
+    Args:
+        consolidated_results: Consolidated results from pipeline processing
+        
+    Returns:
+        str: Number of unique people detected or "0" if none detected
+    """
+    if not consolidated_results or not isinstance(consolidated_results, dict):
+        return "0"
+    
+    # Check for people data in consolidated predictions (new structure)
+    predictions = consolidated_results.get('consolidated_predictions_for_ls', [])
+    
+    # Look for people_analytics prediction
+    for prediction in predictions:
+        if (prediction.get('type') == 'people_analytics' and 
+            prediction.get('from_name') == 'people_counter'):
+            unique_people = prediction.get('value', {}).get('unique_people', 0)
+            if unique_people > 0:
+                return str(unique_people)
+    
+    # Fallback: Check video-level people summary (legacy format)
+    people_summary = consolidated_results.get('people_summary', {})
+    if people_summary and people_summary.get('total_unique_people', 0) > 0:
+        return str(people_summary['total_unique_people'])
+    
+    # Fallback: Check view-level YOLO results directly
+    view_results = consolidated_results.get('view_results', {})
+    max_unique_people = 0
+    
+    for view_name, view_result in view_results.items():
+        if not view_result.get('success', True):
+            continue
+            
+        yolo_data = view_result.get('yolo', {})
+        people_analytics = yolo_data.get('people_analytics', {})
+        
+        if people_analytics and people_analytics.get('count_summary'):
+            unique_people = people_analytics['count_summary'].get('unique_people', 0)
+            max_unique_people = max(max_unique_people, unique_people)
+    
+    return str(max_unique_people) if max_unique_people > 0 else "0"

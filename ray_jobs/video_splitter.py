@@ -42,6 +42,7 @@ def split_video_into_shards(
     target_height: int = 480,
     use_gpu: bool = True,
     shards_per_gpu: float = 2.0,   # e.g., 2 shards per GPU => num_gpus=0.5
+    start_idx: int = 0,  # Starting index for part numbering
 ) -> List[str]:
     """
     Shard a large video; for H100/A100 (no NVENC) we do:
@@ -57,7 +58,7 @@ def split_video_into_shards(
     # Submit per-shard Ray tasks
     futures = []
     t = 0.0
-    idx = 0
+    idx = start_idx  # Use the provided starting index
     num_gpus_per_task = max(1.0 / max(shards_per_gpu, 0.01), 0.01) if use_gpu else 0.0
 
     while t < total_duration - 1e-6:

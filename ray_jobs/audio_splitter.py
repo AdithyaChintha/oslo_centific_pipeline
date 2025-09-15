@@ -37,6 +37,7 @@ def split_audio_into_shards(
     audio_codec: str = "pcm_s16le",  # For WAV: pcm_s16le, pcm_s24le, pcm_f32le
     sample_rate: Optional[int] = None,  # Resample if specified
     channels: Optional[int] = None,  # Mono=1, Stereo=2, etc.
+    start_idx: int = 0,  # Starting index for part numbering
 ) -> List[str]:
     """
     Split audio file into shards with the same timestamps as video shards.
@@ -64,7 +65,7 @@ def split_audio_into_shards(
     # Submit per-shard Ray tasks
     futures = []
     t = 0.0
-    idx = 0
+    idx = start_idx  # Use the provided starting index
 
     while t < total_duration - 1e-6:
         outp = os.path.join(output_dir, f"{_basename_noext(p)}_part{idx}.{audio_format}")

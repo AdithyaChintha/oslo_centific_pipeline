@@ -127,11 +127,13 @@ def insv_to_4viewsERP(
                 f"[dual]v360=input=dfisheye:output=equirect:ih_fov={lens_fov_deg}:iv_fov={lens_fov_deg}:w={W_erp}:h={H_erp}[erp]"
             )
         cmd_erp = [
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "info", "-stats",
             "-i", str(in_path),
             "-filter_complex", vf,
             "-map", "[erp]",
+            "-map", "0:a?",
             "-c:v", encoder,
+            "-c:a", "copy",
             "-crf" if encoder == "libx264" else "-cq", str(crf_or_cq),
             "-preset", preset,
             "-pix_fmt", "yuv420p",
@@ -147,10 +149,11 @@ def insv_to_4viewsERP(
         if flip_erp:
             vf += ",vflip"
         cmd_erp = [
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "info", "-stats",
             "-i", str(in_path),
             "-vf", vf,
             "-c:v", encoder,
+            "-c:a", "copy",
             ("-crf" if encoder == "libx264" else "-cq"), str(crf_or_cq),
             "-preset", preset,
             "-pix_fmt", "yuv420p",
@@ -185,14 +188,14 @@ def insv_to_4viewsERP(
     out_left  = out_dir / f"left_{W}x{H}.mp4"
 
     cmd_4 = [
-        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "info", "-stats",
         "-i", str(erp_path),
         "-filter_complex", vf4,
         # map 4 labeled outputs
-        "-map", "[front]", "-c:v", encoder, ("-cq" if encoder == "h264_nvenc" else "-crf"), str(crf_or_cq), "-preset", preset, "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out_front),
-        "-map", "[right]", "-c:v", encoder, ("-cq" if encoder == "h264_nvenc" else "-crf"), str(crf_or_cq), "-preset", preset, "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out_right),
-        "-map", "[back]",  "-c:v", encoder, ("-cq" if encoder == "h264_nvenc" else "-crf"), str(crf_or_cq), "-preset", preset, "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out_back),
-        "-map", "[left]",  "-c:v", encoder, ("-cq" if encoder == "h264_nvenc" else "-crf"), str(crf_or_cq), "-preset", preset, "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out_left),
+        "-map", "[front]", "-map", "0:a?", "-c:v", encoder, ("-cq" if encoder == "h264_nvenc" else "-crf"), str(crf_or_cq), "-preset", preset, "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out_front),
+        "-map", "[right]", "-map", "0:a?", "-c:v", encoder, ("-cq" if encoder == "h264_nvenc" else "-crf"), str(crf_or_cq), "-preset", preset, "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out_right),
+        "-map", "[back]",  "-map", "0:a?", "-c:v", encoder, ("-cq" if encoder == "h264_nvenc" else "-crf"), str(crf_or_cq), "-preset", preset, "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out_back),
+        "-map", "[left]",  "-map", "0:a?", "-c:v", encoder, ("-cq" if encoder == "h264_nvenc" else "-crf"), str(crf_or_cq), "-preset", preset, "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out_left),
     ]
 
     _run(cmd_4, fallback_x264=True)

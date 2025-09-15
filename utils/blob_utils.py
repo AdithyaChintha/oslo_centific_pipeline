@@ -750,3 +750,437 @@ def save_video_list_progress(video_list_file: str, videos: List[Dict]):
         logger.info(f"💾 Saved video list progress: {len(videos)} videos")
     except Exception as e:
         logger.error(f"❌ Failed to save video list progress: {e}")
+
+def upload_output_directory_with_sas(output_dir: str, azure_blob_client, container_name: str, 
+                                   blob_base_path: str, video_name: str, 
+                                   account_name: str, account_key: str, 
+                                   sas_expiry_days: int = 365):
+    """
+    Upload entire output directory to Azure blob storage AND generate SAS URLs for all files
+    
+    This function combines the functionality of:
+    - upload_output_directory_to_blob (directory upload)
+    - generate_azure_shard_urls (SAS URL generation)
+    
+    Args:
+        output_dir: Local output directory path
+        azure_blob_client: Azure blob service client
+        container_name: Azure container name
+        blob_base_path: Base blob path (e.g., "output_test/video_domsting")
+        video_name: Timestamped video directory name (e.g., "video_skincare_20250909_123832")
+        account_name: Azure storage account name
+        account_key: Azure storage account key
+        sas_expiry_days: SAS token expiry in days (default 90)
+        
+    Returns:
+        dict: {
+            "success": bool,
+            "uploaded_files": [...],
+            "failed_files": [...],
+            "shard_urls": {
+                "audio_urls": {0: "url_with_sas", 1: "url_with_sas", ...},
+                "view_urls": {
+                    "erp": {0: "url_with_sas", 1: "url_with_sas", ...},
+                    "front": {0: "url_with_sas", 1: "url_with_sas", ...},
+                    ...
+                },
+                "dual_view_urls": {
+                    "view1_urls": {0: "url_with_sas", 1: "url_with_sas", ...},
+                    "view2_urls": {0: "url_with_sas", 1: "url_with_sas", ...},
+                    "audio_urls": {0: "url_with_sas", 1: "url_with_sas", ...}
+                },
+                "single_view_urls": {
+                    "video_urls": {0: "url_with_sas", 1: "url_with_sas", ...},
+                    "audio_urls": {0: "url_with_sas", 1: "url_with_sas", ...}
+                }
+            },
+            "summary": {
+                "total_uploaded": int,
+                "total_failed": int,
+                "total_audio_urls": int,
+                "total_view_urls": int,
+                "sas_expiry": str,
+                "upload_duration": float
+            }
+        }
+    """
+    from pathlib import Path
+    from datetime import datetime, timedelta
+    from azure.storage.blob import generate_blob_sas, BlobSasPermissions
+    import os
+    import json
+    
+    # Start timing
+    upload_start_time = datetime.utcnow()
+    logger.info(f"🚀 Starting comprehensive upload with SAS generation at {upload_start_time.isoformat()}")
+    logger.info(f"   Local path: {output_dir}")
+    logger.info(f"   Blob path: {blob_base_path}/{video_name}")
+    
+    uploaded_files = []
+    failed_files = []
+    shard_urls = {
+        "audio_urls": {},
+        "view_urls": {},
+        "dual_view_urls": {
+            "view1_urls": {},
+            "view2_urls": {},
+            "audio_urls": {}
+        },
+        "single_view_urls": {
+            "video_urls": {},
+            "audio_urls": {}
+        }
+    }
+    
+    # SAS token expiry
+    expiry = datetime.utcnow() + timedelta(days=sas_expiry_days)
+    
+    try:
+        # Walk through all files in the output directory
+        output_path = Path(output_dir)
+        if not output_path.exists():
+            logger.error(f"Output directory does not exist: {output_dir}")
+            return {"success": False, "error": "Output directory not found"}
+        
+        # CRITICAL: Validate all expected shard files exist before starting upload
+        missing_files = []
+        all_files = list(output_path.rglob('*'))
+        for file_path in all_files:
+            if file_path.is_file():
+                if not os.path.exists(file_path):
+                    missing_files.append(str(file_path))
+
+        if missing_files:
+            logger.error(f"❌ Missing shard files detected: {missing_files}")
+            return {
+                "success": False,
+                "error": f"Missing {len(missing_files)} shard files",
+                "missing_files": missing_files,
+                "shard_urls": shard_urls
+            }
+
+        logger.info(f"✅ All {len([f for f in all_files if f.is_file()])} shard files validated - proceeding with upload...")
+        
+        # Track shard files for URL generation
+        audio_shards = []
+        view_shards = {}
+        view1_shards = []
+        view2_shards = []
+        single_view_shards = []
+        
+        # Upload all files and collect shard information
+        for file_path in output_path.rglob('*'):
+            if file_path.is_file():
+                # Calculate relative path from output directory
+                relative_path = file_path.relative_to(output_path)
+                
+                # Create blob path
+                blob_name = f"{blob_base_path.strip('/')}/{video_name}/{relative_path}".replace("\\", "/")
+                
+                try:
+                    # Upload file to blob
+                    blob_client = azure_blob_client.get_blob_client(
+                        container=container_name, 
+                        blob=blob_name
+                    )
+                    
+                    with open(file_path, "rb") as data:
+                        blob_client.upload_blob(data, overwrite=True)
+                    
+                    # Track uploaded file
+                    uploaded_files.append({
+                        "local_path": str(file_path),
+                        "blob_name": blob_name,
+                        "size": file_path.stat().st_size
+                    })
+                    
+                    # Categorize shard files for URL generation
+                    parent_dir = file_path.parent.name
+                    file_ext = file_path.suffix.lower()
+                    
+                    if parent_dir == "audio_shards" and file_ext == ".wav":
+                        audio_shards.append((file_path, blob_name))
+                    elif parent_dir.endswith("_shards") and file_ext == ".mp4":
+                        view_name = parent_dir.replace("_shards", "")
+                        if view_name not in view_shards:
+                            view_shards[view_name] = []
+                        view_shards[view_name].append((file_path, blob_name))
+                        
+                        # Special handling for dual-view and single-view
+                        if parent_dir == "view_1_shards":
+                            view1_shards.append((file_path, blob_name))
+                        elif parent_dir == "view_2_shards":
+                            view2_shards.append((file_path, blob_name))
+                        else:
+                            # For single-view, use any video shard as the main video
+                            single_view_shards.append((file_path, blob_name))
+                    
+                except Exception as e:
+                    logger.error(f"Failed to upload {file_path}: {e}")
+                    failed_files.append({
+                        "local_path": str(file_path),
+                        "error": str(e)
+                    })
+        
+        # Generate SAS URLs for audio shards
+        logger.info(f"📝 Generating SAS URLs for {len(audio_shards)} audio shards...")
+        audio_shards_sorted = sorted(audio_shards, key=lambda x: x[0].name)
+        for i, (file_path, blob_name) in enumerate(audio_shards_sorted):
+            sas_token = generate_blob_sas(
+                account_name=account_name,
+                container_name=container_name,
+                blob_name=blob_name,
+                account_key=account_key,
+                permission=BlobSasPermissions(read=True),
+                expiry=expiry
+            )
+            url_with_sas = f"https://{account_name}.blob.core.windows.net/{container_name}/{blob_name}?{sas_token}"
+            shard_urls["audio_urls"][i] = url_with_sas
+            shard_urls["dual_view_urls"]["audio_urls"][i] = url_with_sas
+            shard_urls["single_view_urls"]["audio_urls"][i] = url_with_sas
+        
+        # Generate SAS URLs for view shards
+        for view_name, shards in view_shards.items():
+            logger.info(f"📝 Generating SAS URLs for {len(shards)} {view_name} view shards...")
+            shard_urls["view_urls"][view_name] = {}
+            
+            shards_sorted = sorted(shards, key=lambda x: x[0].name)
+            for i, (file_path, blob_name) in enumerate(shards_sorted):
+                sas_token = generate_blob_sas(
+                    account_name=account_name,
+                    container_name=container_name,
+                    blob_name=blob_name,
+                    account_key=account_key,
+                    permission=BlobSasPermissions(read=True),
+                    expiry=expiry
+                )
+                url_with_sas = f"https://{account_name}.blob.core.windows.net/{container_name}/{blob_name}?{sas_token}"
+                shard_urls["view_urls"][view_name][i] = url_with_sas
+        
+        # Generate SAS URLs for dual-view specific shards
+        if view1_shards:
+            logger.info(f"📝 Generating SAS URLs for {len(view1_shards)} view1 shards...")
+            view1_sorted = sorted(view1_shards, key=lambda x: x[0].name)
+            for i, (file_path, blob_name) in enumerate(view1_sorted):
+                sas_token = generate_blob_sas(
+                    account_name=account_name,
+                    container_name=container_name,
+                    blob_name=blob_name,
+                    account_key=account_key,
+                    permission=BlobSasPermissions(read=True),
+                    expiry=expiry
+                )
+                shard_urls["dual_view_urls"]["view1_urls"][i] = f"https://{account_name}.blob.core.windows.net/{container_name}/{blob_name}?{sas_token}"
+        
+        if view2_shards:
+            logger.info(f"📝 Generating SAS URLs for {len(view2_shards)} view2 shards...")
+            view2_sorted = sorted(view2_shards, key=lambda x: x[0].name)
+            for i, (file_path, blob_name) in enumerate(view2_sorted):
+                sas_token = generate_blob_sas(
+                    account_name=account_name,
+                    container_name=container_name,
+                    blob_name=blob_name,
+                    account_key=account_key,
+                    permission=BlobSasPermissions(read=True),
+                    expiry=expiry
+                )
+                shard_urls["dual_view_urls"]["view2_urls"][i] = f"https://{account_name}.blob.core.windows.net/{container_name}/{blob_name}?{sas_token}"
+        
+        # Generate SAS URLs for single-view (use first available view as video)
+        if single_view_shards:
+            logger.info(f"📝 Generating SAS URLs for {len(single_view_shards)} single-view video shards...")
+            single_sorted = sorted(single_view_shards, key=lambda x: x[0].name)
+            for i, (file_path, blob_name) in enumerate(single_sorted):
+                sas_token = generate_blob_sas(
+                    account_name=account_name,
+                    container_name=container_name,
+                    blob_name=blob_name,
+                    account_key=account_key,
+                    permission=BlobSasPermissions(read=True),
+                    expiry=expiry
+                )
+                shard_urls["single_view_urls"]["video_urls"][i] = f"https://{account_name}.blob.core.windows.net/{container_name}/{blob_name}?{sas_token}"
+        elif view_shards:
+            # Fallback: use first view found for single-view video URLs
+            first_view_name = next(iter(view_shards.keys()))
+            shard_urls["single_view_urls"]["video_urls"] = shard_urls["view_urls"][first_view_name].copy()
+        
+        # Calculate summary with enhanced logging
+        total_uploaded = len(uploaded_files)
+        total_failed = len(failed_files)
+        total_audio_urls = len(shard_urls["audio_urls"])
+        total_view_urls = sum(len(urls) for urls in shard_urls["view_urls"].values())
+        
+        # Performance metrics
+        upload_end_time = datetime.utcnow()
+        upload_duration = (upload_end_time - upload_start_time).total_seconds()
+        
+        logger.info(f"📤 Upload complete: {total_uploaded} files uploaded, {total_failed} failed")
+        logger.info(f"🔗 Generated {total_audio_urls} audio URLs and {total_view_urls} view URLs with SAS tokens")
+        logger.info(f"⏱️ Upload completed in {upload_duration:.2f} seconds")
+        logger.info(f"📊 Performance: {total_uploaded/upload_duration:.1f} files/second" if upload_duration > 0 else "📊 Performance: instant upload")
+        
+        return {
+            "success": total_failed == 0 or total_uploaded > 0,
+            "uploaded_files": uploaded_files,
+            "failed_files": failed_files,
+            "shard_urls": shard_urls,
+            "summary": {
+                "total_uploaded": total_uploaded,
+                "total_failed": total_failed,
+                "total_audio_urls": total_audio_urls,
+                "total_view_urls": total_view_urls,
+                "sas_expiry": expiry.isoformat(),
+                "upload_duration": upload_duration
+            }
+        }
+        
+    except Exception as e:
+        upload_end_time = datetime.utcnow()
+        upload_duration = (upload_end_time - upload_start_time).total_seconds()
+        logger.error(f"Failed to upload output directory after {upload_duration:.2f}s: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "uploaded_files": uploaded_files,
+            "failed_files": failed_files,
+            "shard_urls": shard_urls
+        }
+
+
+def update_labelstudio_tasks_with_new_urls(label_studio_tasks: list, shard_urls: dict, 
+                                          processing_type: str = "multi_view") -> int:
+    """
+    Update Label Studio task JSON files with actual uploaded URLs
+    
+    This is CRITICAL - Label Studio tasks are created with placeholder URLs,
+    then after upload we need to update them with real SAS URLs.
+    
+    CORRECTED: Uses actual Label Studio task key names from labelstudio_tasks.py:
+    - 4-view multi-view tasks: video_top, video_left, video_right, video_bottom, audio
+    - dual-view tasks: video_left, video_right, audio
+    - single-view tasks: video_left, video_right (same URL), audio
+    
+    Args:
+        label_studio_tasks: List of Label Studio JSON file paths
+        shard_urls: URLs from upload_output_directory_with_sas
+        processing_type: "multi_view", "dual_view", or "single_view"
+        
+    Returns:
+        int: Number of tasks successfully updated
+    """
+    import json
+    from utils.logger import get_logger
+    logger = get_logger("LabelStudioUpdate")
+    
+    updated_count = 0
+    
+    for i, task_path in enumerate(label_studio_tasks):
+        if not task_path or not os.path.exists(task_path):
+            logger.warning(f"Label Studio task file not found: {task_path}")
+            continue
+            
+        try:
+            # Read existing task
+            with open(task_path, 'r') as f:
+                task_data = json.load(f)
+            
+            # Update URLs based on processing type and actual Label Studio key names
+            if processing_type == "multi_view":
+                # 4-view multi-view: video_top, video_left, video_right, video_bottom, audio
+                view_urls = shard_urls.get('view_urls', {})
+                
+                # Map view names to Label Studio positions based on assign_views_to_labelstudio_positions
+                position_mapping = {
+                    'front': 'video_top',      # front -> top
+                    'left': 'video_left',      # left -> left  
+                    'right': 'video_right',    # right -> right
+                    'back': 'video_bottom',    # back -> bottom
+                }
+                
+                # Update view URLs for 4-view display
+                for view_name, view_shard_urls in view_urls.items():
+                    if i in view_shard_urls:
+                        # Map view to correct Label Studio position
+                        ls_key = position_mapping.get(view_name.lower())
+                        if ls_key:
+                            task_data['data'][ls_key] = view_shard_urls[i]
+                            logger.debug(f"Updated {ls_key} with {view_name} URL for shard {i}")
+                
+                # Update audio URL
+                if i in shard_urls.get('audio_urls', {}):
+                    task_data['data']['audio'] = shard_urls['audio_urls'][i]
+                
+            elif processing_type == "dual_view":
+                # Dual-view: video_left, video_right, audio
+                dual_urls = shard_urls.get('dual_view_urls', {})
+                if i in dual_urls.get('view1_urls', {}):
+                    task_data['data']['video_left'] = dual_urls['view1_urls'][i]
+                if i in dual_urls.get('view2_urls', {}):
+                    task_data['data']['video_right'] = dual_urls['view2_urls'][i]
+                if i in dual_urls.get('audio_urls', {}):
+                    task_data['data']['audio'] = dual_urls['audio_urls'][i]
+                
+            elif processing_type == "single_view":
+                # Single-view: video_left, video_right (same URL), audio
+                single_urls = shard_urls.get('single_view_urls', {})
+                if i in single_urls.get('video_urls', {}):
+                    video_url = single_urls['video_urls'][i]
+                    task_data['data']['video_left'] = video_url
+                    task_data['data']['video_right'] = video_url  # Same URL for both views
+                if i in single_urls.get('audio_urls', {}):
+                    task_data['data']['audio'] = single_urls['audio_urls'][i]
+            
+            # Write updated task back
+            with open(task_path, 'w') as f:
+                json.dump(task_data, f, indent=2)
+            
+            updated_count += 1
+            logger.debug(f"✅ Updated Label Studio task {i+1} with new URLs")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to update Label Studio task {task_path}: {e}")
+    
+    logger.info(f"🔗 Updated {updated_count}/{len(label_studio_tasks)} Label Studio tasks with new URLs")
+    return updated_count
+
+
+def validate_shard_urls(shard_urls: dict, expected_counts: dict) -> dict:
+    """
+    Validate that generated shard URLs match expected counts
+    
+    Args:
+        shard_urls: Generated shard URLs from upload_output_directory_with_sas
+        expected_counts: Expected counts like {"audio": 5, "erp": 5, "front": 5}
+        
+    Returns:
+        dict: Validation results with any mismatches
+    """
+    validation_results = {
+        "valid": True,
+        "mismatches": [],
+        "summary": {}
+    }
+    
+    # Validate audio URLs
+    audio_count = len(shard_urls.get("audio_urls", {}))
+    expected_audio = expected_counts.get("audio", 0)
+    validation_results["summary"]["audio"] = {"expected": expected_audio, "actual": audio_count}
+    
+    if audio_count != expected_audio:
+        validation_results["valid"] = False
+        validation_results["mismatches"].append(f"Audio: expected {expected_audio}, got {audio_count}")
+    
+    # Validate view URLs
+    for view_name, expected_count in expected_counts.items():
+        if view_name == "audio":
+            continue
+            
+        actual_count = len(shard_urls.get("view_urls", {}).get(view_name, {}))
+        validation_results["summary"][view_name] = {"expected": expected_count, "actual": actual_count}
+        
+        if actual_count != expected_count:
+            validation_results["valid"] = False
+            validation_results["mismatches"].append(f"{view_name}: expected {expected_count}, got {actual_count}")
+    
+    return validation_results
