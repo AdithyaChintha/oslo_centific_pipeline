@@ -449,7 +449,7 @@ def discover_sessions_basic(blob_service_client: BlobServiceClient,
     for session_id, session in sessions.items():
         if session["completion_detected"]:
             if is_walkthrough_session(session):
-                session["processing_type"] = "walkthrough"
+                session["domain"] = "Walkthrough"
                 logger.info(f"Walkthrough session detected: {session_id}")
             ready_sessions[session_id] = session
             logger.info(f"✅ Ready session: {session_id} ({session['completion_method']})")

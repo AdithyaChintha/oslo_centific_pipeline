@@ -1284,6 +1284,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                                         shard_count=len(shards), shard_paths=shards)
                         else:
                             #TODO: Implement sharding with sliding window overlap
+                            continue
                     except Exception as e:
                         logger.error(f"Error sharding {view_name}: {e}")
                         update_tracking(chunk_id, f"view_sharding.{view_name}", "error",
