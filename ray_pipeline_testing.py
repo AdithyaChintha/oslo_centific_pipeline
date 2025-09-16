@@ -2334,11 +2334,12 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
                 flat_result = None
                 raise RuntimeError(f"Failed to convert one 360 file: {mp4_result.get('error', 'Unknown error')}")
 
+        duration_sec = 60
         # Split audio once into 60s shards (reused per view by index)
         audio_shards = ray.get(split_audio_into_shards.remote(
             input_audio_path,
             output_dir=os.path.join(output_dir, "audio_shards"),
-            duration_sec=60
+            duration_sec=duration_sec
         ))
 
         # Optionally upload audio shards for LS streaming
@@ -2363,7 +2364,7 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
             ref = split_video_into_shards.remote(
                 view_path,
                 output_dir=os.path.join(output_dir, f"{view_name}_shards"),
-                duration_sec=60
+                duration_sec=duration_sec
             )
             _split_refs.append(ref)
             _split_order.append(view_name)
@@ -2382,7 +2383,7 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
                     shards = ray.get(split_video_into_shards.remote(
                         view_path,
                         output_dir=os.path.join(output_dir, f"{view_name}_shards"),
-                        duration_sec=60
+                        duration_sec=duration_sec
                     ))
                 except Exception as ex:
                     logger.error(f"Sequential split failed for {view_name}: {ex}")
