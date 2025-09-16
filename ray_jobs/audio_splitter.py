@@ -32,7 +32,7 @@ def _ffprobe_duration(path: str) -> float:
 def split_audio_into_shards(
     audio_path: str,
     output_dir: str = "/tmp/audio_shards",
-    duration_sec: int = 60,
+    duration_sec: int = 180,
     audio_format: str = "wav",  # Output format: wav, mp3, aac, etc.
     audio_codec: str = "pcm_s16le",  # For WAV: pcm_s16le, pcm_s24le, pcm_f32le
     sample_rate: Optional[int] = None,  # Resample if specified
@@ -81,6 +81,58 @@ def split_audio_into_shards(
             channels=channels,
         ))
         t += duration_sec
+        idx += 1
+
+    results = ray.get(futures)
+    return [r for r in results if r is not None]
+
+@ray.remote
+def split_audio_into_shards_with_overlap(
+    audio_path: str,
+    output_dir: str = "/tmp/audio_shards",
+    duration_sec: int = 180,
+    overlap_sec: int = 60,
+    audio_format: str = "wav",
+    audio_codec: str = "pcm_s16le",
+    sample_rate: Optional[int] = None,
+    channels: Optional[int] = None,
+    start_idx: int = 0,
+) -> List[str]:
+    """
+    Split audio file into shards with sliding window overlap.
+    Creates overlapping segments: 180s duration with 60s overlap = 120s step size
+    
+    Example for 15min audio:
+    - Normal: (0-3min, 3-6min, 6-9min, 9-12min, 12-15min)
+    - Overlap: (0-3min, 2-5min, 4-7min, 6-9min, 8-11min, 10-13min, 12-15min)
+    """
+    p = str(Path(audio_path))
+    if not os.path.exists(p):
+        raise FileNotFoundError(f"Audio file not found: {p}")
+    _ensure_dir(output_dir)
+
+    total_duration = _ffprobe_duration(p)
+    step_size = duration_sec - overlap_sec  # 180 - 60 = 120 seconds
+
+    # Submit per-shard Ray tasks
+    futures = []
+    t = 0.0
+    idx = start_idx
+
+    while t < total_duration - 1e-6:
+        outp = os.path.join(output_dir, f"{_basename_noext(p)}_part{idx}.{audio_format}")
+        dur = min(duration_sec, max(0.0, total_duration - t))
+
+        futures.append(_audio_shard_task.remote(
+            audio_path=p,
+            start_time=t,
+            duration=dur,
+            output_path=outp,
+            audio_codec=audio_codec,
+            sample_rate=sample_rate,
+            channels=channels,
+        ))
+        t += step_size  # Move by step size (120s) instead of full duration (180s)
         idx += 1
 
     results = ray.get(futures)
@@ -209,7 +261,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Split audio file into shards matching video timestamps")
     ap.add_argument("--audio", type=str, help="Input audio file path")
     ap.add_argument("--output_dir", type=str, help="Output directory for audio shards")
-    ap.add_argument("--duration", type=int, default=60, help="Duration per shard in seconds")
+    ap.add_argument("--duration", type=int, default=180, help="Duration per shard in seconds")
     ap.add_argument("--format", type=str, default="wav", help="Output audio format")
     ap.add_argument("--codec", type=str, default="pcm_s16le", help="Audio codec")
     ap.add_argument("--sample-rate", type=int, help="Target sample rate")

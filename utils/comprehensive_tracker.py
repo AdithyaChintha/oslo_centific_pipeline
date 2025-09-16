@@ -616,3 +616,117 @@ def cleanup_temp_download_directory(temp_download_dir: str, session_id: str = No
     except Exception as e:
         logger.error(f"❌ Cleanup failed: {e}")
         return {"success": False, "error": str(e), "files_removed": 0, "dirs_removed": 0}
+
+def cleanup_session_output_directory(session_output_dir: str, session_id: str) -> Dict:
+    """
+    Clean up session output directory after successful upload to blob storage.
+    
+    Args:
+        session_output_dir: Path to the session output directory
+        session_id: Session ID for logging purposes
+        
+    Returns:
+        Dictionary with cleanup results
+    """
+    try:
+        if not os.path.exists(session_output_dir):
+            logger.info(f"📁 Session output directory does not exist: {session_output_dir}")
+            return {"success": True, "message": "Directory does not exist", "files_removed": 0}
+        
+        files_removed = 0
+        dirs_removed = 0
+        
+        logger.info(f"🧹 Cleaning up session output directory for session: {session_id}")
+        logger.info(f"   📂 Directory: {session_output_dir}")
+        
+        # Walk through the directory and remove all files and subdirectories
+        for root, dirs, files in os.walk(session_output_dir, topdown=False):
+            # Remove all files
+            for file in files:
+                file_path = os.path.join(root, file)
+                try:
+                    os.remove(file_path)
+                    files_removed += 1
+                    logger.debug(f"   🗑️ Removed file: {file}")
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Failed to remove {file}: {e}")
+            
+            # Remove all subdirectories
+            for dir_name in dirs:
+                dir_path = os.path.join(root, dir_name)
+                try:
+                    os.rmdir(dir_path)
+                    dirs_removed += 1
+                    logger.debug(f"   🗑️ Removed directory: {dir_name}")
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Failed to remove directory {dir_name}: {e}")
+        
+        # Finally, remove the main session directory itself
+        try:
+            os.rmdir(session_output_dir)
+            dirs_removed += 1
+            logger.debug(f"   🗑️ Removed main session directory: {session_output_dir}")
+        except Exception as e:
+            logger.warning(f"   ⚠️ Failed to remove main session directory: {e}")
+        
+        result = {
+            "success": True,
+            "files_removed": files_removed,
+            "dirs_removed": dirs_removed,
+            "session_output_dir": session_output_dir
+        }
+        
+        logger.info(f"✅ Session output cleanup completed: {files_removed} files, {dirs_removed} directories removed")
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Session output cleanup failed: {e}")
+        return {"success": False, "error": str(e), "files_removed": 0, "dirs_removed": 0}
+
+def get_incomplete_sessions_for_retry(output_base_dir: str = "./outmain2withdn") -> List[Dict]:
+    """
+    Get list of sessions that were started but not completed (failed or interrupted).
+    
+    Args:
+        output_base_dir: Base directory containing session outputs
+        
+    Returns:
+        List of dictionaries containing session info for retry
+    """
+    incomplete_sessions = []
+    
+    try:
+        if not os.path.exists(output_base_dir):
+            logger.info(f"📁 Output base directory does not exist: {output_base_dir}")
+            return incomplete_sessions
+        
+        # Look for session directories
+        for item in os.listdir(output_base_dir):
+            session_path = os.path.join(output_base_dir, item)
+            if os.path.isdir(session_path):
+                session_id = item
+                
+                # Check session completion status
+                session_status = check_session_completion_status(session_id, output_base_dir)
+                
+                # Include sessions that are pending (started but not completed)
+                if (session_status.get("completion_status") == "pending" or 
+                    session_status.get("completion_status") == "failed"):
+                    
+                    incomplete_sessions.append({
+                        "session_id": session_id,
+                        "session_path": session_path,
+                        "status": session_status.get("completion_status"),
+                        "last_updated": session_status.get("last_updated"),
+                        "error_details": session_status.get("error_details")
+                    })
+        
+        logger.info(f"🔍 Found {len(incomplete_sessions)} incomplete sessions for potential retry")
+        for session in incomplete_sessions:
+            logger.info(f"   📋 {session['session_id']}: {session['status']} (last updated: {session['last_updated']})")
+        
+        return incomplete_sessions
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting incomplete sessions: {e}")
+        return incomplete_sessions

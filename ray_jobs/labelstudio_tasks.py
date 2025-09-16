@@ -243,7 +243,10 @@ def build_labelstudio_json_for_shard_task(shard_output_dir: str, shard_video_url
             # Additional metadata (these won't show in UI but good for context)
             "shard_number": str(shard_number),
             "shard_offset_seconds": str(shard_offset_sec), 
-            "segments_detected": str(len(result_entries))
+            "segments_detected": str(len(result_entries)),
+            # ERP video and audio URLs
+            "full_video_480P": "",  # URL to full ERP video downscaled to 480p
+            "full_audio_link": ""   # URL to full session audio file
         },
         "annotations":[],
         "predictions": [
@@ -1032,6 +1035,9 @@ def generate_consolidated_shard_labelstudio_task(shard_output_dir, view1_azure_u
                 "end_datetime": "",
                 "total_duration": "",
                 "files_deleted": [],
+                # ERP video and audio URLs
+                "full_video_480P": "",  # URL to full ERP video downscaled to 480p
+                "full_audio_link": ""   # URL to full session audio file
           },
           
           "annotations": [],  # Empty for new tasks

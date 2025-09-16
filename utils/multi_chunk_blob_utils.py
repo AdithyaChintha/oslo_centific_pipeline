@@ -360,6 +360,27 @@ def discover_completion_metadata(blob_service_client: BlobServiceClient,
     logger.info(f"✅ Found metadata for {len(completion_metadata)} sessions")
     return completion_metadata
 
+def is_walkthrough_session(session_data: Dict) -> bool:
+    """
+    Simple walkthrough detection - check filenames and metadata for 'walkthrough'
+    """
+    # Check chunk filenames
+    all_chunks = session_data.get("video_chunks", []) + session_data.get("audio_chunks", [])
+    for chunk_info in all_chunks:
+        filename = chunk_info.get("file_name", "")
+        if "walkthrough" in filename.lower():
+            return True
+    
+    # Check session metadata
+    session_metadata = session_data.get("session_metadata", {})
+    if session_metadata:
+        activity = session_metadata.get("activity", "").lower()
+        specific_activity = session_metadata.get("specific_activity", "").lower()
+        if "walkthrough" in activity or "walkthrough" in specific_activity:
+            return True
+    
+    return False
+
 def discover_sessions_basic(blob_service_client: BlobServiceClient,
                           container_name: str, 
                           input_prefix: str) -> Tuple[Dict[str, Dict], Dict[str, Dict]]:
@@ -427,12 +448,16 @@ def discover_sessions_basic(blob_service_client: BlobServiceClient,
 
     for session_id, session in sessions.items():
         if session["completion_detected"]:
+            if is_walkthrough_session(session):
+                session["domain"] = "Walkthrough"
+                logger.info(f"Walkthrough session detected: {session_id}")
             ready_sessions[session_id] = session
             logger.info(f"✅ Ready session: {session_id} ({session['completion_method']})")
         else:
             not_ready_sessions[session_id] = session
             logger.info(f"⏳ Not ready: {session_id} (no completion indicator)")
-    
+
+
     logger.info(f"📊 Discovery complete: {len(ready_sessions)} ready, {len(not_ready_sessions)} not ready")
     
     return ready_sessions, not_ready_sessions
