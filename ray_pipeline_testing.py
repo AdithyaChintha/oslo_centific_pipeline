@@ -2356,25 +2356,41 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
         # Split each unwarped view into shards and stage per-view shard lists
         view_shards = {}
         view_shard_urls = {}
+        # Launch all split jobs in parallel and collect refs
+        _split_refs = []
+        _split_order = []
         for view_name, view_path in flat_result.items():
-            # Split this view into 60s shards
-            shards = ray.get(split_video_into_shards.remote(
-                view_path, 
-                output_dir=os.path.join(output_dir, f"{view_name}_shards"), 
+            ref = split_video_into_shards.remote(
+                view_path,
+                output_dir=os.path.join(output_dir, f"{view_name}_shards"),
                 duration_sec=60
-            ))
-            view_shards[view_name] = shards
-
-            # Upload shards if Azure is configured
-            # if azure_blob_client and azure_container and azure_output_prefix and azure_account_name and azure_account_key:
-            #     view_shard_urls[view_name] = generate_azure_shard_urls(
-            #         azure_blob_client, azure_container, shards,
-            #         f"{azure_output_prefix}/unwarped_shards/{view_name}",
-            #         azure_account_name, azure_account_key
-            #     )
-            # else:
-            #     view_shard_urls[view_name] = {}
+            )
+            _split_refs.append(ref)
+            _split_order.append(view_name)
+            # initialize urls dict for this view (filled later after upload)
             view_shard_urls[view_name] = {}
+
+        # Execute all splits concurrently and map results back to view names
+        try:
+            _split_results = ray.get(_split_refs)
+        except Exception as e:
+            logger.error(f"Parallel split_video_into_shards failed: {e}")
+            # Fallback: try sequentially so we still produce something
+            _split_results = []
+            for view_name, view_path in flat_result.items():
+                try:
+                    shards = ray.get(split_video_into_shards.remote(
+                        view_path,
+                        output_dir=os.path.join(output_dir, f"{view_name}_shards"),
+                        duration_sec=60
+                    ))
+                except Exception as ex:
+                    logger.error(f"Sequential split failed for {view_name}: {ex}")
+                    shards = []
+                _split_results.append(shards)
+
+        for vn, shards in zip(_split_order, _split_results):
+            view_shards[vn] = shards if shards is not None else []
 
         # Find the minimum shard count across all views to avoid index errors
         min_shards = min(len(shards) for shards in view_shards.values()) if view_shards else 0
