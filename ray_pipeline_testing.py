@@ -1946,69 +1946,85 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                     update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "skipped")
                     update_tracking(chunk_id, "video_processing.view_unwarping", "skipped")
                 
-                for view_name, view_path in flat_result.items():
-                    # Split this view into 180s shards with sequential part numbering
-                    logger.info(f"Processing sharding for view:{view_name} at {view_path} starting from part{global_part_idx}")
-                    update_tracking(chunk_id, f"view_sharding.{view_name}", "processing")
+                # Split each view into shards with global sequential numbering
+                logger.info(f"Processing sharding for views={list(flat_result.keys())} starting from part{global_part_idx}")
+                update_tracking(chunk_id, "view_sharding", "processing", views=list(flat_result.keys()))
+
+                split_tasks = []  # [(vn, ref, out_dir)]
+                duration_sec = 180
+                for vn, vp in flat_result.items():
+                    out_dir = os.path.join(output_dir, f"{vn}_shards")
+                    os.makedirs(out_dir, exist_ok=True)
+                    view_shard_urls.setdefault(vn, {})  
+
+                    if is_walkthrough:
+                        ref = split_video_into_shards_with_overlap.remote(
+                            vp,
+                            output_dir=out_dir,
+                            duration_sec=duration_sec,
+                            overlap_sec=60
+                        )
+                        logger.info(f"[SPLIT][WALKTHROUGH] view={vn} dur={duration_sec}s overlap=60")
+                    else:
+                        ref = split_video_into_shards.remote(
+                            vp,
+                            output_dir=out_dir,
+                            duration_sec=duration_sec
+                        )
+                        logger.info(f"[SPLIT][NORMAL] view={vn} dur={duration_sec}s")
+
+                    split_tasks.append((vn, ref, out_dir))
+
+                # if failed, fallback to sequential processing
+                try:
+                    results = ray.get([ref for _, ref, _ in split_tasks])  # List[List[str]]
+                except Exception as e:
+                    logger.error(f"Parallel split_video_into_shards failed: {e} — fallback to sequential.")
+                    results = []
+                    for vn, ref, out_dir in split_tasks:
+                        try:
+                            if is_walkthrough:
+                                shards = ray.get(split_video_into_shards_with_overlap.remote(
+                                    flat_result[vn], output_dir=out_dir, duration_sec=duration_sec, overlap_sec=60
+                                ))
+                            else:
+                                shards = ray.get(split_video_into_shards.remote(
+                                    flat_result[vn], output_dir=out_dir, duration_sec=duration_sec
+                                ))
+                        except Exception as ex:
+                            logger.error(f"Sequential split failed for {vn}: {ex}")
+                            shards = []
+                        results.append(shards)
+
+                # Rename shards to ensure global sequential numbering across all views
+                for (vn, _, out_dir), shards in zip(split_tasks, results):
+                    shards = shards or []
+                    renumbered = []
+                    for old_path in shards:
+                        base, ext = os.path.splitext(old_path)
+                        # rename to global_part_idx
+                        new_path = os.path.join(out_dir, f"{vn}_part{global_part_idx:04d}{ext or '.mp4'}")
+                        if new_path != old_path:
+                            try:
+                                os.replace(old_path, new_path)  
+                            except Exception as rn_ex:
+                                logger.warning(f"Rename shard failed ({old_path} -> {new_path}): {rn_ex}; keeping original")
+                                new_path = old_path
+                        renumbered.append(new_path)
+                        global_part_idx += 1  
+
+                    # record in view_shards
+                    view_shards[vn] = view_shards.get(vn, []) + renumbered
                     try:
-                        if not is_walkthrough:
-                            # BIG DEBUG STATEMENT FOR NORMAL SPLITTING
-                            logger.info("=" * 120)
-                            logger.info("📹📹📹 NORMAL VIDEO SPLITTING TRIGGERED! 📹📹📹")
-                            logger.info("📹📹📹 NORMAL VIDEO SPLITTING TRIGGERED! 📹📹📹")
-                            logger.info("📹📹📹 NORMAL VIDEO SPLITTING TRIGGERED! 📹📹📹")
-                            logger.info(f"📹 View: {view_name}")
-                            logger.info(f"📹 Video Path: {view_path}")
-                            logger.info("📹 Using: split_video_into_shards (NORMAL MODE)")
-                            logger.info("📹 Duration: 180 seconds per segment")
-                            logger.info("📹 Overlap: 0 seconds (NO OVERLAP)")
-                            logger.info("📹 Method: Discrete 3-minute segments")
-                            logger.info("📹📹📹 NORMAL VIDEO SPLITTING TRIGGERED! 📹📹📹")
-                            logger.info("📹📹📹 NORMAL VIDEO SPLITTING TRIGGERED! 📹📹📹")
-                            logger.info("📹📹📹 NORMAL VIDEO SPLITTING TRIGGERED! 📹📹📹")
-                            logger.info("=" * 120)
-                            
-                            shards = ray.get(split_video_into_shards.remote(
-                                view_path, 
-                                output_dir=os.path.join(output_dir, f"{view_name}_shards"), 
-                                duration_sec=180,
-                                start_idx=global_part_idx  # Pass the global part index
-                            ))
-                            view_shards[view_name] = view_shards.get(view_name, []) + shards
-                            update_tracking(chunk_id, f"view_sharding.{view_name}", "completed",
-                                        shard_count=len(shards), shard_paths=shards)
-                        else:
-                            # BIG DEBUG STATEMENT FOR WALKTHROUGH SPLITTING
-                            logger.info("=" * 120)
-                            logger.info("🔄🔄🔄 WALKTHROUGH VIDEO SPLITTING TRIGGERED! 🔄🔄🔄")
-                            logger.info("🔄🔄🔄 WALKTHROUGH VIDEO SPLITTING TRIGGERED! 🔄🔄🔄")
-                            logger.info("🔄🔄🔄 WALKTHROUGH VIDEO SPLITTING TRIGGERED! 🔄🔄🔄")
-                            logger.info(f"🔄 View: {view_name}")
-                            logger.info(f"🔄 Video Path: {view_path}")
-                            logger.info("🔄 Using: split_video_into_shards_with_overlap (WALKTHROUGH MODE)")
-                            logger.info("🔄 Duration: 180 seconds per segment")
-                            logger.info("🔄 Overlap: 60 seconds (WITH OVERLAP)")
-                            logger.info("🔄 Step Size: 120 seconds (180 - 60)")
-                            logger.info("🔄 Method: Sliding window with 60-second overlap")
-                            logger.info("🔄🔄🔄 WALKTHROUGH VIDEO SPLITTING TRIGGERED! 🔄🔄🔄")
-                            logger.info("🔄🔄🔄 WALKTHROUGH VIDEO SPLITTING TRIGGERED! 🔄🔄🔄")
-                            logger.info("🔄🔄🔄 WALKTHROUGH VIDEO SPLITTING TRIGGERED! 🔄🔄🔄")
-                            logger.info("=" * 120)
-                            
-                            shards = ray.get(split_video_into_shards_with_overlap.remote(
-                                view_path, 
-                                output_dir=os.path.join(output_dir, f"{view_name}_shards"), 
-                                duration_sec=180,
-                                overlap_sec=60,  # 60 seconds overlap
-                                start_idx=global_part_idx  # Pass the global part index
-                            ))
-                            view_shards[view_name] = view_shards.get(view_name, []) + shards
-                            update_tracking(chunk_id, f"view_sharding.{view_name}", "completed",
-                                        shard_count=len(shards), shard_paths=shards)
-                    except Exception as e:
-                        logger.error(f"Error sharding {view_name}: {e}")
-                        update_tracking(chunk_id, f"view_sharding.{view_name}", "error",
-                                       error_message=str(e))
+                        update_tracking(
+                            chunk_id, f"view_sharding.{vn}", "completed",
+                            shard_count=len(renumbered), shard_paths=renumbered
+                        )
+                    except Exception:
+                        logger.debug(f"Failed to update tracking for {vn}")
+
+                logger.info(f"Sharding done; global_part_idx now: {global_part_idx}")
+                # Store the shards for this chunk
                 
                 # Update global part index based on the number of shards created
                 if flat_result:
