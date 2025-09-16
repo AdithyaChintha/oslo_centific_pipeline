@@ -57,16 +57,16 @@ class DomainClassifier:
             "Safety & Security": "Locking doors, checking security systems, or actions related to home safety."
         }
         
-        # A fast model for scoring individual domains
+        # Use the same 8B model for both scoring and query expansion
         self.analyst_llm = ChatGroq(
             groq_api_key=groq_api_key,
             model_name="llama-3.1-8b-instant",
             temperature=0.0
         )
-        # A more powerful model for the one-time query expansion task
+        # Use the same 8B model for query expansion (70B model was decommissioned)
         self.expansion_llm = ChatGroq(
             groq_api_key=groq_api_key,
-            model_name="llama-3.1-70b-versatile",
+            model_name="llama-3.1-8b-instant",
             temperature=0.2
         )
         
@@ -106,7 +106,7 @@ class DomainClassifier:
                 logger.error(f"Failed to expand query for {name}: {e}")
                 # Fallback to the basic description
                 self.expanded_domains[name] = description
-            time.sleep(1) # Pace the calls
+            time.sleep(2) # Pace the calls to avoid rate limiting
         logger.info("✅ All domain queries expanded.")
 
     def collect_scene_descriptions(self, base_path: str = "./outtrymain") -> List[Document]:
@@ -183,6 +183,9 @@ class DomainClassifier:
             response = self.analyst_llm.invoke(prompt)
             result = json.loads(response.content)
             result['score'] = int(result.get('score', 0))
+            
+            # Add delay after each API call to avoid rate limiting
+            time.sleep(2)
             return result
         except Exception as e:
             logger.error(f"❌ Failed to parse LLM response for domain '{domain_name}': {e}")
@@ -215,7 +218,7 @@ class DomainClassifier:
                 "reasoning": score_result["reasoning"],
                 "evidence": [doc.page_content for doc in evidence]
             })
-            time.sleep(1) # Pace API calls
+            time.sleep(3) # Pace API calls to avoid rate limiting
 
         # 3. Classify
         sorted_scores = sorted(domain_scores, key=lambda x: x['score'], reverse=True)

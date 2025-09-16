@@ -25,8 +25,9 @@ class ComprehensiveTracker:
         self.session_id = session_id
         self.output_dir = output_dir
         
-        # Save tracking files in ./outtrymain/comprehensive_tracking/
-        base_tracking_dir = "./outtrymain"
+        # Save tracking files in the same base directory as output_dir
+        # Extract base directory from output_dir (e.g., ./outmain2withdoamain/session_id -> ./outmain2withdoamain)
+        base_tracking_dir = os.path.dirname(output_dir)
         self.tracking_dir = os.path.join(base_tracking_dir, "comprehensive_tracking")
         os.makedirs(self.tracking_dir, exist_ok=True)
         
@@ -47,6 +48,8 @@ class ComprehensiveTracker:
             "session_id": self.session_id,
             "session_start_time": datetime.now().isoformat(),
             "session_status": "initialized",
+            "session_completion_status": "pending",
+            "session_completion_time": None,
             "total_chunks": 0,
             "chunks": {},
             "overall_progress": {
@@ -442,6 +445,27 @@ class ComprehensiveTracker:
             if file.endswith('_tracking.json'):
                 tracking_files.append(os.path.join(self.tracking_dir, file))
         return tracking_files
+    
+    def mark_session_complete(self):
+        """Mark the entire session as completed."""
+        self.session_data["session_completion_status"] = "completed"
+        self.session_data["session_completion_time"] = datetime.now().isoformat()
+        self.session_data["session_status"] = "completed"
+        self._save_session_data()
+        logger.info(f"Marked session {self.session_id} as completed")
+    
+    def is_session_completed(self) -> bool:
+        """Check if the session has been completed."""
+        return self.session_data.get("session_completion_status") == "completed"
+    
+    def get_session_completion_info(self) -> Dict:
+        """Get session completion information."""
+        return {
+            "session_id": self.session_id,
+            "completion_status": self.session_data.get("session_completion_status", "pending"),
+            "completion_time": self.session_data.get("session_completion_time"),
+            "session_status": self.session_data.get("session_status", "unknown")
+        }
 
 
 # Global tracker instance
@@ -463,3 +487,132 @@ def update_tracking(chunk_id: str, stage: str, status: str, **kwargs):
         _global_tracker.update_chunk_status(chunk_id, stage, status, **kwargs)
     else:
         logger.warning("Global tracker not initialized")
+
+def check_session_completion_status(session_id: str, output_base_dir: str = "./outmain2withdoamain") -> Dict:
+    """
+    Check if a session has already been completed by looking at its tracking file.
+    
+    Args:
+        session_id: The session ID to check
+        output_base_dir: Base output directory from config (default: ./outmain2withdoamain)
+        
+    Returns:
+        Dictionary with completion status information
+    """
+    tracking_dir = os.path.join(output_base_dir, "comprehensive_tracking")
+    session_tracking_file = os.path.join(tracking_dir, f"{session_id}_session_tracking.json")
+    
+    if not os.path.exists(session_tracking_file):
+        return {
+            "session_id": session_id,
+            "exists": False,
+            "completion_status": "not_found",
+            "completion_time": None,
+            "session_status": "not_found"
+        }
+    
+    try:
+        with open(session_tracking_file, 'r') as f:
+            session_data = json.load(f)
+        
+        return {
+            "session_id": session_id,
+            "exists": True,
+            "completion_status": session_data.get("session_completion_status", "pending"),
+            "completion_time": session_data.get("session_completion_time"),
+            "session_status": session_data.get("session_status", "unknown"),
+            "total_chunks": session_data.get("total_chunks", 0),
+            "error_count": len(session_data.get("error_summary", []))
+        }
+    except Exception as e:
+        logger.error(f"Failed to read session tracking file for {session_id}: {e}")
+        return {
+            "session_id": session_id,
+            "exists": True,
+            "completion_status": "error",
+            "completion_time": None,
+            "session_status": "error",
+            "error": str(e)
+        }
+
+def is_session_already_processed(session_id: str, output_base_dir: str = "./outmain2withdoamain") -> bool:
+    """
+    Simple check to see if a session has already been completed.
+    
+    Args:
+        session_id: The session ID to check
+        output_base_dir: Base output directory from config (default: ./outmain2withdoamain)
+        
+    Returns:
+        True if session is completed, False otherwise
+    """
+    status = check_session_completion_status(session_id, output_base_dir)
+    return status.get("completion_status") == "completed"
+
+def cleanup_temp_download_directory(temp_download_dir: str, session_id: str = None) -> Dict:
+    """
+    Clean up temporary download directory after session processing is complete.
+    
+    Args:
+        temp_download_dir: Path to the temporary download directory
+        session_id: Optional session ID to clean up specific session files
+        
+    Returns:
+        Dictionary with cleanup results
+    """
+    try:
+        if not os.path.exists(temp_download_dir):
+            logger.info(f"📁 Temp download directory does not exist: {temp_download_dir}")
+            return {"success": True, "message": "Directory does not exist", "files_removed": 0}
+        
+        files_removed = 0
+        dirs_removed = 0
+        
+        if session_id:
+            # Clean up specific session files
+            logger.info(f"🧹 Cleaning up temp files for session: {session_id}")
+            for root, dirs, files in os.walk(temp_download_dir):
+                for file in files:
+                    if session_id in file:
+                        file_path = os.path.join(root, file)
+                        try:
+                            os.remove(file_path)
+                            files_removed += 1
+                            logger.debug(f"   🗑️ Removed file: {file}")
+                        except Exception as e:
+                            logger.warning(f"   ⚠️ Failed to remove {file}: {e}")
+        else:
+            # Clean up entire temp directory
+            logger.info(f"🧹 Cleaning up entire temp download directory: {temp_download_dir}")
+            for root, dirs, files in os.walk(temp_download_dir, topdown=False):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    try:
+                        os.remove(file_path)
+                        files_removed += 1
+                        logger.debug(f"   🗑️ Removed file: {file}")
+                    except Exception as e:
+                        logger.warning(f"   ⚠️ Failed to remove {file}: {e}")
+                
+                for dir_name in dirs:
+                    dir_path = os.path.join(root, dir_name)
+                    try:
+                        os.rmdir(dir_path)
+                        dirs_removed += 1
+                        logger.debug(f"   🗑️ Removed directory: {dir_name}")
+                    except Exception as e:
+                        logger.warning(f"   ⚠️ Failed to remove directory {dir_name}: {e}")
+        
+        result = {
+            "success": True,
+            "files_removed": files_removed,
+            "dirs_removed": dirs_removed,
+            "temp_download_dir": temp_download_dir
+        }
+        
+        logger.info(f"✅ Cleanup completed: {files_removed} files, {dirs_removed} directories removed")
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Cleanup failed: {e}")
+        return {"success": False, "error": str(e), "files_removed": 0, "dirs_removed": 0}

@@ -6,7 +6,7 @@ azure_storage:
   # Input directory configuration
   input_blob_prefix: "azure_directory_path/Oslo/test2"  # Default blob prefix to search for videos
   # Output directory configuration
-  output_blob_prefix: "output_test/video_domging"  # Base prefix for uploading processed results
+  output_blob_prefix: "output_test/video_doing_my_work"  # Base prefix for uploading processed results
   
   # Container settings (these can override blobfuse2_config.yaml if needed)
   # container_name: "instavideo"  # Uncomment to override
@@ -17,7 +17,7 @@ azure_storage:
 local_storage:
   # Local file system configuration
   temp_download_dir: "/tmp/azure_downloads"   # Temporary download location
-  output_base_dir: "./outtrymain"                    # Local output directory
+  output_base_dir: "./outmain2withdn"                    # Local output directory
   video_list_file: "./azure_video_list.json"  # Video discovery tracking
   checklist_file: "./video_checklist.json"    # Processing progress tracking
 
