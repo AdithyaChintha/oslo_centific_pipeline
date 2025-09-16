@@ -1719,7 +1719,8 @@ def process_single_session(session_path: str, session_id: str, output_base_dir: 
             blob_client=create_azure_blob_client(azure_config),
             container_name=azure_config.get('container'),
             account_name=azure_config.get('account-name'),
-            account_key=azure_config.get('account-key')
+            account_key=azure_config.get('account-key'),
+            local_download_dir=pipeline_config['local_storage']['temp_download_dir']
         )
         
         processing_time = time.time() - start_time
@@ -2112,11 +2113,14 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
         # Clean up temporary download directory for this session
         if pipeline_config.get('cleanup', {}).get('cleanup_temp_dir', True):
             logger.info(f"🧹 Cleaning up temporary download directory for session: {session_id}")
-            cleanup_result = cleanup_temp_download_directory(local_download_dir, session_id)
-            if cleanup_result.get("success", False):
-                logger.info(f"✅ Temp cleanup completed: {cleanup_result.get('files_removed', 0)} files removed")
+            if local_download_dir is not None:
+                cleanup_result = cleanup_temp_download_directory(local_download_dir, session_id)
+                if cleanup_result.get("success", False):
+                    logger.info(f"✅ Temp cleanup completed: {cleanup_result.get('files_removed', 0)} files removed")
+                else:
+                    logger.warning(f"⚠️ Temp cleanup failed: {cleanup_result.get('error', 'Unknown error')}")
             else:
-                logger.warning(f"⚠️ Temp cleanup failed: {cleanup_result.get('error', 'Unknown error')}")
+                logger.warning(f"⚠️ local_download_dir is None - skipping temp cleanup")
         else:
             logger.info(f"ℹ️ Temp cleanup disabled in config - keeping temp files")
         
