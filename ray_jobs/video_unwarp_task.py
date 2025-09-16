@@ -92,7 +92,7 @@ def erp_unwarp_task(mp4_path: str,
 
 
 
-@ray.remote(num_cpus=1, num_gpus=1, max_retries=1)
+@ray.remote(num_gpus=1, max_retries=1)
 def insv_unwarp_task(
     insv_path: str,
     out_dir: Optional[str] = None,
