@@ -29,7 +29,9 @@ import signal
 import sys
 import threading
 import zoneinfo
-from typing import Any, Dict, Iterable, List, Set
+from typing import Any, Dict, Iterable, List, Set, Union
+from collections import defaultdict
+import math
 
 _NEGATIVE_KEYWORDS = {"no", "none", "no pii", "no minors", "no nsfw", "no sensitive", "unknown"}
 
@@ -46,6 +48,7 @@ _SIGNAL_KEYWORDS = {
     "scene": ["scene", "scenes", "shot"]
 }
 
+_FROMNAME_RE = re.compile(r"(?P<prefix>.+?)_(?P<pos>start|end)_(?P<unit>minute|second)$", re.IGNORECASE)
 
 # Load values from .env file into environment variables
 dotenv_path = os.path.join(os.path.dirname(__file__), "..", ".env")
@@ -96,17 +99,6 @@ def _final_blob_name(video_identifier: str) -> str:
     return f"{video_identifier}.json"
 
 
-def _format_time(seconds: float) -> str:
-    """Format seconds into HH:MM:SS.mmm string."""
-    td = timedelta(seconds=seconds)
-    total_seconds = td.total_seconds()
-    hours = int(total_seconds // 3600)
-    minutes = int((total_seconds % 3600) // 60)
-    secs = int(total_seconds % 60)
-    millis = int(round((total_seconds - int(total_seconds)) * 1000))
-    return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
-
-
 def _globalise_seconds(local_time: float, shard_id: int,
                        default_duration: int = 60) -> float:
     """Shift local time by shard offset to global timeline."""
@@ -139,6 +131,56 @@ def _matches_any_keyword(name_or_text: str, keywords: Iterable[str]) -> bool:
             return True
     return False
 
+def compute_shard_offset(shard_index: int, shard_minutes: float = 3.0, overlap_minutes: float = 1.0) -> int:
+    """
+    Return offset seconds for given shard.
+    - shard_index: integer index (0-based by default). If one_indexed=True, pass 1-based index.
+    - shard_minutes: duration of each shard in minutes (default 3).
+    - overlap_minutes: overlap between consecutive shards in minutes (default 1).
+    Returns integer seconds (rounded down).
+    """
+    if shard_index < 1:
+        raise ValueError("shard_index must be >= 1")
+    
+
+    shard_len_s = int(round(shard_minutes * 60))
+    overlap_s = int(round(overlap_minutes * 60))
+    step_s = shard_len_s - overlap_s
+    return (shard_index -1)* step_s
+
+Numeric = Union[int, float]
+
+def _format_time(seconds: float) -> str:
+    """Format seconds as HH:MM:SS.mmm (milliseconds precision)."""
+    if seconds is None:
+        return None
+    seconds = max(0.0, float(seconds))  # clamp negatives
+    hrs = int(seconds // 3600)
+    mins = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int(round((seconds - math.floor(seconds)) * 1000))
+    return f"{hrs:02d}:{mins:02d}:{secs:02d}.{millis:03d}"
+
+def _clamp_and_warn(value: float, context: str) -> float:
+    """Clamp negative to 0 and log a warning."""
+    if value is None:
+        return value
+    try:
+        if value < 0:
+            logger.warning(f"[GLOBALISE] {context}: value {value} < 0 after adding offset — clamped to 0")
+            return 0.0
+        return float(value)
+    except Exception:
+        return value
+
+def _is_iso_datetime_string(s: Any) -> bool:
+    """Detect ISO datetime strings to avoid shifting them."""
+    return isinstance(s, str) and ("T" in s and "-" in s and ":" in s)
+
+def _format_count_summary(label: str, total: int, adjusted: int) -> str:
+    """Helper to format logging summary lines like before."""
+    return f"[GLOBALISE] {label}: total={total}, adjusted={adjusted}"
+
 
 # 🔹 Create log file path in current directory
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -168,43 +210,11 @@ if not logger.handlers:
     logger.addHandler(ch)
 
 
-def _clamp_and_warn(value: float, context: str) -> float:
-    """
-    If value is negative, log a warning and clamp to zero.
-    Return the (possibly clamped) value.
-    """
-    if value is None:
-        return value
-    try:
-        if value < 0:
-            logger.warning(f"[GLOBALISE] Negative timestamp detected for {context}: {value:.3f} -> clamping to 0.0")
-            return 0.0
-    except Exception:
-        logger.debug(f"[GLOBALISE] Non-numeric timestamp for {context}: {value!r}")
-    return value
-
-import copy
-import logging
-from typing import Any, Dict, List
-
-logger = logging.getLogger("insv_to_mp4")
 
 
-def _clamp_and_warn(value: float, context: str) -> float:
-    """
-    If value is negative, log a warning and clamp to zero.
-    Return the (possibly clamped) value.
-    """
-    if value is None:
-        return value
-    try:
-        if value < 0:
-            logger.warning(f"[GLOBALISE] Negative timestamp detected for {context}: {value:.3f} -> clamping to 0.0")
-            return 0.0
-    except Exception:
-        # In case value isn't numeric, we'll let the caller handle it (or it will raise elsewhere)
-        logger.debug(f"[GLOBALISE] Non-numeric timestamp for {context}: {value!r}")
-    return value
+
+
+
 
 
 def _format_count_summary(name: str, total: int, adjusted: int) -> str:
@@ -396,148 +406,290 @@ class ConsolidationPipeline:
             return ""
 
 
-    def _globalise_model_results(self, view_data: Dict[str, Any], shard_id: int, default_duration: int = 60) -> None:
+    def globalise_predictions(self,predictions: List[Dict[str, Any]], offset_seconds: float) -> Dict[str, Dict[str,int]]:
         """
-        Shift all time-based fields in model results to global video timeline.
-        Added logging and negative-time handling (clamp to 0 and warn).
+        Globalise numeric time fields under predictions[].result[].value by adding offset_seconds.
+        Mutates `predictions` in-place. Returns a summary dict of counters.
+        """
+        logger.info(f"[GLOBALISE] Starting globalisation with offset_seconds={offset_seconds}")
+
+        numeric_time_keys = {
+            "start", "end", "start_time", "end_time",
+            "clap_timestamp", "timestamp_seconds", "timestamp"
+        }
+        array_time_keys = {"nsfw_timestamps"}
+        ts_string_keys = {"start_ts", "end_ts"}
+
+        counters = defaultdict(lambda: {"total": 0, "adjusted": 0})
+
+        def _shift_numeric(key: str, value: Numeric, ctx_path: str) -> Numeric:
+            counters[key]["total"] += 1
+            try:
+                orig = float(value)
+            except Exception:
+                return value
+            new = orig + offset_seconds
+            new = _clamp_and_warn(new, f"{ctx_path}.{key}")
+            if abs(new - orig) > 1e-6:
+                counters[key]["adjusted"] += 1
+            return new
+
+        def _process_dict(d: Dict[str, Any], path: str = ""):
+            for k, v in list(d.items()):
+                current_path = f"{path}.{k}" if path else k
+
+                if k in array_time_keys and isinstance(v, list):
+                    counters[k]["total"] += len(v)
+                    changed = 0
+                    new_list = []
+                    for i, item in enumerate(v):
+                        if isinstance(item, (int, float)):
+                            orig = float(item)
+                            new_item = orig + offset_seconds
+                            new_item = _clamp_and_warn(new_item, f"{current_path}[{i}]")
+                            new_list.append(new_item)
+                            if abs(new_item - orig) > 1e-6:
+                                changed += 1
+                        else:
+                            new_list.append(item)
+                    d[k] = new_list
+                    counters[k]["adjusted"] += changed
+                    continue
+
+                if k in numeric_time_keys:
+                    if k == "timestamp" and _is_iso_datetime_string(v):
+                        continue
+                    if isinstance(v, (int, float)):
+                        new_val = _shift_numeric(k, v, path or "predictions")
+                        d[k] = new_val
+                        if k in ("start", "start_time"):
+                            d["start_ts"] = _format_time(new_val)
+                        elif k in ("end", "end_time"):
+                            d["end_ts"] = _format_time(new_val)
+                        continue
+                    else:
+                        continue
+
+                if k in ts_string_keys:
+                    numeric_counterpart = "start" if k == "start_ts" else "end"
+                    alt_counterpart = numeric_counterpart + "_time"
+                    if numeric_counterpart in d and isinstance(d[numeric_counterpart], (int, float)):
+                        d[k] = _format_time(d[numeric_counterpart])
+                    elif alt_counterpart in d and isinstance(d[alt_counterpart], (int, float)):
+                        d[k] = _format_time(d[alt_counterpart])
+                    continue
+
+                if isinstance(v, dict):
+                    _process_dict(v, current_path)
+                elif isinstance(v, list):
+                    _process_list(v, current_path)
+
+        def _process_list(lst: List[Any], path: str = ""):
+            for idx, item in enumerate(lst):
+                item_path = f"{path}[{idx}]"
+                if isinstance(item, dict):
+                    _process_dict(item, item_path)
+                elif isinstance(item, list):
+                    _process_list(item, item_path)
+
+        for p_idx, pred in enumerate(predictions):
+            base_path = f"predictions[{p_idx}]"
+            results = pred.get("result", []) or []
+            for r_idx, res in enumerate(results):
+                value = res.get("value")
+                if isinstance(value, dict):
+                    _process_dict(value, f"{base_path}.result[{r_idx}].value")
+                elif isinstance(value, list):
+                    _process_list(value, f"{base_path}.result[{r_idx}].value")
+
+        # Log summary
+        for key, counts in counters.items():
+            logger.info(_format_count_summary(key, counts["total"], counts["adjusted"]))
+
+        logger.info("[GLOBALISE] Done.")
+        return counters
+
+
+    def _globalise_annotations(self,records: List[Dict[str, Any]], offset_seconds: float) -> List[Dict[str, Any]]:
+        """
+        Globalise annotations in-place-style but return a deep-copied updated list.
 
         Args:
-            view_data (dict): Model results for one view (view1/view2).
-            shard_id (int): Shard number.
-            default_duration (int): Shard duration in seconds. Defaults to 60.
-        """
-        try:
-            logger.info(f"[GLOBALISE] Globalising model results for shard_id={shard_id}, default_duration={default_duration}")
-            # Counters for summary
-            audio_total = audio_adjusted = 0
-            scene_total = scene_adjusted = 0
-            motion_total = motion_adjusted = 0
-            face_seg_total = face_seg_adjusted = 0
-            face_fd_total = face_fd_adjusted = 0
-            clap_total = clap_adjusted = 0
+        records: sample_json['annotations'] (list of record dicts; each record must contain "result": list)
+        offset_seconds: seconds to add to the minute+second pair (and numeric label start/end)
 
-            if "audio" in view_data:
-                for audio_shard in view_data["audio"]:
-                    for diar in audio_shard.get("diarization", []):
-                        audio_total += 1
-                        s = _globalise_seconds(diar["start_time"], shard_id, default_duration)
-                        e = _globalise_seconds(diar["end_time"], shard_id, default_duration)
-                        s = _clamp_and_warn(s, f"audio.diarization.start (shard={shard_id})")
-                        e = _clamp_and_warn(e, f"audio.diarization.end (shard={shard_id})")
-                        if s != diar["start_time"] or e != diar["end_time"]:
-                            audio_adjusted += 1
-                        diar["start_time"] = s
-                        diar["end_time"] = e
-
-            if "scene" in view_data and "scenes" in view_data["scene"]:
-                for scene in view_data["scene"]["scenes"]:
-                    scene_total += 1
-                    s = _globalise_seconds(scene["start_time"], shard_id, default_duration)
-                    e = _globalise_seconds(scene["end_time"], shard_id, default_duration)
-                    s = _clamp_and_warn(s, f"scene.start (shard={shard_id})")
-                    e = _clamp_and_warn(e, f"scene.end (shard={shard_id})")
-                    if s != scene["start_time"] or e != scene["end_time"]:
-                        scene_adjusted += 1
-                    scene["start_time"] = s
-                    scene["end_time"] = e
-
-            if "motion" in view_data and "segments" in view_data["motion"]:
-                for seg in view_data["motion"]["segments"]:
-                    motion_total += 1
-                    s = _globalise_seconds(seg["start_time"], shard_id, default_duration)
-                    e = _globalise_seconds(seg["end_time"], shard_id, default_duration)
-                    s = _clamp_and_warn(s, f"motion.segment.start (shard={shard_id})")
-                    e = _clamp_and_warn(e, f"motion.segment.end (shard={shard_id})")
-                    if s != seg["start_time"] or e != seg["end_time"]:
-                        motion_adjusted += 1
-                    seg["start_time"] = s
-                    seg["end_time"] = e
-
-            if "face" in view_data and "flagged_segments" in view_data["face"]:
-                for seg in view_data["face"]["flagged_segments"]:
-                    face_seg_total += 1
-                    s = _globalise_seconds(seg["start_time"], shard_id, default_duration)
-                    e = _globalise_seconds(seg["end_time"], shard_id, default_duration)
-                    s = _clamp_and_warn(s, f"face.flagged_segment.start (shard={shard_id})")
-                    e = _clamp_and_warn(e, f"face.flagged_segment.end (shard={shard_id})")
-                    if s != seg["start_time"] or e != seg["end_time"]:
-                        face_seg_adjusted += 1
-                    seg["start_time"] = s
-                    seg["end_time"] = e
-
-                    for fd in seg.get("metadata", {}).get("detailed_face_data", []):
-                        if "timestamp" in fd:
-                            face_fd_total += 1
-                            t = _globalise_seconds(fd["timestamp"], shard_id, default_duration)
-                            t = _clamp_and_warn(t, f"face.detailed_face_data.timestamp (shard={shard_id})")
-                            if t != fd["timestamp"]:
-                                face_fd_adjusted += 1
-                            fd["timestamp"] = t
-
-            if "clap" in view_data and "clap_timestamps" in view_data["clap"]:
-                for ts in view_data["clap"]["clap_timestamps"]:
-                    clap_total += 1
-                    global_seconds = _globalise_seconds(ts["timestamp_seconds"], shard_id, default_duration)
-                    global_seconds = _clamp_and_warn(global_seconds, f"clap.timestamp_seconds (shard={shard_id})")
-                    if global_seconds != ts["timestamp_seconds"]:
-                        clap_adjusted += 1
-                    ts["timestamp_seconds"] = global_seconds
-                    ts["timestamp_formatted"] = _format_time(global_seconds)
-
-            # Summary logs
-            logger.info(_format_count_summary("audio diarizations", audio_total, audio_adjusted))
-            logger.info(_format_count_summary("scenes", scene_total, scene_adjusted))
-            logger.info(_format_count_summary("motion segments", motion_total, motion_adjusted))
-            logger.info(_format_count_summary("face flagged segments", face_seg_total, face_seg_adjusted))
-            logger.info(_format_count_summary("face detailed timestamps", face_fd_total, face_fd_adjusted))
-            logger.info(_format_count_summary("clap timestamps", clap_total, clap_adjusted))
-
-        except Exception as e:
-            logger.exception(f"⚠️ Globalisation error in view data (shard_id={shard_id}): {e}")
-
-
-    def _globalise_annotations(self, annotations: List[Dict[str, Any]], shard_id: int, default_duration: int = 60) -> List[Dict[str, Any]]:
-        """
-        Shift start/end fields in annotations to global video timeline.
-        Added logging and negative-time handling (clamp to 0 and warn).
-
-        Args:
-            annotations (list): List of annotation objects.
-            shard_id (int): Shard number.
-            default_duration (int): Shard duration in seconds. Defaults to 60.
         Returns:
-            list: Updated list of annotations with global times.
+        new_records: deep-copied list of records with updated times:
+            - numeric value.start/value.end shifted (float)
+            - taxonomy minute annotations updated to global minute string in taxonomy nested array
+            - taxonomy second annotations updated to global second string in taxonomy nested array
         """
-        logger.info(f"[GLOBALISE] Globalising {len(annotations)} annotation(s) for shard_id={shard_id}")
-        updated = []
-        total_labels = adjusted_labels = 0
+        def _parse_primitive_as_int(x: Any) -> Optional[int]:
+            if x is None:
+                return None
+            val = x
+            # unwrap nested single-element lists like [["06"]] -> "06"
+            while isinstance(val, list) and len(val) > 0:
+                val = val[0]
+            if isinstance(val, (int, float)):
+                try:
+                    return int(val)
+                except Exception:
+                    return None
+            if isinstance(val, str):
+                s = val.strip()
+                if s == "":
+                    return None
+                try:
+                    return int(float(s))
+                except Exception:
+                    return None
+            return None
 
-        for ann in annotations:
-            ann_copy = copy.deepcopy(ann)
-            if ann_copy.get("type") == "labels":
-                total_labels += 1
-                val = ann_copy.get("value", {})
-                # start
-                if "start" in val and isinstance(val["start"], (int, float)):
-                    old_start = val["start"]
-                    new_start = _globalise_seconds(old_start, shard_id, default_duration)
-                    new_start = _clamp_and_warn(new_start, f"annotation.start (id={ann_copy.get('id','?')}, shard={shard_id})")
-                    if new_start != old_start:
-                        adjusted_labels += 1
-                    val["start"] = new_start
-                # end
-                if "end" in val and isinstance(val["end"], (int, float)):
-                    old_end = val["end"]
-                    new_end = _globalise_seconds(old_end, shard_id, default_duration)
-                    new_end = _clamp_and_warn(new_end, f"annotation.end (id={ann_copy.get('id','?')}, shard={shard_id})")
-                    if new_end != old_end:
-                        adjusted_labels += 1
-                    val["end"] = new_end
-                ann_copy["value"] = val
-            updated.append(ann_copy)
+        def _clamp_nonneg(v: Optional[float]) -> Optional[float]:
+            if v is None:
+                return None
+            try:
+                fv = float(v)
+            except Exception:
+                return None
+            if fv < 0:
+                logger.warning("[GLOBALISE] clamping negative time to 0: %s", fv)
+                return 0.0
+            return fv
 
-        logger.info(_format_count_summary("annotations (labels)", total_labels, adjusted_labels))
-        return updated
+        if not isinstance(records, list):
+            raise TypeError("Expected `records` to be a list (sample_json['annotations']).")
+
+        out_records = copy.deepcopy(records)
+
+        stats = {
+            "records": 0,
+            "annotations_total": 0,
+            "labels_seen": 0,
+            "labels_shifted": 0,
+            "taxonomy_groups": 0,
+            "taxonomy_updated": 0,
+        }
+
+        for rec_idx, rec in enumerate(out_records):
+            stats["records"] += 1
+            if not isinstance(rec, dict):
+                logger.warning("[GLOBALISE] skipping non-dict record at index %d", rec_idx)
+                continue
+            results = rec.get("result", [])
+            if not isinstance(results, list):
+                logger.warning("[GLOBALISE] record %d has no 'result' list; skipping", rec_idx)
+                continue
+
+            # 1) Shift numeric label start/end in each annotation's value (or top-level)
+            for ann in results:
+                stats["annotations_total"] += 1
+                val_container = ann.get("value") if isinstance(ann.get("value"), dict) else ann
+                for key in ("start", "end"):
+                    if key in val_container and isinstance(val_container[key], (int, float)):
+                        old = float(val_container[key])
+                        stats["labels_seen"] += 1
+                        new = _clamp_nonneg(old + float(offset_seconds))
+                        if new is None:
+                            continue
+                        if abs(new - old) > 1e-12:
+                            stats["labels_shifted"] += 1
+                        val_container[key] = new
+                if isinstance(ann.get("value"), dict):
+                    ann["value"] = val_container
+
+            # 2) Collect taxonomy minute/second annotations grouped by (prefix, pos)
+            # groups[(prefix,pos)] = {"minutes": [(idx,ann),...], "seconds": [(idx,ann),...]}
+            groups = {}
+
+            for idx_ann, ann in enumerate(results):
+                if not isinstance(ann, dict):
+                    continue
+                if ann.get("type") != "taxonomy":
+                    continue
+                from_name = (ann.get("from_name") or "")
+                m = _FROMNAME_RE.match(from_name)
+                if not m:
+                    continue
+                prefix = m.group("prefix")
+                pos = m.group("pos").lower()
+                unit = m.group("unit").lower()
+
+                key = (prefix, pos)
+                if key not in groups:
+                    groups[key] = {"minutes": [], "seconds": []}
+
+                # retrieve numeric from ann["value"]["taxonomy"] nested-array
+                num = None
+                if isinstance(ann.get("value"), dict) and "taxonomy" in ann["value"]:
+                    # ann["value"]["taxonomy"] typically looks like [["06"]]
+                    num = _parse_primitive_as_int(ann["value"]["taxonomy"])
+
+                if unit.startswith("min"):
+                    groups[key]["minutes"].append((idx_ann, ann, num))
+                else:
+                    groups[key]["seconds"].append((idx_ann, ann, num))
+
+            # 3) For each group compute global total seconds and write back minute/second split
+            for (prefix, pos), info in groups.items():
+                stats["taxonomy_groups"] += 1
+                # Determine minute and second sources (use first available value if multiple; missing -> 0)
+                minute_val = None
+                second_val = None
+                if info["minutes"]:
+                    # first minute annotation's parsed numeric value
+                    minute_val = info["minutes"][0][2]
+                if info["seconds"]:
+                    second_val = info["seconds"][0][2]
+
+                if minute_val is None:
+                    minute_val = 0
+                if second_val is None:
+                    second_val = 0
+
+                try:
+                    minute_int = int(minute_val)
+                except Exception:
+                    minute_int = 0
+                try:
+                    second_int = int(second_val)
+                except Exception:
+                    second_int = 0
+
+                total_seconds = float(minute_int * 60 + second_int) + float(offset_seconds)
+                total_seconds = _clamp_nonneg(total_seconds)
+                if total_seconds is None:
+                    total_seconds = 0.0
+
+                # compute global minute and second components
+                global_minute = int(total_seconds) // 60
+                global_second = int(total_seconds) % 60
+
+                # format strings: minutes with at least 2 digits, seconds always 2 digits
+                minute_str = f"{global_minute:02d}"
+                second_str = f"{global_second:02d}"
+
+                # update all minute annotations in group to contain minute_str in nested taxonomy array
+                for idx_ann, ann_obj, _num in info["minutes"]:
+                    # ensure value dict exists
+                    if not isinstance(results[idx_ann].get("value"), dict):
+                        results[idx_ann]["value"] = {}
+                    results[idx_ann]["value"]["taxonomy"] = [[minute_str]]
+                    stats["taxonomy_updated"] += 1
+
+                # update all second annotations in group to contain second_str in nested taxonomy array
+                for idx_ann, ann_obj, _num in info["seconds"]:
+                    if not isinstance(results[idx_ann].get("value"), dict):
+                        results[idx_ann]["value"] = {}
+                    results[idx_ann]["value"]["taxonomy"] = [[second_str]]
+                    stats["taxonomy_updated"] += 1
+
+        logger.info("[GLOBALISE] records=%d annotations=%d labels_seen=%d labels_shifted=%d taxonomy_groups=%d taxonomy_updated=%d",
+                    stats["records"], stats["annotations_total"], stats["labels_seen"], stats["labels_shifted"],
+                    stats["taxonomy_groups"], stats["taxonomy_updated"])
+
+        return out_records
 
     # ------------------------------
     # Consolidation
@@ -566,25 +718,24 @@ class ConsolidationPipeline:
             if shard_number in master["consolidated_shards"] and not overwrite_existing:
                 print(f"ℹ️ No new merge needed for {video_id} (shard {shard_number})")
                 return master
-
+            
+            offset_seconds=compute_shard_offset(shard_number)
             shard_key = f"shard_{shard_number}"
             shard_entry = {
                 "shard_number": shard_number,
                 "data": copy.deepcopy(shard_json.get("data", {})),
                 "predictions": shard_json.get("predictions", []),
-                "annotations": self._globalise_annotations(shard_json.get("annotations", []), shard_number, default_duration)
+                "annotations": self._globalise_annotations(shard_json.get("annotations", []), offset_seconds)
             }
 
-            if "model_results" in shard_entry["data"]:
-                for view_key in ["view1", "view2"]:
-                    if view_key in shard_entry["data"]["model_results"]:
-                        self._globalise_model_results(shard_entry["data"]["model_results"][view_key], shard_number, default_duration)
-
-            for pred in shard_entry["predictions"]:
-                for res in pred.get("result", []):
-                    for view_key in ["view1", "view2"]:
-                        if view_key in res:
-                            self._globalise_model_results(res[view_key], shard_number, default_duration)
+            try:
+                counters = self.globalise_predictions(shard_entry["predictions"], offset_seconds)
+                logger.info(f"[GLOBALISE] Globalised predictions for {shard_key} with offset_seconds={offset_seconds}")
+                # Log a compact summary (mirrors earlier summary style)
+                for key, counts in counters.items():
+                    logger.info(f"[GLOBALISE] {key}: total={counts['total']}, adjusted={counts['adjusted']}")
+            except Exception as e:
+                logger.exception(f"⚠️ Error globalising predictions for shard={shard_number}: {e}")
 
             master["shards"][shard_key] = shard_entry
 
