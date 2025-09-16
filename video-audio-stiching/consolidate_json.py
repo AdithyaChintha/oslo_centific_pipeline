@@ -694,7 +694,7 @@ class ConsolidationPipeline:
     # ------------------------------
     # Consolidation
     # ------------------------------
-    def consolidate_shard(self, shard_json: Dict[str, Any], *, default_duration: int = 60, overwrite_existing: bool = False) -> Dict[str, Any]:
+    def consolidate_shard(self, shard_json: Dict[str, Any], *, default_duration: int = 180, overwrite_existing: bool = False) -> Dict[str, Any]:
         """
         Consolidate a single shard JSON into its video master.
 
@@ -708,6 +708,7 @@ class ConsolidationPipeline:
         """
         try:
             video_id = shard_json["data"]["video_name"]
+            offset_variable=shard_json["data"]["metadata_domain"]
             shard_number = int(shard_json["data"]["shard_number"])
             total_shards = int(shard_json["data"].get("total_shards", 0))
 
@@ -719,7 +720,11 @@ class ConsolidationPipeline:
                 print(f"ℹ️ No new merge needed for {video_id} (shard {shard_number})")
                 return master
             
-            offset_seconds=compute_shard_offset(shard_number)
+            if offset_variable=="Walkthrough":
+                offset_seconds=compute_shard_offset(shard_number)
+            else:
+                offset_seconds=(shard_number-1)*default_duration
+
             shard_key = f"shard_{shard_number}"
             shard_entry = {
                 "shard_number": shard_number,
