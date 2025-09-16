@@ -26,7 +26,10 @@ from utils.blob_utils import (
     update_labelstudio_tasks_with_new_urls, validate_shard_urls, load_pipeline_config,
     save_video_list_progress
 )
+from utils.dynamic_erp_processor import integrate_erp_audio_with_labelstudio_tasks
 from utils.multi_chunk_blob_utils import download_ready_sessions
+
+
 
 from azure.storage.blob import generate_blob_sas, BlobSasPermissions, BlobServiceClient
 from azure.core.exceptions import ResourceNotFoundError
@@ -57,7 +60,7 @@ from ray_jobs.signal_quality_check_blur_black_screen import detect_blur_and_blac
 from ray_jobs.video_lighting_task import lighting_by_second_task
 
 # Import comprehensive tracking system
-from utils.comprehensive_tracker import initialize_global_tracker, update_tracking, get_global_tracker, check_session_completion_status, is_session_already_processed, cleanup_temp_download_directory
+from utils.comprehensive_tracker import initialize_global_tracker, update_tracking, get_global_tracker, check_session_completion_status, is_session_already_processed, cleanup_temp_download_directory, cleanup_session_output_directory, get_incomplete_sessions_for_retry
 from utils.chunk_id_extractor import extract_chunk_id_from_path, extract_sequence_number_from_path, extract_chunk_type_from_path
 
 # Import new ray jobs
@@ -123,6 +126,27 @@ def download_video_batch_task(blob_service_client: BlobServiceClient, container_
                 logger.info(f"⬇️ RAY TASK {task_id} - Downloading video {idx}/{len(video_batch)}: {video_name}")
                 logger.info(f"   �� Video blob: {video_blob}")
                 logger.info(f"   �� Audio blob: {audio_blob}")
+                
+                # Check if session is already completed before downloading
+                session_status = check_session_completion_status(video_name, "./outmain2withdn")
+                if session_status.get("completion_status") == "completed":
+                    logger.info(f"⏭️  RAY TASK {task_id} - Session {video_name} already completed at {session_status.get('completion_time')} - skipping download")
+                    download_results.append({
+                        'video_name': video_name,
+                        'video_path': None,
+                        'audio_path': None,
+                        'video_info': video_info,
+                        'success': False,
+                        'error': f"Session already completed at {session_status.get('completion_time')}",
+                        'task_id': task_id,
+                        'skipped': True,
+                        'skip_reason': 'already_completed'
+                    })
+                    continue
+                elif session_status.get("completion_status") == "pending" and session_status.get("exists"):
+                    logger.info(f"🔄 RAY TASK {task_id} - Session {video_name} was previously started but not completed - resuming download")
+                else:
+                    logger.info(f"🆕 RAY TASK {task_id} - Starting new session: {video_name}")
                 
                 # Fix potential double extension issue
                 video_local_filename = os.path.basename(video_blob)
@@ -211,6 +235,57 @@ def download_video_batch_task(blob_service_client: BlobServiceClient, container_
 # =============================================================================
 # END OF BATCH PROCESSING FUNCTIONS
 # =============================================================================
+def read_clap_detection_from_json(shard_output_dir: str, shard_type: str) -> bool:
+    """
+    Read clap detection results from clap_output JSON files.
+    
+    Args:
+        shard_output_dir: Directory containing the shard (e.g., shard_1, shard_2, etc.)
+        shard_type: "first" or "last" for logging purposes
+        
+    Returns:
+        bool: True if clap was detected in video_results, False otherwise
+    """
+    try:
+        logger.info(f"🔍 Reading clap detection from JSON files in {shard_output_dir}")
+        
+        # Look for clap_output directories in any view subdirectory
+        import glob
+        clap_output_patterns = [
+            f"{shard_output_dir}/*/clap_output/*.json",
+            f"{shard_output_dir}/*/clap_output/*_clap_detection.json",
+            f"{shard_output_dir}/*/clap_output/*_combined_clap_detection.json"
+        ]
+        
+        clap_json_files = []
+        for pattern in clap_output_patterns:
+            clap_json_files.extend(glob.glob(pattern))
+        
+        if not clap_json_files:
+            logger.warning(f"⚠️ No clap detection JSON files found in {shard_output_dir}")
+            return False
+        
+        # Use the first JSON file found
+        clap_json_file = clap_json_files[0]
+        logger.info(f"📄 Reading clap detection from: {clap_json_file}")
+        
+        # Read and parse the JSON file
+        with open(clap_json_file, 'r') as f:
+            clap_data = json.load(f)
+        
+        # Extract video_results success field
+        video_results = clap_data.get('video_results', {})
+        success = video_results.get('success', False)
+        
+        logger.info(f"🎬 {shard_type.upper()} SHARD clap detection result: {'✅ SUCCESS' if success else '❌ FAILED'}")
+        logger.info(f"   Video results: {video_results}")
+        
+        return success
+        
+    except Exception as e:
+        logger.error(f"❌ Error reading clap detection from JSON: {e}")
+        return False
+
 
 @ray.remote
 def integrated_blob_polling_and_pipeline_task(
@@ -347,6 +422,41 @@ def integrated_blob_polling_and_pipeline_task(
         logger.info("✅ Failed videos reset to pending state")
     else:
         logger.info("✅ No failed videos found")
+    
+    # =============================================================================
+    # CHECK FOR INCOMPLETE SESSIONS AND ADD TO RETRY QUEUE
+    # =============================================================================
+    incomplete_sessions = get_incomplete_sessions_for_retry(output_base_dir)
+    if incomplete_sessions:
+        logger.info(f"🔄 Found {len(incomplete_sessions)} incomplete sessions for retry:")
+        for session in incomplete_sessions:
+            session_id = session['session_id']
+            status = session['status']
+            last_updated = session['last_updated']
+            logger.info(f"   📋 {session_id}: {status} (last updated: {last_updated})")
+            
+            # Add to checklist if not already present
+            if session_id not in checklist['videos']:
+                checklist['videos'][session_id] = {
+                    'status': 'pending',
+                    'last_updated': datetime.now().isoformat(),
+                    'retry_reason': f'Incomplete session - {status}',
+                    'original_status': status
+                }
+                checklist['total_videos'] += 1
+                logger.info(f"   ➕ Added {session_id} to checklist for retry")
+            else:
+                # Update existing entry to pending
+                checklist['videos'][session_id]['status'] = 'pending'
+                checklist['videos'][session_id]['last_updated'] = datetime.now().isoformat()
+                checklist['videos'][session_id]['retry_reason'] = f'Incomplete session - {status}'
+                logger.info(f"   🔄 Updated {session_id} status to pending for retry")
+        
+        checklist['last_updated'] = datetime.now().isoformat()
+        save_video_checklist(checklist, checklist_path)
+        logger.info("✅ Incomplete sessions added to retry queue")
+    else:
+        logger.info("✅ No incomplete sessions found")
     
     processing_results = []
     successful_count = 0
@@ -1719,7 +1829,7 @@ def process_single_session(session_path: str, session_id: str, output_base_dir: 
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_output_prefix: str=None, blob_client:str = None, container_name:str = None, account_name: str = None, account_key: str = None):
+def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_output_prefix: str=None, blob_client:str = None, container_name:str = None, account_name: str = None, account_key: str = None, local_download_dir: str = None):
     
     try:
         if not ray.is_initialized():
@@ -2056,6 +2166,26 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
             consolidated_json_paths.append(shard_results['consolidated_model_results_json'])
             
             logger.info(f"✅ Completed multi-view processing for shard {shard_idx + 1}: {shard_results['total_views_processed']} views, {shard_results['successful_views']} successful")
+        
+        # =================================================================
+        # DYNAMIC ERP VIDEO AND AUDIO PROCESSING - AFTER LABEL STUDIO TASKS
+        # =================================================================
+        logger.info(f"🎬 Starting dynamic ERP video and audio processing for session: {session_id}")
+        
+        # Integrate ERP video and audio URLs with Label Studio tasks
+        label_studio_tasks = integrate_erp_audio_with_labelstudio_tasks(
+            output_dir=output_dir,
+            session_id=session_id,
+            blob_service_client=blob_client,
+            container_name=container_name,
+            blob_base_path=azure_output_prefix,
+            account_key=account_key,
+            labelstudio_tasks=label_studio_tasks
+        )
+        
+        logger.info(f"🎬 Dynamic ERP and audio processing completed for session: {session_id}")
+        # =================================================================
+        
         print(label_studio_tasks)
         generate_final_combined_model_results_json(output_dir, consolidated_json_paths)
         
@@ -2112,11 +2242,22 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
             logger.info(f"🧹 Cleaning up temporary download directory for session: {session_id}")
             cleanup_result = cleanup_temp_download_directory(local_download_dir, session_id)
             if cleanup_result.get("success", False):
-                logger.info(f"✅ Cleanup completed: {cleanup_result.get('files_removed', 0)} files removed")
+                logger.info(f"✅ Temp cleanup completed: {cleanup_result.get('files_removed', 0)} files removed")
             else:
-                logger.warning(f"⚠️ Cleanup failed: {cleanup_result.get('error', 'Unknown error')}")
+                logger.warning(f"⚠️ Temp cleanup failed: {cleanup_result.get('error', 'Unknown error')}")
         else:
-            logger.info(f"ℹ️ Cleanup disabled in config - keeping temp files")
+            logger.info(f"ℹ️ Temp cleanup disabled in config - keeping temp files")
+        
+        # Clean up session output directory after successful upload
+        if pipeline_config.get('cleanup', {}).get('cleanup_output_dir', True):
+            logger.info(f"🧹 Cleaning up session output directory for session: {session_id}")
+            output_cleanup_result = cleanup_session_output_directory(output_dir, session_id)
+            if output_cleanup_result.get("success", False):
+                logger.info(f"✅ Output cleanup completed: {output_cleanup_result.get('files_removed', 0)} files, {output_cleanup_result.get('dirs_removed', 0)} directories removed")
+            else:
+                logger.warning(f"⚠️ Output cleanup failed: {output_cleanup_result.get('error', 'Unknown error')}")
+        else:
+            logger.info(f"ℹ️ Output cleanup disabled in config - keeping output files")
 
 
 
@@ -2288,6 +2429,24 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
             
             logger.info(f"✅ Completed multi-view processing for shard {shard_idx + 1}: {shard_results['total_views_processed']} views, {shard_results['successful_views']} successful")
 
+        # =================================================================
+        # DYNAMIC ERP VIDEO AND AUDIO PROCESSING - AFTER LABEL STUDIO TASKS
+        # =================================================================
+        logger.info(f"🎬 Starting dynamic ERP video and audio processing for session: {session_id}")
+        
+        # Integrate ERP video and audio URLs with Label Studio tasks
+        label_studio_tasks = integrate_erp_audio_with_labelstudio_tasks(
+            output_dir=output_dir,
+            session_id=session_id,
+            blob_service_client=blob_client,
+            container_name=container_name,
+            blob_base_path=azure_output_prefix,
+            account_key=account_key,
+            labelstudio_tasks=label_studio_tasks
+        )
+        
+        logger.info(f"🎬 Dynamic ERP and audio processing completed for session: {session_id}")
+        # =================================================================
         
         # Add missing final processing steps  
         generate_final_combined_model_results_json(output_dir, consolidated_json_paths)
@@ -2412,6 +2571,25 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
                 logger.info(f"📋 Enhanced shard {shard_index + 1} labelstudio task with model results")
             except Exception as e:
                 logger.error(f"❌ Failed to enhance shard {shard_index + 1} labelstudio task: {e}")
+        
+        # =================================================================
+        # DYNAMIC ERP VIDEO AND AUDIO PROCESSING - AFTER LABEL STUDIO TASKS
+        # =================================================================
+        logger.info(f"🎬 Starting dynamic ERP video and audio processing for session: {session_id}")
+        
+        # Integrate ERP video and audio URLs with Label Studio tasks
+        label_studio_tasks = integrate_erp_audio_with_labelstudio_tasks(
+            output_dir=output_dir,
+            session_id=session_id,
+            blob_service_client=blob_client,
+            container_name=container_name,
+            blob_base_path=azure_output_prefix,
+            account_key=account_key,
+            labelstudio_tasks=label_studio_tasks
+        )
+        
+        logger.info(f"🎬 Dynamic ERP and audio processing completed for session: {session_id}")
+        # =================================================================
         
         # Generate final combined JSON with all shards
         generate_final_combined_model_results_json(output_dir, consolidated_json_paths)
@@ -3897,7 +4075,7 @@ def process_time_aligned_shard_multiview(
 
     logger.info(f"🎬 Processing shard {shard_index+1} with {len(view_shard_paths)} views: {list(view_shard_paths.keys())}")
 
-    # --- ENHANCED FIRST/LAST SHARD CLAP DETECTION (REUSE EXISTING LOGIC) ---
+    # --- ENHANCED FIRST/LAST SHARD CLAP DETECTION (READ FROM CLAP OUTPUT JSON) ---
     # Always determine first/last shard status regardless of multi_chunk_process
     is_first_shard = (shard_index == 0)
     is_last_shard = (total_shard_count and shard_index == total_shard_count - 1)
@@ -3909,10 +4087,15 @@ def process_time_aligned_shard_multiview(
         shard_type = "first" if is_first_shard else "last"
         logger.info(f"🔍 CLAP DETECTION for {shard_type} shard {shard_index+1}")
         
+        # Read clap detection results from clap_output JSON files
+        clap_detected = read_clap_detection_from_json(shard_output_dir, shard_type)
+        
         if is_first_shard:
-            logger.info(f"🎬 FIRST SHARD - will check clap detection results from all views")
+            clap_detected_in_first_shard = clap_detected
+            logger.info(f"🎬 FIRST SHARD clap detection: {'✅ DETECTED' if clap_detected else '❌ NOT DETECTED'}")
         else:
-            logger.info(f"🎬 LAST SHARD - will check clap detection results from all views")
+            clap_detected_in_last_shard = clap_detected
+            logger.info(f"🎬 LAST SHARD clap detection: {'✅ DETECTED' if clap_detected else '❌ NOT DETECTED'}")
     else:
         logger.info(f"ℹ️ Shard {shard_index+1} is middle shard - no special clap processing")
 
@@ -4156,7 +4339,7 @@ def process_time_aligned_shard(
     shard_offset_sec = shard_index * 60
     os.makedirs(shard_output_dir, exist_ok=True)
 
-    # --- ENHANCED FIRST/LAST SHARD CLAP DETECTION ---
+    # --- ENHANCED FIRST/LAST SHARD CLAP DETECTION (READ FROM CLAP OUTPUT JSON) ---
     # Determine if this is first or last shard using array indexing logic
     is_first_shard = (shard_index == 0)  # array[0]
     is_last_shard = (total_shard_count and shard_index == total_shard_count - 1)  # array[-1]
@@ -4169,12 +4352,15 @@ def process_time_aligned_shard(
         shard_type = "first" if is_first_shard else "last"
         logger.info(f"🔍 CLAP DETECTION for {shard_type} shard {shard_index+1}")
         
-        # Run clap detection on this shard's audio using existing clap results from normal pipeline
-        # We'll get the clap results from the normal pipeline processing
+        # Read clap detection results from clap_output JSON files
+        clap_detected = read_clap_detection_from_json(shard_output_dir, shard_type)
+        
         if is_first_shard:
-            logger.info(f"🎬 FIRST SHARD - will check clap detection results")
-        else:  # is_last_shard
-            logger.info(f"🎬 LAST SHARD - will check clap detection results")
+            clap_detected_in_first_shard = clap_detected
+            logger.info(f"🎬 FIRST SHARD clap detection: {'✅ DETECTED' if clap_detected else '❌ NOT DETECTED'}")
+        else:
+            clap_detected_in_last_shard = clap_detected
+            logger.info(f"🎬 LAST SHARD clap detection: {'✅ DETECTED' if clap_detected else '❌ NOT DETECTED'}")
     else:
         logger.info(f"ℹ️ Shard {shard_index+1} is middle shard - no special clap processing")
 
@@ -4201,57 +4387,44 @@ def process_time_aligned_shard(
     is_intro_statement_there = False
     intro_transcript = ""
     
-    if is_first_shard or is_last_shard:
-        # Extract clap detection results from the normal pipeline processing
-        clap_results = view1_results.get('clap', {})
-        clap_count = clap_results.get('detected_clap', {}).get('timestamp') if clap_results else 0
-        clap_detected = clap_timestamp is not None
+    if is_first_shard:
+        # --- DETECT INTRO STATEMENT IN FIRST SHARD ---
+        logger.info(f"🎤 ANALYZING FIRST SHARD for intro statement...")
         
-        if is_first_shard:
-            clap_detected_in_first_shard = clap_detected
-            logger.info(f"🎬 FIRST SHARD clap detection: {'✅ DETECTED' if clap_detected else '❌ NOT DETECTED'} ({clap_count} claps)")
+        # Check audio results from view1 for transcript
+        audio_results = view1_results.get('audio', [])
+        if isinstance(audio_results, list) and audio_results:
+            audio_result = audio_results[0]  # Get first audio result
+            transcript = audio_result.get('transcript', '').strip()
             
-            # --- DETECT INTRO STATEMENT IN FIRST SHARD ---
-            logger.info(f"🎤 ANALYZING FIRST SHARD for intro statement...")
-            
-            # Check audio results from view1 for transcript
-            audio_results = view1_results.get('audio', [])
-            if isinstance(audio_results, list) and audio_results:
-                audio_result = audio_results[0]  # Get first audio result
-                transcript = audio_result.get('transcript', '').strip()
+            if transcript:
+                intro_transcript = transcript
                 
-                if transcript:
-                    intro_transcript = transcript
-                    
-                    # Detect intro statements using common intro phrases and patterns
-                    intro_keywords = [
-                        "i'm going to", "i will", "today we", "welcome", "hello", "hi there",
-                        "let's", "we're going to", "this is", "in this", "i am going to",
-                        "we will", "starting with", "first we", "beginning", "introduction"
-                    ]
-                    
-                    transcript_lower = transcript.lower()
-                    
-                    # Check for intro keywords or if it's a substantial opening statement
-                    has_intro_keywords = any(keyword in transcript_lower for keyword in intro_keywords)
-                    has_meaningful_content = len(transcript.strip()) > 10  # More than just a few words
-                    
-                    is_intro_statement_there = has_intro_keywords or has_meaningful_content
-                    
-                    logger.info(f"🗣️ INTRO STATEMENT: {'✅ DETECTED' if is_intro_statement_there else '❌ NOT DETECTED'}")
-                    logger.info(f"📝 Transcript: '{transcript}'")
-                    
-                    if has_intro_keywords:
-                        matched_keywords = [kw for kw in intro_keywords if kw in transcript_lower]
-                        logger.info(f"🔤 Intro keywords found: {matched_keywords}")
-                else:
-                    logger.info(f"📝 No transcript found in first shard")
+                # Detect intro statements using common intro phrases and patterns
+                intro_keywords = [
+                    "i'm going to", "i will", "today we", "welcome", "hello", "hi there",
+                    "let's", "we're going to", "this is", "in this", "i am going to",
+                    "we will", "starting with", "first we", "beginning", "introduction"
+                ]
+                
+                transcript_lower = transcript.lower()
+                
+                # Check for intro keywords or if it's a substantial opening statement
+                has_intro_keywords = any(keyword in transcript_lower for keyword in intro_keywords)
+                has_meaningful_content = len(transcript.strip()) > 10  # More than just a few words
+                
+                is_intro_statement_there = has_intro_keywords or has_meaningful_content
+                
+                logger.info(f"🗣️ INTRO STATEMENT: {'✅ DETECTED' if is_intro_statement_there else '❌ NOT DETECTED'}")
+                logger.info(f"📝 Transcript: '{transcript}'")
+                
+                if has_intro_keywords:
+                    matched_keywords = [kw for kw in intro_keywords if kw in transcript_lower]
+                    logger.info(f"🔤 Intro keywords found: {matched_keywords}")
             else:
-                logger.info(f"📝 No audio results found in first shard")
-                
-        else:  # is_last_shard
-            clap_detected_in_last_shard = clap_detected
-            logger.info(f"🎬 LAST SHARD clap detection: {'✅ DETECTED' if clap_detected else '❌ NOT DETECTED'} ({clap_count} claps)")
+                logger.info(f"📝 No transcript found in first shard")
+        else:
+            logger.info(f"📝 No audio results found in first shard")
 
     # --- CREATE CLAP DETECTION FLAGS ---
     detection_flags = {
@@ -5065,6 +5238,25 @@ def _process_single_view(
         except Exception as e:
             logger.error(f"❌ Failed to enhance shard {idx + 1} labelstudio task: {e}")
 
+    # =================================================================
+    # DYNAMIC ERP VIDEO AND AUDIO PROCESSING - AFTER LABEL STUDIO TASKS
+    # =================================================================
+    logger.info(f"🎬 Starting dynamic ERP video and audio processing for session: {video_name}")
+    
+    # Integrate ERP video and audio URLs with Label Studio tasks
+    label_studio_tasks = integrate_erp_audio_with_labelstudio_tasks(
+        output_dir=output_dir,
+        session_id=video_name,
+        blob_service_client=blob_client,
+        container_name=container_name,
+        blob_base_path=azure_output_prefix,
+        account_key=account_key,
+        labelstudio_tasks=label_studio_tasks
+    )
+    
+    logger.info(f"🎬 Dynamic ERP and audio processing completed for session: {video_name}")
+    # =================================================================
+
     # Generate final combined JSON with all shards
     generate_final_combined_model_results_json(output_dir, consolidated_json_paths)
 
@@ -5468,14 +5660,14 @@ if __name__ == "__main__":
     
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Ray Pipeline with Integrated Blob Polling")
-    parser.add_argument("--mode", choices=["integrated", "standalone", "multi_chunks", "multi_sessions", "blob_polling"], default="multi_chunks",
-                       help="Run mode: 'integrated' for blob polling + pipeline, 'standalone' for direct pipeline, 'multi_chunks' for single session, 'multi_sessions' for multiple sessions, 'blob_polling' for continuous blob polling")
+    parser.add_argument("--mode", choices=["integrated", "standalone", "multi_chunks", "multi_sessions", "blob_polling"], default="blob_polling",
+                       help="Run mode: 'integrated' for blob polling + pipeline, 'standalone' for direct pipeline, 'multi_chunks' for single session, 'multi_sessions' for multiple sessions, 'blob_polling' for continuous blob polling (default: blob_polling)")
     parser.add_argument("--azure-config", default="blobfuse2_config.yaml",
                        help="Azure configuration file path")
     parser.add_argument("--pipeline-config", default="config/pipeline_config.yaml",
                        help="Pipeline configuration file path")
-    parser.add_argument("--blob-prefix", default="test/input_videos",
-                       help="Blob prefix to search for videos")
+    parser.add_argument("--blob-prefix", 
+                       help="Blob prefix to search for videos (default: from pipeline_config.yaml)")
     parser.add_argument("--max-videos", type=int,
                        help="Maximum number of videos to process")
     parser.add_argument("--force-refresh", action="store_true",
@@ -5488,18 +5680,32 @@ if __name__ == "__main__":
                        help="Enable parallel chunk downloading using Ray (default: True)")
     parser.add_argument("--sequential-chunks", action="store_true", default=False,
                        help="Use sequential chunk downloading (overrides parallel-chunks)")
-    parser.add_argument("--polling-interval", type=int, default=5,
-                       help="Polling interval in minutes for blob_polling mode (default: 5)")
+    parser.add_argument("--polling-interval", type=int,
+                       help="Polling interval in minutes for blob_polling mode (default: from pipeline_config.yaml)")
 
     # Standalone mode arguments
     parser.add_argument("--input-video", 
                        help="Input video file path (for standalone mode)")
     parser.add_argument("--input-audio", 
                        help="Input audio file path (for standalone mode)")
-    parser.add_argument("--output-dir", default="/tmp/pipeline_output",
-                       help="Output directory (for standalone mode)")
+    parser.add_argument("--output-dir",
+                       help="Output directory (for standalone mode, default: from pipeline_config.yaml)")
     
     args = parser.parse_args()
+    
+    # Load pipeline config to get defaults
+    pipeline_config = load_pipeline_config(args.pipeline_config)
+    
+    # Set defaults from config file if not provided via command line
+    if args.blob_prefix is None:
+        args.blob_prefix = pipeline_config['azure_storage']['input_blob_prefix']
+    
+    if args.polling_interval is None:
+        args.polling_interval = pipeline_config['polling']['interval_minutes']
+    
+    if args.output_dir is None:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        args.output_dir = os.path.join(current_dir, pipeline_config['local_storage']['output_base_dir'].lstrip('./'))
     
     try:
         # Initialize Ray
@@ -5596,7 +5802,7 @@ if __name__ == "__main__":
                     size_mb = os.path.getsize(file_path) / (1024 * 1024)
                     print(f"   📄 {file} ({size_mb:.1f} MB)")
             output_prefix = pipeline_config['azure_storage']['output_blob_prefix']
-            pipeline_main_multichunks(result, output_base_dir, f"{output_prefix}", blob_client, container_name, account_name, account_key)
+            pipeline_main_multichunks(result, output_base_dir, f"{output_prefix}", blob_client, container_name, account_name, account_key, local_download_dir)
 
         elif args.mode == "multi_sessions":
             # =================================================================
@@ -5710,7 +5916,13 @@ if __name__ == "__main__":
             # Launch the integrated blob polling and pipeline task with batch processing
             task_ref = integrated_blob_polling_and_pipeline_task.remote(
                 azure_config_path=args.azure_config,
-                pipeline_config_path=args.pipeline_config
+                pipeline_config_path=args.pipeline_config,
+                blob_prefix=args.blob_prefix,
+                max_videos=args.max_videos,
+                force_refresh=args.force_refresh,
+                process_dual_views=args.dual_views,
+                process_unwarped_views=args.unwarped_views,
+                batch_size=pipeline_config.get('processing', {}).get('max_videos_per_batch', 3)
             )
             
             # Monitor the continuous task 

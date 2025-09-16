@@ -4,9 +4,9 @@
 # Azure Blob Storage Configuration
 azure_storage:
   # Input directory configuration
-  input_blob_prefix: "azure_directory_path/Oslo/test2"  # Default blob prefix to search for videos
+  input_blob_prefix: "test_audio/"  # Default blob prefix to search for videos
   # Output directory configuration
-  output_blob_prefix: "output_test/video_doing_my_work"  # Base prefix for uploading processed results
+  output_blob_prefix: "processed/"  # Base prefix for uploading processed results
   
   # Container settings (these can override blobfuse2_config.yaml if needed)
   # container_name: "instavideo"  # Uncomment to override
@@ -39,6 +39,9 @@ processing:
 cleanup:
   # Whether to clean up temporary download directory after processing
   cleanup_temp_dir: true
+  
+  # Whether to clean up session output directory after successful upload to blob
+  cleanup_output_dir: true
   
   # Whether to clean up individual files after each video processing
   cleanup_files_after_each_video: true
