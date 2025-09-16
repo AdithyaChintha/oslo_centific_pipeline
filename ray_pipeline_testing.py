@@ -1728,7 +1728,7 @@ def process_single_session(session_path: str, session_id: str, output_base_dir: 
         return {
             "success": True,
             "processing_time": processing_time,
-            "shards_processed": pipeline_result.get("total_shards_processed", 0),
+            "shards_processed": pipeline_result.get("total_shards_processed", 0) if pipeline_result else 0,
             "pipeline_result": pipeline_result
         }
         
@@ -2135,6 +2135,14 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
         else:
             logger.info(f"ℹ️ Output cleanup disabled in config - keeping output files")
 
+    # Return success result at the end of pipeline processing
+    return {
+        "success": True,
+        "message": f"Pipeline completed successfully for session: {session_id}",
+        "total_shards_processed": min_shards,  # Actual number of shards processed
+        "session_id": session_id,
+        "output_dir": output_dir
+    }
 
 
 def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str, 
