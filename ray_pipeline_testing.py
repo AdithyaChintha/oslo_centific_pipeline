@@ -2334,7 +2334,7 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
                 flat_result = None
                 raise RuntimeError(f"Failed to convert one 360 file: {mp4_result.get('error', 'Unknown error')}")
 
-        duration_sec = 60
+        duration_sec = 5
         # Split audio once into 60s shards (reused per view by index)
         audio_shards = ray.get(split_audio_into_shards.remote(
             input_audio_path,

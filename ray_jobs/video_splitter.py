@@ -133,7 +133,7 @@ def split_video_into_shards_with_overlap(
     return [r for r in results if r is not None]
 
 # ---------- per-shard task ----------
-@ray.remote
+@ray.remote(num_gpus=0.5)
 def _shard_task(
     video_path: str,
     start_time: float,
