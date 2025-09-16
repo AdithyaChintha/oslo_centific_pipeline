@@ -84,7 +84,7 @@ def upload_erp_video_to_blob(
             "success": True,
             "blob_name": blob_name,
             "blob_url": sas_url,
-            "full_video_480P": sas_url,  # Add the expected key for Label Studio integration
+            "full_video_url": sas_url,  # Add the expected key for Label Studio integration
             "local_path": video_to_upload,
             "file_size_bytes": file_size,
             "is_downscaled": is_downscaled,
@@ -270,10 +270,10 @@ def process_erp_and_audio_for_labelstudio(
         downscale_erp: Whether to downscale ERP video to 480p
         
     Returns:
-        Dict containing full_video_480P and full_audio_link URLs
+        Dict containing full_video_url and full_audio_link URLs
     """
     result = {
-        "full_video_480P": None,
+        "full_video_url": None,
         "full_audio_link": None,
         "success": False,
         "errors": []
@@ -293,8 +293,8 @@ def process_erp_and_audio_for_labelstudio(
             )
             
             if erp_result["success"]:
-                result["full_video_480P"] = erp_result["blob_url"]
-                logger.info(f"✅ ERP video URL generated: {result['full_video_480P']}")
+                result["full_video_url"] = erp_result["blob_url"]
+                logger.info(f"✅ ERP video URL generated: {result['full_video_url']}")
             else:
                 result["errors"].append(f"ERP video upload failed: {erp_result.get('error', 'Unknown error')}")
         else:
@@ -319,7 +319,7 @@ def process_erp_and_audio_for_labelstudio(
             result["errors"].append("Session audio path not provided")
         
         # Determine overall success
-        result["success"] = result["full_video_480P"] is not None and result["full_audio_link"] is not None
+        result["success"] = result["full_video_url"] is not None and result["full_audio_link"] is not None
         
         if result["success"]:
             logger.info("✅ Successfully processed ERP video and audio for Label Studio")

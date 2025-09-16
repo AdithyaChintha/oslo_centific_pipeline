@@ -302,7 +302,7 @@ def process_erp_and_audio_dynamically(
                 )
                 
                 if video_upload_result["success"]:
-                    full_erp_blob_url = video_upload_result["full_video_480P"]
+                    full_erp_blob_url = video_upload_result["full_video_url"]
                     logger.info(f"✅ ERP video uploaded: {full_erp_blob_url}")
                 else:
                     logger.error(f"❌ Failed to upload ERP video: {video_upload_result.get('error', 'Unknown error')}")
