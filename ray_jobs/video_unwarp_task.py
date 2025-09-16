@@ -138,8 +138,8 @@ def insv_unwarp_task(
         # )
      
         # The new insv -> ERP --> 4views pipeline (under testing)
-        from video_process.video4_unwarpERP import insv_to_4viewsERP
-        return insv_to_4viewsERP(
+        from video_process.video4_unwarpERP import insv_to_4viewsERP_one_shot
+        return insv_to_4viewsERP_one_shot(
             insv_path,
             output_dir=out_dir,
             out_size=out_size,

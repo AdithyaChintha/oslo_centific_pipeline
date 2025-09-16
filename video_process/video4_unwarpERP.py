@@ -5,26 +5,6 @@ from pathlib import Path
 from typing import Dict, Iterable, Tuple
 
 
-# =============================
-# INSV → ERP(2:1) → 4 rect views (FFmpeg-only)
-# =============================
-#
-# - Step 1: Build a TRUE equirectangular (ERP, 2:1) video from INSV.
-#   • If the INSV has TWO fisheye video streams, we first hstack them to a dual-fisheye frame
-#     then convert with v360: dfisheye→equirect.
-#   • If it has ONE fisheye stream, we use v360: fisheye→equirect.
-#
-# - Step 2: From ERP, map 4 rectilinear 90° views via v360 (input=equirect → output=rectilinear)
-#   • yaw sequence defaults to: FRONT=45, RIGHT=135, BACK=225, LEFT=-45 (avoids seam).
-#
-# Notes
-# -----
-# • All heavy lifting is done by FFmpeg/FFprobe; Python only orchestrates commands.
-# • Requires FFmpeg built with the `v360` filter.
-# • Encoder defaults to NVENC, and auto-falls back to libx264 if NVENC is unavailable.
-# • Add ih_fov/iv_fov according to your lens (default 190° typical for action cams).
-# • For better compatibility, outputs use yuv420p and +faststart.
-
 
 class FFmpegError(RuntimeError):
     pass
@@ -33,7 +13,7 @@ class FFmpegError(RuntimeError):
 def _run(cmd: Iterable[str], *, fallback_x264: bool = False) -> None:
     """Run a subprocess command. If NVENC fails and fallback_x264=True, retry with libx264."""
     try:
-        subprocess.run(list(cmd), check=True)
+        subprocess.run(list(cmd), check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as e:
         if fallback_x264 and any("h264_nvenc" in tok for tok in cmd):
             # Retry replacing encoder with libx264
@@ -46,11 +26,13 @@ def _run(cmd: Iterable[str], *, fallback_x264: bool = False) -> None:
                 else:
                     cmd2.append(tok)
             try:
-                subprocess.run(cmd2, check=True)
+                subprocess.run(cmd2, check=True, capture_output=True, text=True)
                 return
             except subprocess.CalledProcessError as e2:
-                raise FFmpegError(f"FFmpeg failed (fallback to libx264 also failed):\n{e2}") from e2
-        raise FFmpegError(f"FFmpeg failed: {e}") from e
+                stderr = getattr(e2, "stderr", None)
+                raise FFmpegError(f"FFmpeg failed (fallback to libx264 also failed): returncode={e2.returncode}\nstderr={stderr}\ncmd={e2.cmd}") from e2
+        stderr = getattr(e, "stderr", None)
+        raise FFmpegError(f"FFmpeg failed: returncode={e.returncode}\nstderr={stderr}\ncmd={e.cmd}") from e
 
 
 def _probe_video_stream_count(path: Path) -> int:
@@ -70,7 +52,6 @@ def _probe_video_stream_count(path: Path) -> int:
     lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
     return len(lines)
 
-
 def insv_to_4viewsERP(
     insv_path: str,
     output_dir: str = "out_4views",
@@ -88,7 +69,7 @@ def insv_to_4viewsERP(
     yaw_front_right_back_left: Tuple[float, float, float, float] = (45.0, 135.0, -135.0, -45.0),
     pitch_deg: float = 0.0,
     roll_deg: float = 0.0,
-    flip_erp: bool = True,
+    #flip_erp: bool = True,
 ) -> Dict[str, str]:
     """
     Convert an INSV file into a TRUE ERP (2:1) video, then map out four 90° rectilinear views
@@ -109,23 +90,16 @@ def insv_to_4viewsERP(
 
     n_streams = _probe_video_stream_count(in_path)
 
-    if n_streams >= 2:
-        # Two fisheye streams → hstack → dfisheye→equirect → (optional) vflip
-        if flip_erp:
-            vf = (
+    if n_streams == 2:
+        # Two fisheye streams → hstack → dfisheye→equirect → vflip
+        vf = (
                 f"[0:v:0]setpts=PTS-STARTPTS,setsar=1[v0];"
                 f"[0:v:1]setpts=PTS-STARTPTS,setsar=1[v1];"
                 f"[v0][v1]hstack=inputs=2[dual];"
                 f"[dual]v360=input=dfisheye:output=equirect:ih_fov={lens_fov_deg}:iv_fov={lens_fov_deg}:w={W_erp}:h={H_erp}[erp1];"
                 f"[erp1]vflip[erp]"
             )
-        else:
-            vf = (
-                f"[0:v:0]setpts=PTS-STARTPTS,setsar=1[v0];"
-                f"[0:v:1]setpts=PTS-STARTPTS,setsar=1[v1];"
-                f"[v0][v1]hstack=inputs=2[dual];"
-                f"[dual]v360=input=dfisheye:output=equirect:ih_fov={lens_fov_deg}:iv_fov={lens_fov_deg}:w={W_erp}:h={H_erp}[erp]"
-            )
+
         cmd_erp = [
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "info", "-stats",
             "-i", str(in_path),
@@ -141,28 +115,8 @@ def insv_to_4viewsERP(
             str(erp_path),
         ]
         _run(cmd_erp, fallback_x264=True)
-    elif n_streams == 1:
-        # Single fisheye stream → fisheye→equirect → (optional) vflip
-        vf = (
-            f"v360=input=fisheye:output=equirect:ih_fov={lens_fov_deg}:iv_fov={lens_fov_deg}:w={W_erp}:h={H_erp}"
-        )
-        if flip_erp:
-            vf += ",vflip"
-        cmd_erp = [
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "info", "-stats",
-            "-i", str(in_path),
-            "-vf", vf,
-            "-c:v", encoder,
-            "-c:a", "copy",
-            ("-crf" if encoder == "libx264" else "-cq"), str(crf_or_cq),
-            "-preset", preset,
-            "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",
-            str(erp_path),
-        ]
-        _run(cmd_erp, fallback_x264=True)
     else:
-        raise FFmpegError("No video streams found in input.")
+        raise FFmpegError("No suitable video streams found in input.")
 
     # ---------- Step 2: ERP → 4 rect views ----------
     W, H = out_size
@@ -209,6 +163,159 @@ def insv_to_4viewsERP(
     }
 
 
+from pathlib import Path
+from typing import Tuple, Dict
+
+def insv_to_4viewsERP_one_shot(
+    insv_path: str,
+    output_dir: str = "out_4views",
+    *,
+    # Step 1 (build ERP from dual-fisheye)
+    erp_size: Tuple[int, int] = (4096, 2048),
+    lens_fov_deg: float = 190.0,       # fisheye lens FOV used by v360 dfisheye→equirect
+    encoder: str = "libx264",          # or "h264_nvenc"
+    crf_or_cq: int = 18,               # x264: CRF value; NVENC: CQ value
+    preset: str = "fast",              # x264 presets: ultrafast..veryslow; NVENC accepts "slow/medium/fast" or p1..p7
+    # Step 2 (extract 4 rectilinear views from ERP)
+    out_size: Tuple[int, int] = (1440, 1440),
+    h_fov_deg: float = 90.0,
+    v_fov_deg: float = 90.0,
+    yaw_front_right_back_left: Tuple[float, float, float, float] = (45.0, 135.0, -135.0, -45.0),
+    pitch_deg: float = 0.0,
+    roll_deg: float = 0.0,
+) -> Dict[str, str]:
+    """
+    One-shot INSV → ERP → 4 rectilinear views using a single FFmpeg invocation.
+
+    Pipeline (single -filter_complex):
+      [0:v:0] + [0:v:1]  --hstack-->  [dual]
+      [dual] --v360 dfisheye→equirect--> [erp1] --vflip--> [erp]
+      [erp] --split=5--> [erp_out],[f],[r],[b],[l]
+      Each of [f],[r],[b],[l] --v360 equirect→rectilinear--> [front],[right],[back],[left]
+
+    Assumptions:
+      • The INSV contains two video streams: [0:v:0] and [0:v:1] (dual-fisheye).
+      • Audio is optional; we map "0:a?" to copy audio when present.
+      • All five outputs are encoded in the same codec/preset/rate-control for simplicity.
+
+    Args:
+      insv_path: Path to the input .insv file.
+      output_dir: Directory where all outputs will be written/created.
+      erp_size: (W,H) of the equirectangular (2:1) frame produced from dual-fisheye.
+      lens_fov_deg: FOV parameter for v360 dfisheye→equirect conversion.
+      encoder: "libx264" for CPU H.264, or "h264_nvenc" for NVIDIA NVENC H.264.
+      crf_or_cq: If encoder=="libx264", interpreted as CRF; if "h264_nvenc", interpreted as CQ.
+      preset: Encoder preset. For x264 use standard presets; for NVENC use slow/medium/fast or p1..p7.
+      out_size: (W,H) of each rectilinear view (front/right/back/left).
+      h_fov_deg, v_fov_deg: Horizontal/vertical FOV for rectilinear projection.
+      yaw_front_right_back_left: Yaw angles (deg) for the 4 views: front, right, back, left.
+      pitch_deg, roll_deg: Pitch/roll (deg) applied to every rectilinear view.
+
+    Returns:
+      Dict with keys:
+        "erp", "front", "right", "back", "left"  →  absolute file paths to the five MP4s.
+
+    Notes:
+      • Using a single FFmpeg run reduces I/O and avoids recomputing dfisheye→equirect.
+      • All outputs are written in one go; compute load rises since 4 encoders run in parallel.
+      • If you do NOT want an ERP file, change split=5→4 and remove the [erp_out] mapping block.
+      • If the input isn’t dual-stream, you should add a probe/guard before building the graph.
+    """
+    in_path = Path(insv_path).expanduser().resolve()
+    out_dir = Path(output_dir).expanduser().resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if not in_path.exists():
+        raise FileNotFoundError(in_path)
+
+    # ----- Build output paths -----
+    W_erp, H_erp = erp_size
+    erp_path   = out_dir / f"{in_path.stem}_ERP_{W_erp}x{H_erp}.mp4"
+
+    W, H       = out_size
+    out_front  = out_dir / f"front_{W}x{H}.mp4"
+    out_right  = out_dir / f"right_{W}x{H}.mp4"
+    out_back   = out_dir / f"back_{W}x{H}.mp4"
+    out_left   = out_dir / f"left_{W}x{H}.mp4"
+
+    # Normalize yaw to [-180, 180] for v360 stability (wrap-around)
+    def _norm(a: float) -> float:
+        return (a + 180.0) % 360.0 - 180.0
+
+    yaw_f, yaw_r, yaw_b, yaw_l = map(_norm, yaw_front_right_back_left)
+
+    # ----- Compose the filter graph -----
+    # 1) Align PTS & SAR for each fisheye → hstack → dfisheye→equirect into target ERP size → vflip to fix vertical orientation.
+    # 2) Split ERP into five branches: one branch is saved as ERP output; four branches are rectified into 90° views.
+    vf = (
+        # Dual-fisheye → ERP
+        f"[0:v:0]setpts=PTS-STARTPTS,setsar=1[v0];"
+        f"[0:v:1]setpts=PTS-STARTPTS,setsar=1[v1];"
+        f"[v0][v1]hstack=inputs=2[dual];"
+        f"[dual]v360=input=dfisheye:output=equirect:ih_fov={lens_fov_deg}:iv_fov={lens_fov_deg}:w={W_erp}:h={H_erp}[erp1];"
+        f"[erp1]vflip[erp];"
+        # ERP → (erp_out + 4 rect views)
+        f"[erp]split=5[erp_out][f][r][b][l];"
+        f"[f]v360=input=equirect:output=rectilinear:h_fov={h_fov_deg}:v_fov={v_fov_deg}:"
+        f"yaw={yaw_f}:pitch={pitch_deg}:roll={roll_deg}:w={W}:h={H}[front];"
+        f"[r]v360=input=equirect:output=rectilinear:h_fov={h_fov_deg}:v_fov={v_fov_deg}:"
+        f"yaw={yaw_r}:pitch={pitch_deg}:roll={roll_deg}:w={W}:h={H}[right];"
+        f"[b]v360=input=equirect:output=rectilinear:h_fov={h_fov_deg}:v_fov={v_fov_deg}:"
+        f"yaw={yaw_b}:pitch={pitch_deg}:roll={roll_deg}:w={W}:h={H}[back];"
+        f"[l]v360=input=equirect:output=rectilinear:h_fov={h_fov_deg}:v_fov={v_fov_deg}:"
+        f"yaw={yaw_l}:pitch={pitch_deg}:roll={roll_deg}:w={W}:h={H}[left]"
+    )
+
+    # Rate-control flag depends on encoder family:
+    #   x264 → use -crf; NVENC → use -cq
+    rate_flag = "-cq" if encoder == "h264_nvenc" else "-crf"
+
+    # Important: FFmpeg applies options to the *next* output that follows.
+    # We therefore repeat mapping/encoding blocks for each of the five outputs.
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "info", "-stats",
+        "-i", str(in_path),
+        "-filter_complex", vf,
+
+        # Save ERP as an MP4 (with audio if present)
+        "-map", "[erp_out]", "-map", "0:a?",
+        "-c:v", encoder, rate_flag, str(crf_or_cq), "-preset", preset,
+        "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(erp_path),
+
+        # Front view
+        "-map", "[front]", "-map", "0:a?",
+        "-c:v", encoder, rate_flag, str(crf_or_cq), "-preset", preset,
+        "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out_front),
+
+        # Right view
+        "-map", "[right]", "-map", "0:a?",
+        "-c:v", encoder, rate_flag, str(crf_or_cq), "-preset", preset,
+        "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out_right),
+
+        # Back view
+        "-map", "[back]", "-map", "0:a?",
+        "-c:v", encoder, rate_flag, str(crf_or_cq), "-preset", preset,
+        "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out_back),
+
+        # Left view
+        "-map", "[left]", "-map", "0:a?",
+        "-c:v", encoder, rate_flag, str(crf_or_cq), "-preset", preset,
+        "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out_left),
+    ]
+
+    # _run should execute subprocess and (optionally) fall back to x264 if NVENC is unavailable.
+    # Example behavior:
+    #   try NVENC → if failed, rebuild identical cmd substituting encoder="libx264" and rate_flag="-crf".
+    _run(cmd, fallback_x264=True)
+
+    return {
+        "erp": str(erp_path),
+        "front": str(out_front),
+        "right": str(out_right),
+        "back":  str(out_back),
+        "left":  str(out_left),
+    }
+
 if __name__ == "__main__":
     import sys
     import json
@@ -216,7 +323,7 @@ if __name__ == "__main__":
     insv = "VID_20250809_094836_00_045.insv"
     out_dir = "out_4viewsERP"
 
-    outputs = insv_to_4views_ffmpeg(
+    outputs = insv_to_4viewsERP_one_shot(
         insv_path=insv,
         output_dir=out_dir,
     )
