@@ -1437,17 +1437,7 @@ def pipeline_main_with_blob_polling(base_prefix: str, output_base_dir: str, azur
         pipeline_config: Pipeline configuration
         polling_interval_minutes: How long to wait between polling attempts (default: 5 minutes)
     """
-    logger.info("=" * 100)
-    logger.info("🔄🔄🔄 STARTING BLOB POLLING MODE 🔄🔄🔄")
-    logger.info("🔄🔄🔄 STARTING BLOB POLLING MODE 🔄🔄🔄")
-    logger.info("🔄🔄🔄 STARTING BLOB POLLING MODE 🔄🔄🔄")
-    logger.info(f"🔄 Base Prefix: {base_prefix}")
-    logger.info(f"🔄 Polling Interval: {polling_interval_minutes} minutes")
-    logger.info(f"🔄 Output Directory: {output_base_dir}")
-    logger.info("🔄🔄🔄 STARTING BLOB POLLING MODE 🔄🔄🔄")
-    logger.info("🔄🔄🔄 STARTING BLOB POLLING MODE 🔄🔄🔄")
-    logger.info("🔄🔄🔄 STARTING BLOB POLLING MODE 🔄🔄🔄")
-    logger.info("=" * 100)
+    logger.info("🔄 Starting blob polling mode - Base: %s, Interval: %d minutes, Output: %s", base_prefix, polling_interval_minutes, output_base_dir)
     
     # Initialize blob client
     blob_client = create_azure_blob_client(azure_config)
@@ -1461,12 +1451,7 @@ def pipeline_main_with_blob_polling(base_prefix: str, output_base_dir: str, azur
     
     while True:
         polling_cycle += 1
-        logger.info("=" * 100)
-        logger.info(f"🔍🔍🔍 POLLING CYCLE #{polling_cycle} 🔍🔍🔍")
-        logger.info(f"🔍 Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info(f"🔍 Searching for sessions under: {base_prefix}")
-        logger.info("🔍🔍🔍 POLLING CYCLE #{polling_cycle} 🔍🔍🔍")
-        logger.info("=" * 100)
+        logger.info("🔍 Polling cycle #%d - Searching sessions under: %s", polling_cycle, base_prefix)
         
         try:
             # Discover all sessions in the directory
@@ -1484,15 +1469,10 @@ def pipeline_main_with_blob_polling(base_prefix: str, output_base_dir: str, azur
             
             if new_sessions:
                 logger.info("=" * 100)
-                logger.info(f"🎉🎉🎉 FOUND {len(new_sessions)} NEW SESSIONS! 🎉🎉🎉")
-                logger.info(f"🎉🎉🎉 FOUND {len(new_sessions)} NEW SESSIONS! 🎉🎉🎉")
-                logger.info(f"🎉🎉🎉 FOUND {len(new_sessions)} NEW SESSIONS! 🎉🎉🎉")
+                logger.info("🎉 Found %d new sessions:", len(new_sessions))
                 for i, session in enumerate(new_sessions, 1):
                     walkthrough_status = "🔄 WALKTHROUGH" if session["is_walkthrough"] else "📹 NORMAL"
-                    logger.info(f"   {i}. {session['session_id']} - {walkthrough_status}")
-                logger.info("🎉🎉🎉 FOUND NEW SESSIONS! 🎉🎉🎉")
-                logger.info("🎉🎉🎉 FOUND NEW SESSIONS! 🎉🎉🎉")
-                logger.info("🎉🎉🎉 FOUND NEW SESSIONS! 🎉🎉🎉")
+                    logger.info("   %d. %s - %s", i, session['session_id'], walkthrough_status)
                 logger.info("=" * 100)
                 
                 # Process the new sessions
@@ -1504,32 +1484,17 @@ def pipeline_main_with_blob_polling(base_prefix: str, output_base_dir: str, azur
                     pipeline_config
                 )
                 
-                logger.info("=" * 100)
-                logger.info("✅✅✅ SESSION PROCESSING COMPLETED! ✅✅✅")
-                logger.info("✅✅✅ SESSION PROCESSING COMPLETED! ✅✅✅")
-                logger.info("✅✅✅ SESSION PROCESSING COMPLETED! ✅✅✅")
-                logger.info(f"✅ Total Sessions: {processing_result['total_sessions']}")
-                logger.info(f"✅ Completed: {processing_result['completed_sessions']}")
-                logger.info(f"✅ Failed: {processing_result['failed_sessions']}")
-                logger.info(f"✅ Skipped: {processing_result['skipped_sessions']}")
-                logger.info("✅✅✅ SESSION PROCESSING COMPLETED! ✅✅✅")
-                logger.info("✅✅✅ SESSION PROCESSING COMPLETED! ✅✅✅")
-                logger.info("✅✅✅ SESSION PROCESSING COMPLETED! ✅✅✅")
-                logger.info("=" * 100)
+                logger.info("✅ Session processing completed - Total: %d, Completed: %d, Failed: %d, Skipped: %d",
+                           processing_result['total_sessions'],
+                           processing_result['completed_sessions'],
+                           processing_result['failed_sessions'],
+                           processing_result['skipped_sessions'])
                 
                 # Save updated tracking data
                 save_processed_sessions_tracking(tracking_file, all_processed_sessions)
             else:
-                logger.info("=" * 100)
-                logger.info("😴😴😴 NO NEW SESSIONS FOUND 😴😴😴")
-                logger.info("😴😴😴 NO NEW SESSIONS FOUND 😴😴😴")
-                logger.info("😴😴😴 NO NEW SESSIONS FOUND 😴😴😴")
-                logger.info(f"😴 Total sessions in directory: {len(all_sessions)}")
-                logger.info(f"😴 Already processed: {len(all_processed_sessions)}")
-                logger.info("😴😴😴 NO NEW SESSIONS FOUND 😴😴😴")
-                logger.info("😴😴😴 NO NEW SESSIONS FOUND 😴😴😴")
-                logger.info("😴😴😴 NO NEW SESSIONS FOUND 😴😴😴")
-                logger.info("=" * 100)
+                logger.info("😴 No new sessions found - Total: %d, Already processed: %d",
+                           len(all_sessions), len(all_processed_sessions))
             
         except Exception as e:
             logger.error(f"❌ Error during polling cycle #{polling_cycle}: {e}")
@@ -1537,13 +1502,7 @@ def pipeline_main_with_blob_polling(base_prefix: str, output_base_dir: str, azur
         
         # Wait before next polling cycle
         logger.info("=" * 100)
-        logger.info(f"⏰⏰⏰ WAITING {polling_interval_minutes} MINUTES FOR NEXT POLL ⏰⏰⏰")
-        logger.info(f"⏰⏰⏰ WAITING {polling_interval_minutes} MINUTES FOR NEXT POLL ⏰⏰⏰")
-        logger.info(f"⏰⏰⏰ WAITING {polling_interval_minutes} MINUTES FOR NEXT POLL ⏰⏰⏰")
-        logger.info(f"⏰ Next poll at: {(datetime.now() + timedelta(minutes=polling_interval_minutes)).strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info("⏰⏰⏰ WAITING FOR NEXT POLL ⏰⏰⏰")
-        logger.info("⏰⏰⏰ WAITING FOR NEXT POLL ⏰⏰⏰")
-        logger.info("⏰⏰⏰ WAITING FOR NEXT POLL ⏰⏰⏰")
+        logger.info("⏰ Waiting %d minutes for next poll - Next poll at: %s", polling_interval_minutes, (datetime.now() + timedelta(minutes=polling_interval_minutes)).strftime('%Y-%m-%d %H:%M:%S'))
         logger.info("=" * 100)
         
         # Sleep for the polling interval
@@ -1566,12 +1525,7 @@ def read_session_metadata(blob_client, container_name: str, session_path: str) -
         # Get container client
         container_client = blob_client.get_container_client(container_name)
         
-        # BIG DEBUG STATEMENT FOR METADATA SEARCH
-        logger.info("=" * 100)
-        logger.info("🔍🔍🔍 METADATA SEARCH DEBUG 🔍🔍🔍")
-        logger.info(f"🔍 Searching for JSON files in session: {session_path}")
-        logger.info("🔍🔍🔍 METADATA SEARCH DEBUG 🔍🔍🔍")
-        logger.info("=" * 100)
+        logger.info("🔍 Searching for metadata in session: %s", session_path)
         
         # List all blobs in the session directory
         blobs = container_client.list_blobs(name_starts_with=session_path)
@@ -1602,13 +1556,7 @@ def read_session_metadata(blob_client, container_name: str, session_path: str) -
                 blob_data = container_client.download_blob(json_file).readall()
                 metadata = json.loads(blob_data.decode('utf-8'))
                 
-                # BIG DEBUG STATEMENT FOR METADATA CONTENT
-                logger.info("=" * 100)
-                logger.info("🔍🔍🔍 METADATA CONTENT DEBUG 🔍🔍🔍")
-                logger.info(f"🔍 JSON file: {json_file}")
-                logger.info(f"🔍 Raw metadata: {json.dumps(metadata, indent=2)}")
-                logger.info("🔍🔍🔍 METADATA CONTENT DEBUG 🔍🔍🔍")
-                logger.info("=" * 100)
+                logger.info("📋 Processing metadata from: %s", json_file)
                 
                 # Determine walkthrough status based on metadata fields
                 domain = metadata.get('domain', '').lower()
@@ -1622,49 +1570,16 @@ def read_session_metadata(blob_client, container_name: str, session_path: str) -
                     'walkthrough' in specific_activity
                 )
                 
-                # BIG DEBUG STATEMENT FOR WALKTHROUGH DETECTION
-                logger.info("=" * 100)
-                logger.info("🔍🔍🔍 WALKTHROUGH DETECTION RESULT 🔍🔍🔍")
-                logger.info(f"🔍 JSON file: {json_file}")
-                logger.info(f"🔍 Domain: '{domain}' -> Contains 'walkthrough': {'walkthrough' in domain}")
-                logger.info(f"🔍 Activity: '{activity}' -> Contains 'walkthrough': {'walkthrough' in activity}")
-                logger.info(f"🔍 Specific Activity: '{specific_activity}' -> Contains 'walkthrough': {'walkthrough' in specific_activity}")
-                logger.info(f"🔍 Final is_walkthrough: {is_walkthrough}")
-                logger.info("🔍🔍🔍 WALKTHROUGH DETECTION RESULT 🔍🔍🔍")
-                logger.info("=" * 100)
+                logger.info("📋 Session %s - Domain: %s, Activity: %s, Walkthrough: %s",
+                           os.path.basename(session_path),
+                           metadata.get('domain', 'Unknown'),
+                           metadata.get('activity', 'Unknown'),
+                           is_walkthrough)
                 
-                logger.info(f"📋 Session metadata for {os.path.basename(session_path)}:")
-                logger.info(f"   Domain: {metadata.get('domain', 'Unknown')}")
-                logger.info(f"   Activity: {metadata.get('activity', 'Unknown')}")
-                logger.info(f"   Walkthrough: {is_walkthrough}")
-                
-                # BIG DEBUG STATEMENT FOR WALKTHROUGH DETECTION
                 if is_walkthrough:
-                    logger.info("=" * 100)
-                    logger.info("🔄🔄🔄 WALKTHROUGH VIDEO DETECTED! 🔄🔄🔄")
-                    logger.info("🔄🔄🔄 WALKTHROUGH VIDEO DETECTED! 🔄🔄🔄")
-                    logger.info("🔄🔄🔄 WALKTHROUGH VIDEO DETECTED! 🔄🔄🔄")
-                    logger.info(f"🔄 Session: {os.path.basename(session_path)}")
-                    logger.info(f"🔄 Domain: {metadata.get('domain', 'Unknown')}")
-                    logger.info(f"🔄 Activity: {metadata.get('activity', 'Unknown')}")
-                    logger.info("🔄 This video will use 3-minute segments with 60-second overlap!")
-                    logger.info("🔄🔄🔄 WALKTHROUGH VIDEO DETECTED! 🔄🔄🔄")
-                    logger.info("🔄🔄🔄 WALKTHROUGH VIDEO DETECTED! 🔄🔄🔄")
-                    logger.info("🔄🔄🔄 WALKTHROUGH VIDEO DETECTED! 🔄🔄🔄")
-                    logger.info("=" * 100)
+                    logger.info("🔄 Walkthrough video detected - will use 3-minute segments with 60-second overlap")
                 else:
-                    logger.info("=" * 100)
-                    logger.info("📹📹📹 NORMAL VIDEO DETECTED! 📹📹📹")
-                    logger.info("📹📹📹 NORMAL VIDEO DETECTED! 📹📹📹")
-                    logger.info("📹📹📹 NORMAL VIDEO DETECTED! 📹📹📹")
-                    logger.info(f"📹 Session: {os.path.basename(session_path)}")
-                    logger.info(f"📹 Domain: {metadata.get('domain', 'Unknown')}")
-                    logger.info(f"📹 Activity: {metadata.get('activity', 'Unknown')}")
-                    logger.info("📹 This video will use 3-minute segments WITHOUT overlap!")
-                    logger.info("📹📹📹 NORMAL VIDEO DETECTED! 📹📹📹")
-                    logger.info("📹📹📹 NORMAL VIDEO DETECTED! 📹📹📹")
-                    logger.info("📹📹📹 NORMAL VIDEO DETECTED! 📹📹📹")
-                    logger.info("=" * 100)
+                    logger.info("📹 Normal video detected - will use 3-minute segments without overlap")
                 
                 return {
                     "metadata": metadata,
@@ -1789,22 +1704,12 @@ def process_single_session(session_path: str, session_id: str, output_base_dir: 
         )
         actual_is_walkthrough = session_metadata_info["is_walkthrough"]
         
-        # BIG DEBUG: Show what we determined from metadata
-        logger.info("=" * 100)
-        logger.info("🔍🔍🔍 PROCESS_SINGLE_SESSION WALKTHROUGH DETECTION 🔍🔍🔍")
-        logger.info(f"🔍 Parameter is_walkthrough: {is_walkthrough}")
-        logger.info(f"🔍 Metadata determined is_walkthrough: {actual_is_walkthrough}")
-        logger.info(f"🔍 Domain: {session_metadata_info.get('domain', 'Unknown')}")
-        logger.info(f"🔍 Activity: {session_metadata_info.get('activity', 'Unknown')}")
-        logger.info("🔍🔍🔍 PROCESS_SINGLE_SESSION WALKTHROUGH DETECTION 🔍🔍🔍")
-        logger.info("=" * 100)
+        logger.info("🔄 Processing session: %s (Walkthrough: %s)", session_id, actual_is_walkthrough)
         
         # Add walkthrough status to download results based on metadata
         for session_result in download_result.get("download_results", {}).values():
             session_result["processing_type"] = "walkthrough" if actual_is_walkthrough else "normal"
         
-        # Process the downloaded session
-        logger.info(f"🔄 Processing session: {session_id} (Walkthrough: {actual_is_walkthrough})")
         session_output_dir = os.path.join(output_base_dir, session_id)
         
         pipeline_result = pipeline_main_multichunks(
@@ -1870,11 +1775,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
         
         # BIG DEBUG: Show what processing_type we got and what is_walkthrough is set to
         logger.info("=" * 100)
-        logger.info("🔍🔍🔍 PIPELINE WALKTHROUGH CHECK DEBUG 🔍🔍🔍")
-        logger.info(f"🔍 Session Result Processing Type: '{session_result.get('processing_type', 'NOT_SET')}'")
-        logger.info(f"🔍 is_walkthrough variable: {is_walkthrough}")
-        logger.info(f"🔍 Processing Type == 'walkthrough': {session_result.get('processing_type') == 'walkthrough'}")
-        logger.info("🔍🔍🔍 PIPELINE WALKTHROUGH CHECK DEBUG 🔍🔍🔍")
+        logger.info("🔍 Pipeline walkthrough check - Processing type: %s, is_walkthrough: %s, Equals 'walkthrough': %s", session_result.get('processing_type', 'NOT_SET'), is_walkthrough, session_result.get('processing_type') == 'walkthrough')
         logger.info("=" * 100)
 
         # Session metadata from JSON
@@ -1932,20 +1833,35 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                     update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "processing")
                     try:
                         mp4_result = ray.get(insv_unwarp_task.remote(local_video_path, out_dir=os.path.join(output_dir, "4views")))
+
+                        # Check if the unwarp task returned an error
+                        if "__error__" in mp4_result:
+                            error_msg = mp4_result["__error__"]
+                            logger.error(f"INSV unwarp task failed: {error_msg}")
+                            update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "error",
+                                           error_message=error_msg)
+                            continue  # Skip to next chunk
+
                         flat_result = mp4_result
-                        update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "completed", 
+                        update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "completed",
                                        output_path=mp4_result.get('output_path'))
-                        update_tracking(chunk_id, "video_processing.view_unwarping", "completed", 
+                        update_tracking(chunk_id, "video_processing.view_unwarping", "completed",
                                        views_created=flat_result)
                     except Exception as e:
                         logger.error(f"Exception raised in video conversion to mp4: {e}")
-                        update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "error", 
+                        update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "error",
                                        error_message=str(e))
+                        continue  # Skip to next chunk
                 else:
                     flat_result = local_video_path
                     update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "skipped")
                     update_tracking(chunk_id, "video_processing.view_unwarping", "skipped")
                 
+                # Check if flat_result is valid before iterating
+                if not isinstance(flat_result, dict) or "__error__" in flat_result:
+                    logger.error(f"Invalid flat_result for sharding: {flat_result}")
+                    continue  # Skip to next chunk
+
                 for view_name, view_path in flat_result.items():
                     # Split this view into 180s shards with sequential part numbering
                     logger.info(f"Processing sharding for view:{view_name} at {view_path} starting from part{global_part_idx}")
@@ -1954,18 +1870,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                         if not is_walkthrough:
                             # BIG DEBUG STATEMENT FOR NORMAL SPLITTING
                             logger.info("=" * 120)
-                            logger.info("📹📹📹 NORMAL VIDEO SPLITTING TRIGGERED! 📹📹📹")
-                            logger.info("📹📹📹 NORMAL VIDEO SPLITTING TRIGGERED! 📹📹📹")
-                            logger.info("📹📹📹 NORMAL VIDEO SPLITTING TRIGGERED! 📹📹📹")
-                            logger.info(f"📹 View: {view_name}")
-                            logger.info(f"📹 Video Path: {view_path}")
-                            logger.info("📹 Using: split_video_into_shards (NORMAL MODE)")
-                            logger.info("📹 Duration: 180 seconds per segment")
-                            logger.info("📹 Overlap: 0 seconds (NO OVERLAP)")
-                            logger.info("📹 Method: Discrete 3-minute segments")
-                            logger.info("📹📹📹 NORMAL VIDEO SPLITTING TRIGGERED! 📹📹📹")
-                            logger.info("📹📹📹 NORMAL VIDEO SPLITTING TRIGGERED! 📹📹📹")
-                            logger.info("📹📹📹 NORMAL VIDEO SPLITTING TRIGGERED! 📹📹📹")
+                            logger.info("📹 Normal video splitting - View: %s, Path: %s, Duration: 180s, Overlap: 0s", view_name, view_path)
                             logger.info("=" * 120)
                             
                             shards = ray.get(split_video_into_shards.remote(
@@ -1980,19 +1885,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                         else:
                             # BIG DEBUG STATEMENT FOR WALKTHROUGH SPLITTING
                             logger.info("=" * 120)
-                            logger.info("🔄🔄🔄 WALKTHROUGH VIDEO SPLITTING TRIGGERED! 🔄🔄🔄")
-                            logger.info("🔄🔄🔄 WALKTHROUGH VIDEO SPLITTING TRIGGERED! 🔄🔄🔄")
-                            logger.info("🔄🔄🔄 WALKTHROUGH VIDEO SPLITTING TRIGGERED! 🔄🔄🔄")
-                            logger.info(f"🔄 View: {view_name}")
-                            logger.info(f"🔄 Video Path: {view_path}")
-                            logger.info("🔄 Using: split_video_into_shards_with_overlap (WALKTHROUGH MODE)")
-                            logger.info("🔄 Duration: 180 seconds per segment")
-                            logger.info("🔄 Overlap: 60 seconds (WITH OVERLAP)")
-                            logger.info("🔄 Step Size: 120 seconds (180 - 60)")
-                            logger.info("🔄 Method: Sliding window with 60-second overlap")
-                            logger.info("🔄🔄🔄 WALKTHROUGH VIDEO SPLITTING TRIGGERED! 🔄🔄🔄")
-                            logger.info("🔄🔄🔄 WALKTHROUGH VIDEO SPLITTING TRIGGERED! 🔄🔄🔄")
-                            logger.info("🔄🔄🔄 WALKTHROUGH VIDEO SPLITTING TRIGGERED! 🔄🔄🔄")
+                            logger.info("🔄 Walkthrough video splitting - View: %s, Path: %s, Duration: 180s, Overlap: 60s, Step: 120s", view_name, view_path)
                             logger.info("=" * 120)
                             
                             shards = ray.get(split_video_into_shards_with_overlap.remote(
@@ -2043,18 +1936,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                     if is_walkthrough:
                         # BIG DEBUG STATEMENT FOR WALKTHROUGH AUDIO SPLITTING
                         logger.info("=" * 120)
-                        logger.info("🎵🎵🎵 WALKTHROUGH AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
-                        logger.info("🎵🎵🎵 WALKTHROUGH AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
-                        logger.info("🎵🎵🎵 WALKTHROUGH AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
-                        logger.info(f"🎵 Audio Path: {local_audio_path}")
-                        logger.info("🎵 Using: split_audio_into_shards_with_overlap (WALKTHROUGH MODE)")
-                        logger.info("🎵 Duration: 180 seconds per segment")
-                        logger.info("🎵 Overlap: 60 seconds (WITH OVERLAP)")
-                        logger.info("🎵 Step Size: 120 seconds (180 - 60)")
-                        logger.info("🎵 Method: Sliding window with 60-second overlap")
-                        logger.info("🎵🎵🎵 WALKTHROUGH AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
-                        logger.info("🎵🎵🎵 WALKTHROUGH AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
-                        logger.info("🎵🎵🎵 WALKTHROUGH AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
+                        logger.info("🎵 Walkthrough audio splitting - Path: %s, Duration: 180s, Overlap: 60s, Step: 120s", local_audio_path)
                         logger.info("=" * 120)
                         
                         # Use sliding window overlap for audio as well
@@ -2068,17 +1950,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                     else:
                         # BIG DEBUG STATEMENT FOR NORMAL AUDIO SPLITTING
                         logger.info("=" * 120)
-                        logger.info("🎵🎵🎵 NORMAL AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
-                        logger.info("🎵🎵🎵 NORMAL AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
-                        logger.info("🎵🎵🎵 NORMAL AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
-                        logger.info(f"🎵 Audio Path: {local_audio_path}")
-                        logger.info("🎵 Using: split_audio_into_shards (NORMAL MODE)")
-                        logger.info("🎵 Duration: 180 seconds per segment")
-                        logger.info("🎵 Overlap: 0 seconds (NO OVERLAP)")
-                        logger.info("🎵 Method: Discrete 3-minute segments")
-                        logger.info("🎵🎵🎵 NORMAL AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
-                        logger.info("🎵🎵🎵 NORMAL AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
-                        logger.info("🎵🎵🎵 NORMAL AUDIO SPLITTING TRIGGERED! 🎵🎵🎵")
+                        logger.info("🎵 Normal audio splitting - Path: %s, Duration: 180s, Overlap: 0s", local_audio_path)
                         logger.info("=" * 120)
                         
                         # Normal processing without overlap
@@ -2167,24 +2039,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
             
             logger.info(f"✅ Completed multi-view processing for shard {shard_idx + 1}: {shard_results['total_views_processed']} views, {shard_results['successful_views']} successful")
         
-        # =================================================================
-        # DYNAMIC ERP VIDEO AND AUDIO PROCESSING - AFTER LABEL STUDIO TASKS
-        # =================================================================
-        logger.info(f"🎬 Starting dynamic ERP video and audio processing for session: {session_id}")
         
-        # Integrate ERP video and audio URLs with Label Studio tasks
-        label_studio_tasks = integrate_erp_audio_with_labelstudio_tasks(
-            output_dir=output_dir,
-            session_id=session_id,
-            blob_service_client=blob_client,
-            container_name=container_name,
-            blob_base_path=azure_output_prefix,
-            account_key=account_key,
-            labelstudio_tasks=label_studio_tasks
-        )
-        
-        logger.info(f"🎬 Dynamic ERP and audio processing completed for session: {session_id}")
-        # =================================================================
         
         print(label_studio_tasks)
         generate_final_combined_model_results_json(output_dir, consolidated_json_paths)
@@ -2229,7 +2084,24 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
             logger.warning("⚠️ Azure configuration missing - Label Studio tasks will have placeholder URLs")
             audio_urls = {}
             view_shard_urls = {}
-
+        # =================================================================
+        # DYNAMIC ERP VIDEO AND AUDIO PROCESSING - AFTER LABEL STUDIO TASKS
+        # =================================================================
+        logger.info(f"🎬 Starting dynamic ERP video and audio processing for session: {session_id}")
+        
+        # Integrate ERP video and audio URLs with Label Studio tasks
+        label_studio_tasks = integrate_erp_audio_with_labelstudio_tasks(
+            output_dir=output_dir,
+            session_id=session_id,
+            blob_service_client=blob_client,
+            container_name=container_name,
+            blob_base_path=azure_output_prefix,
+            account_key=account_key,
+            labelstudio_tasks=label_studio_tasks
+        )
+        
+        logger.info(f"🎬 Dynamic ERP and audio processing completed for session: {session_id}")
+        # =================================================================
         import_consolidated_tasks_to_labelstudio(label_studio_tasks,pipeline_config)
         
         # Mark session as completed
@@ -2314,25 +2186,39 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
             # Try the simpler single-output
             try:
                 mp4_result = ray.get(insv_unwarp_task.remote(input_video_path, out_dir=os.path.join(output_dir, "4views")))
+
+                # Check if the unwarp task returned an error
+                if "__error__" in mp4_result:
+                    error_msg = mp4_result["__error__"]
+                    logger.error(f"INSV unwarp task failed: {error_msg}")
+                    raise RuntimeError(f"Failed to convert INSV file: {error_msg}")
+
                 flat_result = mp4_result
                 logger.info(f"Using two 180 for unwarp:: {len(flat_result)} views under {flat_result}")
                 # mp4_result = ray.get(insv_unwarp_task.remote(input_video_path, out_dir=os.path.join(output_dir, "4views")))
                 # flat_result = mp4_result.get('erp')
                 # print(f"erp_result: {erp_result}")
                 # yolo_ref  = run_yolo_detection.remote(erp_result, "out_4viewsERP")
-            except Exception:
+            except Exception as e:
                 flat_result = None
-                raise RuntimeError(f"Failed to convert two 180 INSV file: {mp4_result.get('error', 'Unknown error')}")
+                raise RuntimeError(f"Failed to convert two 180 INSV file: {str(e)}")
         else:
             mp4_path = input_video_path
             try:
                  # Undistort/unwarp the 360 video into multiple perspective views
                 views4_ref = erp_unwarp_task.remote(mp4_path)
                 flat_result = ray.get(views4_ref)  # dict: {view_name: output_path}
+
+                # Check if the unwarp task returned an error
+                if "__error__" in flat_result:
+                    error_msg = flat_result["__error__"]
+                    logger.error(f"ERP unwarp task failed: {error_msg}")
+                    raise RuntimeError(f"Failed to convert 360 file: {error_msg}")
+
                 logger.info(f"Using one 360 for unwarp: {len(flat_result)} views under {flat_result}")
-            except Exception:
+            except Exception as e:
                 flat_result = None
-                raise RuntimeError(f"Failed to convert one 360 file: {mp4_result.get('error', 'Unknown error')}")
+                raise RuntimeError(f"Failed to convert one 360 file: {str(e)}")
 
         # Split audio once into 60s shards (reused per view by index)
         audio_shards = ray.get(split_audio_into_shards.remote(
@@ -2356,6 +2242,12 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
         # Split each unwarped view into shards and stage per-view shard lists
         view_shards = {}
         view_shard_urls = {}
+
+        # Check if flat_result is valid before iterating
+        if not isinstance(flat_result, dict) or "__error__" in flat_result:
+            logger.error(f"Invalid flat_result for unwarped view processing: {flat_result}")
+            return {"status": "error", "error": "Failed to process unwarped views due to invalid result"}
+
         for view_name, view_path in flat_result.items():
             # Split this view into 60s shards
             shards = ray.get(split_video_into_shards.remote(

@@ -2,7 +2,7 @@ import json
 import shlex
 import subprocess
 from pathlib import Path
-from typing import Dict, Iterable, Tuple
+from typing import Dict, Iterable, Optional, Tuple
 
 
 # =============================
@@ -70,19 +70,46 @@ def _probe_video_stream_count(path: Path) -> int:
     lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
     return len(lines)
 
+def _get_input_video_resolution(path: Path) -> Tuple[int, int]:
+    """Get the resolution of the input video using ffprobe."""
+    if not path.exists():
+        raise FFmpegError(f"Video file does not exist: {path}")
+
+    proc = subprocess.run(
+        [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=p=0",
+            str(path),
+        ],
+        capture_output=True, text=True
+    )
+    if proc.returncode != 0:
+        raise FFmpegError(f"ffprobe failed to get video resolution from {path}: {proc.stderr}")
+
+    output = proc.stdout.strip()
+    if not output:
+        raise FFmpegError(f"ffprobe returned empty output for {path}")
+
+    try:
+        width, height = output.split(',')
+        return int(width), int(height)
+    except (ValueError, IndexError) as e:
+        raise FFmpegError(f"Failed to parse video resolution '{output}' from {path}: {e}")
 
 def insv_to_4viewsERP(
     insv_path: str,
     output_dir: str = "out_4views",
     *,
     # Step 1 (ERP)
-    erp_size: Tuple[int, int] = (4096, 2048),
+    erp_size: Tuple[int, int] = None,
     lens_fov_deg: float = 190.0,  # for (d)fisheye→equirect
     encoder: str = "libx264",  # try NVENC first; falls back to x264
     crf_or_cq: int = 18,          # if NVENC: CQ; if x264: CRF
     preset: str = "fast",
     # Step 2 (4 rect views)
-    out_size: Tuple[int, int] = (1440, 1440),
+    out_size: Optional[Tuple[int, int]] = None,  # Auto-calculate from ERP size if None
     h_fov_deg: float = 90.0,
     v_fov_deg: float = 90.0,
     yaw_front_right_back_left: Tuple[float, float, float, float] = (45.0, 135.0, -135.0, -45.0),
@@ -101,10 +128,30 @@ def insv_to_4viewsERP(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if not in_path.exists():
-        raise FileNotFoundError(in_path)
+        raise FileNotFoundError(f"Input file does not exist: {in_path}")
 
     # ---------- Step 1: INSV → ERP ----------
-    W_erp, H_erp = erp_size
+    if erp_size is None:
+        try:
+            resolution_result = _get_input_video_resolution(in_path)
+            if resolution_result is None:
+                raise FFmpegError(f"Failed to get video resolution from {in_path} - got None")
+            input_width, input_height = resolution_result
+        except Exception as e:
+            raise FFmpegError(f"Error getting input video resolution from {in_path}: {e}")
+        # For equirectangular projection, maintain 2:1 aspect ratio
+        # Use input width as base and calculate height accordingly
+        if input_width >= input_height * 2:
+            # Input is already roughly 2:1, use as-is
+            W_erp, H_erp = input_width, input_height
+        else:
+            # Input is not 2:1, create proper ERP dimensions
+            # Use the larger dimension to determine scale
+            max_dim = max(input_width, input_height)
+            W_erp = max_dim if max_dim % 2 == 0 else max_dim + 1  # Ensure even
+            H_erp = W_erp // 2
+    else:
+        W_erp, H_erp = erp_size
     erp_path = out_dir / f"{in_path.stem}_ERP_{W_erp}x{H_erp}.mp4"
 
     n_streams = _probe_video_stream_count(in_path)
@@ -165,6 +212,14 @@ def insv_to_4viewsERP(
         raise FFmpegError("No video streams found in input.")
 
     # ---------- Step 2: ERP → 4 rect views ----------
+    # Calculate output size from ERP dimensions if not specified
+    if out_size is None:
+        # Use ERP height as the square output dimension (maintains good quality)
+        # For 3840x1920 ERP → 1920x1920 square views
+        # For 7680x3840 ERP → 3840x3840 square views
+        square_size = H_erp
+        out_size = (square_size, square_size)
+
     W, H = out_size
     yaw_f, yaw_r, yaw_b, yaw_l = yaw_front_right_back_left
 

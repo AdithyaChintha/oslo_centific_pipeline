@@ -176,7 +176,68 @@ def find_audio_file_in_blob_storage(
         logger.error(f"❌ Error finding audio file: {e}")
         return None
 
+def generate_erp_blob_url(
+    blob_service_client: BlobServiceClient,
+    container_name: str,
+    blob_base_path: str,
+    session_id: str,
+    account_key: str,
+    erp_video_path: str
+) -> Optional[str]:
+    """
+    Generate blob SAS URL for ERP video that was already uploaded as part of results folder.
 
+    Args:
+        blob_service_client: Azure BlobServiceClient instance
+        container_name: Azure container name
+        blob_base_path: Base blob path
+        session_id: Session ID
+        account_key: Azure storage account key
+        erp_video_path: Local path to ERP video (used to extract filename)
+
+    Returns:
+        Optional[str]: SAS URL to the ERP video if found, None otherwise
+    """
+    try:
+        import os
+        from azure.storage.blob import generate_blob_sas, BlobSasPermissions
+        from datetime import datetime, timedelta
+
+        # Extract ERP filename from local path
+        erp_filename = os.path.basename(erp_video_path)
+
+        # Construct blob path following the results upload structure
+        # Pattern: {blob_base_path}/{session_id}/4views/{erp_filename}
+        erp_blob_name = f"{blob_base_path.strip('/')}/{session_id}/4views/{erp_filename}"
+
+        # Check if blob exists
+        blob_client = blob_service_client.get_blob_client(
+            container=container_name,
+            blob=erp_blob_name
+        )
+
+        if blob_client.exists():
+            # Generate SAS URL
+            sas_token = generate_blob_sas(
+                account_name=blob_service_client.account_name,
+                container_name=container_name,
+                blob_name=erp_blob_name,
+                account_key=account_key,
+                permission=BlobSasPermissions(read=True),
+                expiry=datetime.utcnow() + timedelta(days=365)
+            )
+
+            erp_url = f"https://{blob_service_client.account_name}.blob.core.windows.net/{container_name}/{erp_blob_name}?{sas_token}"
+            logger.info(f"✅ Generated ERP blob URL: {erp_url}")
+            return erp_url
+        else:
+            logger.warning(f"⚠️ ERP blob not found at: {erp_blob_name}")
+            return None
+
+    except Exception as e:
+        logger.error(f"❌ Error generating ERP blob URL: {e}")
+        return None
+        
 def process_erp_and_audio_dynamically(
     output_dir: str,
     session_id: str,
@@ -184,7 +245,7 @@ def process_erp_and_audio_dynamically(
     container_name: str,
     blob_base_path: str,
     account_key: str,
-    downscale_erp: bool = True
+    downscale_erp: bool = False
 ) -> Tuple[Optional[str], Optional[str]]:
     """
     Dynamically process ERP video and audio files for a session.
@@ -206,7 +267,7 @@ def process_erp_and_audio_dynamically(
         downscale_erp: Whether to downscale ERP video to 480p
         
     Returns:
-        Tuple[Optional[str], Optional[str]]: (full_video_480p_url, full_audio_link)
+        Tuple[Optional[str], Optional[str]]: (full_erp_blob_url, full_audio_link)
     """
     try:
         logger.info(f"🎬 Starting dynamic ERP and audio processing for session: {session_id}")
@@ -218,7 +279,7 @@ def process_erp_and_audio_dynamically(
             return None, None
         
         # Step 2: Process ERP video
-        full_video_480p_url = None
+        full_erp_blob_url = None
         if downscale_erp:
             logger.info("🎬 Downscaling ERP video to 480p...")
             downscaled_video_path = downscale_video_to_480p(
@@ -241,8 +302,8 @@ def process_erp_and_audio_dynamically(
                 )
                 
                 if video_upload_result["success"]:
-                    full_video_480p_url = video_upload_result["full_video_480P"]
-                    logger.info(f"✅ ERP video uploaded: {full_video_480p_url}")
+                    full_erp_blob_url = video_upload_result["full_video_480P"]
+                    logger.info(f"✅ ERP video uploaded: {full_erp_blob_url}")
                 else:
                     logger.error(f"❌ Failed to upload ERP video: {video_upload_result.get('error', 'Unknown error')}")
                 
@@ -255,6 +316,22 @@ def process_erp_and_audio_dynamically(
             else:
                 logger.error("❌ Failed to downscale ERP video")
         else:
+            logger.info("🔗 Generating blob URL for already-uploaded ERP video...")
+            erp_blob_url = generate_erp_blob_url(
+                blob_service_client=blob_service_client,
+                container_name=container_name,
+                blob_base_path=blob_base_path,
+                session_id=session_id,
+                account_key=account_key,
+                erp_video_path=erp_video_path  # This is already available from find_erp_video_in_output_dir()
+            )
+
+            if erp_blob_url:
+                logger.info(f"✅ ERP video blob URL generated: {erp_blob_url}")
+                full_erp_blob_url = erp_blob_url
+            else:
+                logger.warning("⚠️ Could not generate ERP video blob URL")
+                full_erp_blob_url = None
             logger.info("⏭️ Skipping ERP video downscaling")
         
         # Step 3: Find and process audio file
@@ -272,12 +349,12 @@ def process_erp_and_audio_dynamically(
             full_audio_link = ""  # Use empty string as fallback
         
         logger.info(f"🎬 Dynamic ERP and audio processing completed for session: {session_id}")
-        if full_video_480p_url:
-            logger.info(f"   ✅ ERP video URL: {full_video_480p_url}")
+        if full_erp_blob_url:
+            logger.info(f"   ✅ ERP video URL: {full_erp_blob_url}")
         if full_audio_link:
             logger.info(f"   ✅ Audio URL: {full_audio_link}")
         
-        return full_video_480p_url, full_audio_link
+        return full_erp_blob_url, full_audio_link
         
     except Exception as e:
         logger.error(f"❌ Dynamic ERP and audio processing failed for {session_id}: {e}")
@@ -312,14 +389,14 @@ def integrate_erp_audio_with_labelstudio_tasks(
         logger.info(f"🔗 Integrating ERP and audio URLs with {len(labelstudio_tasks)} Label Studio tasks")
         
         # Process ERP video and audio
-        full_video_480p_url, full_audio_link = process_erp_and_audio_dynamically(
+        full_erp_blob_url, full_audio_link = process_erp_and_audio_dynamically(
             output_dir=output_dir,
             session_id=session_id,
             blob_service_client=blob_service_client,
             container_name=container_name,
             blob_base_path=blob_base_path,
             account_key=account_key,
-            downscale_erp=True
+            downscale_erp=False
         )
         
         # Update each Label Studio task with the new URLs
@@ -332,7 +409,7 @@ def integrate_erp_audio_with_labelstudio_tasks(
                     
                     # Update the existing keys in the data section
                     if "data" in task_data:
-                        task_data["data"]["full_video_480P"] = full_video_480p_url or ""
+                        task_data["data"]["full_video_link"] = full_erp_blob_url or ""
                         task_data["data"]["full_audio_link"] = full_audio_link or ""
                         
                         # Write the updated task back
