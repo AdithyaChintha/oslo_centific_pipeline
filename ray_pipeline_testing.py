@@ -1819,7 +1819,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
             
             for video_id, video_download_result in video_downloads:
                 local_video_path = video_download_result['local_path']
-                local_video_path = "VID_20250809_094836_00_045.insv" #temp for debug
+                #local_video_path = "VID_20250809_094836_00_045.insv" #temp for debug
                 logger.info(f"local_video_path:{local_video_path}")
                 
                 # Initialize tracking for this video chunk
@@ -1886,67 +1886,49 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                                     vn, vp, duration_sec, overlap_sec, max(0, duration_sec - overlap_sec))
                         logger.info("=" * 120)
                         ref = split_video_into_shards_with_overlap.remote(
-                            vp, output_dir=out_dir, duration_sec=duration_sec, overlap_sec=overlap_sec
+                            vp, output_dir=out_dir, duration_sec=duration_sec, overlap_sec=overlap_sec, start_idx=global_part_idx
                         )
                     else:
                         logger.info("=" * 120)
                         logger.info("📹 Normal video splitting - View: %s, Path: %s, Duration: %ss, Overlap: 0s", vn, vp, duration_sec)
                         logger.info("=" * 120)
                         ref = split_video_into_shards.remote(
-                            vp, output_dir=out_dir, duration_sec=duration_sec
+                            vp, output_dir=out_dir, duration_sec=duration_sec, start_idx=global_part_idx
                         )
                     split_tasks.append((vn, ref, out_dir))
 
-                # Prefer parallel; on failure, fall back to sequential per-view with per-view error tracking
+                # Prefer parallel; on failure, error tracking
                 try:
                     results = ray.get([ref for _, ref, _ in split_tasks])  # List[List[str]]
                 except Exception as e:
-                    logger.error(f"Parallel split_video_into_shards failed: {e} — fallback to sequential.")
-                    # results = []
-                    # for vn, _, out_dir in split_tasks:
-                    #     try:
-                    #         if is_walkthrough:
-                    #             shards = ray.get(split_video_into_shards_with_overlap.remote(
-                    #                 flat_result[vn], output_dir=out_dir, duration_sec=duration_sec, overlap_sec=overlap_sec
-                    #             ))
-                    #         else:
-                    #             shards = ray.get(split_video_into_shards.remote(
-                    #                 flat_result[vn], output_dir=out_dir, duration_sec=duration_sec
-                    #             ))
-                    #     except Exception as ex:
-                    #         logger.error(f"Sequential split failed for {vn}: {ex}")
-                    #         try:
-                    #             update_tracking(chunk_id, f"view_sharding.{vn}", "error", error_message=str(ex))
-                    #         except Exception:
-                    #             logger.debug(f"Failed to update tracking error for {vn}")
-                    #         shards = []
-                    #     results.append(shards)
+                    logger.error(f"Parallel split_video_into_shards failed: {e}")
+
 
                 # Renumber shards to ensure global sequential numbering across all views
                 for (vn, _, out_dir), shards in zip(split_tasks, results):
                     shards = shards or []
-                    renumbered = []
-                    for old_path in shards:
-                        _base, ext = os.path.splitext(old_path)
-                        ext = ext or ".mp4"
-                        new_path = os.path.join(out_dir, f"{vn}_part{global_part_idx}{ext}")
-                        if new_path != old_path:
-                            try:
-                                os.replace(old_path, new_path)
-                            except Exception as rn_ex:
-                                logger.warning(f"Rename shard failed ({old_path} -> {new_path}): {rn_ex}; keeping original")
-                                new_path = old_path
-                        renumbered.append(new_path)
+                    # renumbered = []
+                    # for old_path in shards:
+                    #     _base, ext = os.path.splitext(old_path)
+                    #     ext = ext or ".mp4"
+                    #     new_path = os.path.join(out_dir, f"{vn}_part{global_part_idx}{ext}")
+                    #     if new_path != old_path:
+                    #         try:
+                    #             os.replace(old_path, new_path)
+                    #         except Exception as rn_ex:
+                    #             logger.warning(f"Rename shard failed ({old_path} -> {new_path}): {rn_ex}; keeping original")
+                    #             new_path = old_path
+                    #     renumbered.append(new_path)
 
-                    # record in view_shards and tracking
-                    view_shards[vn] = view_shards.get(vn, []) + renumbered
-                    try:
-                        update_tracking(
-                            chunk_id, f"view_sharding.{vn}", "completed",
-                            shard_count=len(renumbered), shard_paths=renumbered
-                        )
-                    except Exception:
-                        logger.debug(f"Failed to update tracking for {vn}")
+                    # # record in view_shards and tracking
+                    # view_shards[vn] = view_shards.get(vn, []) + renumbered
+                    # try:
+                    #     update_tracking(
+                    #         chunk_id, f"view_sharding.{vn}", "completed",
+                    #         shard_count=len(renumbered), shard_paths=renumbered
+                    #     )
+                    # except Exception:
+                    #     logger.debug(f"Failed to update tracking for {vn}")
 
                 logger.info(f"Sharding done; global_part_idx now: {global_part_idx}")
                 
