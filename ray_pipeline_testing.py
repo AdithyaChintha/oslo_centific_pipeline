@@ -1819,6 +1819,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
             
             for video_id, video_download_result in video_downloads:
                 local_video_path = video_download_result['local_path']
+                local_video_path = "VID_20250809_094836_00_045.insv" #temp for debug
                 logger.info(f"local_video_path:{local_video_path}")
                 
                 # Initialize tracking for this video chunk
@@ -1928,7 +1929,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                     for old_path in shards:
                         _base, ext = os.path.splitext(old_path)
                         ext = ext or ".mp4"
-                        new_path = os.path.join(out_dir, f"{vn}_part{global_part_idx:04d}{ext}")
+                        new_path = os.path.join(out_dir, f"{vn}_part{global_part_idx}{ext}")
                         if new_path != old_path:
                             try:
                                 os.replace(old_path, new_path)
@@ -1936,7 +1937,6 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                                 logger.warning(f"Rename shard failed ({old_path} -> {new_path}): {rn_ex}; keeping original")
                                 new_path = old_path
                         renumbered.append(new_path)
-                        global_part_idx += 1
 
                     # record in view_shards and tracking
                     view_shards[vn] = view_shards.get(vn, []) + renumbered
@@ -5627,7 +5627,7 @@ if __name__ == "__main__":
     
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Ray Pipeline with Integrated Blob Polling")
-    parser.add_argument("--mode", choices=["integrated", "standalone", "multi_chunks", "multi_sessions", "blob_polling"], default="blob_polling",
+    parser.add_argument("--mode", choices=["integrated", "standalone", "multi_chunks", "multi_sessions", "blob_polling"], default="multi_chunks",
                        help="Run mode: 'integrated' for blob polling + pipeline, 'standalone' for direct pipeline, 'multi_chunks' for single session, 'multi_sessions' for multiple sessions, 'blob_polling' for continuous blob polling (default: blob_polling)")
     parser.add_argument("--azure-config", default="blobfuse2_config.yaml",
                        help="Azure configuration file path")

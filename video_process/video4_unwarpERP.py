@@ -309,7 +309,6 @@ def insv_to_4viewsERP_one_shot(
         W_erp, H_erp = erp_size
 
     # ----- Build output paths -----
-    W_erp, H_erp = erp_size
     erp_path   = out_dir / f"{in_path.stem}_ERP_{W_erp}x{H_erp}.mp4"
 
     # Calculate output size from ERP dimensions if not specified
