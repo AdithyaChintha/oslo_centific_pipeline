@@ -1951,7 +1951,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                 update_tracking(chunk_id, "view_sharding", "processing", views=list(flat_result.keys()))
 
                 split_tasks = []  # [(vn, ref, out_dir)]
-                duration_sec = 180
+                duration_sec = 120
                 for vn, vp in flat_result.items():
                     out_dir = os.path.join(output_dir, f"{vn}_shards")
                     os.makedirs(out_dir, exist_ok=True)
