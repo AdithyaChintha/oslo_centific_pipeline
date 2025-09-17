@@ -99,7 +99,7 @@ def insv_unwarp_task(
     erp_w: int = 5760,
     erp_h: int = 2880,
     lens_fov_deg: float = 180.0,
-    out_size: Tuple[int, int] = (1440, 1440), # erp_w/4
+    out_size: Optional[Tuple[int, int]] = None, # erp_w/4
     v_fov_deg: float = 90.0,
     h_fov_deg: float = 90.0,
     roll_deg: float = 0.0,
@@ -142,7 +142,7 @@ def insv_unwarp_task(
         return insv_to_4viewsERP(
             insv_path,
             output_dir=out_dir,
-            out_size=out_size,
+            out_size=out_size,  # Pass None to let the function auto-detect
             h_fov_deg=h_fov_deg,
             v_fov_deg=v_fov_deg,
             roll_deg=roll_deg,

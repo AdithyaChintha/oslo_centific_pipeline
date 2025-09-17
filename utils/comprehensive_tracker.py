@@ -571,16 +571,40 @@ def cleanup_temp_download_directory(temp_download_dir: str, session_id: str = No
         if session_id:
             # Clean up specific session files
             logger.info(f"🧹 Cleaning up temp files for session: {session_id}")
+
+            # Create multiple session identifier patterns to match different naming conventions
+            session_patterns = [
+                session_id,  # Original session ID (with hyphens)
+                session_id.replace('-', '_'),  # Replace hyphens with underscores
+                session_id.replace('_', '-'),  # Replace underscores with hyphens (just in case)
+            ]
+
+            # Also extract the core UUID part for broader matching
+            uuid_part = session_id.split('-')[1:6]  # Extract UUID parts
+            if len(uuid_part) >= 5:
+                core_uuid = '-'.join(uuid_part)  # Like "515fb09c-f12f-48ee-91e7-b21c9f4ac5ab"
+                session_patterns.extend([
+                    core_uuid,
+                    core_uuid.replace('-', '_')
+                ])
+
+            logger.debug(f"   🔍 Searching for files matching patterns: {session_patterns}")
+
             for root, dirs, files in os.walk(temp_download_dir):
                 for file in files:
-                    if session_id in file:
+                    # Check if any of the session patterns match the filename
+                    file_matches = any(pattern in file for pattern in session_patterns if pattern)
+
+                    if file_matches:
                         file_path = os.path.join(root, file)
                         try:
                             os.remove(file_path)
                             files_removed += 1
-                            logger.debug(f"   🗑️ Removed file: {file}")
+                            logger.info(f"   🗑️ Removed file: {file}")
                         except Exception as e:
                             logger.warning(f"   ⚠️ Failed to remove {file}: {e}")
+                    else:
+                        logger.debug(f"   ⏭️ Skipping file (no pattern match): {file}")
         else:
             # Clean up entire temp directory
             logger.info(f"🧹 Cleaning up entire temp download directory: {temp_download_dir}")

@@ -905,7 +905,10 @@ def generate_multiview_4view_labelstudio_task(shard_output_dir, assigned_views,
             "segments_detected": str(len(raw_predictions)),
             "processing_type": "multi_view_4view_equal",
             "successful_views": len([v for v in assigned_views.values() if v.get('url')]),
-            "total_views_processed": len(assigned_views)
+            "total_views_processed": len(assigned_views),
+            "full_video_link":"",
+            "full_audio_link":"",
+            "moderator_id":""
         },
         "predictions": [{
             "model_version": "multi_view_4view_v1.0",
