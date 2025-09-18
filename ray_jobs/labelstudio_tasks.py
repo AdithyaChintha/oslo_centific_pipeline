@@ -925,7 +925,7 @@ def generate_multiview_4view_labelstudio_task(shard_output_dir, assigned_views,
     logger.info(f"📋 Generated 4-view Label Studio task: {task_file_path}")
     return task_file_path
 
-def import_consolidated_tasks_to_labelstudio(task_file_paths, pipeline_config=None):
+def import_consolidated_tasks_to_labelstudio(task_file_paths, pipeline_config=None, is_walkthrough = False):
     """
     Import consolidated Label Studio tasks to Label Studio platform.
     
@@ -964,7 +964,10 @@ def import_consolidated_tasks_to_labelstudio(task_file_paths, pipeline_config=No
     label_studio_config = pipeline_config.get('label_studio', {})
     server_url = label_studio_config.get('server_url', 'https://annotations-stg.oneforma2.com/')
     api_token = label_studio_config.get('api_token', 'd75a31c7994b96099cfbf7d61e15cff643943853')
-    project_id = label_studio_config.get('project_id', '5458')
+    if not is_walkthrough:
+        project_id = label_studio_config.get('project_id', '5458')
+    else:
+        project_id = label_studio_config.get('walkthrough_project_id', '5458')
     
     logger.info(f"📤 Importing {len(valid_task_files)} consolidated tasks to Label Studio...")
     logger.info(f"   Server: {server_url}")

@@ -4,9 +4,9 @@
 # Azure Blob Storage Configuration
 azure_storage:
   # Input directory configuration
-  input_blob_prefix: "test_audio/"  # Default blob prefix to search for videos
+  input_blob_prefix: "one-data-platform/"  # Default blob prefix to search for videos
   # Output directory configuration
-  output_blob_prefix: "processed/"  # Base prefix for uploading processed results
+  output_blob_prefix: "one_data_platform_output/"  # Base prefix for uploading processed results
   
   # Container settings (these can override blobfuse2_config.yaml if needed)
   # container_name: "instavideo"  # Uncomment to override
@@ -17,7 +17,7 @@ azure_storage:
 local_storage:
   # Local file system configuration
   temp_download_dir: "/tmp/azure_downloads"   # Temporary download location
-  output_base_dir: "./outmain2withdn"                    # Local output directory
+  output_base_dir: "./output_test_51"                    # Local output directory
   video_list_file: "./azure_video_list.json"  # Video discovery tracking
   checklist_file: "./video_checklist.json"    # Processing progress tracking
 
@@ -58,7 +58,8 @@ label_studio:
   api_token: "d75a31c7994b96099cfbf7d61e15cff643943853"
   
   # Project ID
-  project_id: "5392"
+  project_id: "5684"
+  walkthrough_project_id: "5706"
 
 # API Keys Configuration
 api_keys:

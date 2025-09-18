@@ -1,6 +1,7 @@
 import re
 import os
 from typing import Optional, Dict, List, Tuple
+from collections import defaultdict
 from utils.logger import get_logger
 import json
 from azure.storage.blob import BlobServiceClient
@@ -10,7 +11,7 @@ from datetime import datetime
 import ray
 logger = get_logger("ChunkFilenameParser")
 
-def parse_chunk_filename_complete(filename: str) -> Optional[Dict]:
+def parse_chunk_filename_complete_legacy(filename: str) -> Optional[Dict]:
     """
     Parse filenames like:
       - 11_515f...c5ab_audio1_working-on-laptop_20250907T00:00:00.000Z122100_01_audio.WAV
@@ -91,6 +92,232 @@ def parse_chunk_filename_complete(filename: str) -> Optional[Dict]:
         "format": "underscore-new",
         "extension": ext_lower
     }
+
+
+def parse_chunk_filename_simple(filename: str) -> Optional[Dict]:
+    """
+    Simple parser that extracts only essential information:
+    - chunk_number: Sequence number (01, 02, 03, etc.)
+    - chunk_type: 'audio' or 'video' (from file extension)
+    - file_name: Original filename for downloading
+
+    Session grouping is handled by folder structure, not filename parsing.
+    """
+    if not filename:
+        return None
+
+    base = os.path.basename(filename)
+    name, ext = os.path.splitext(base)
+    ext_lower = ext.lower()
+
+    # Only parse audio/video files
+    if ext_lower not in {'.wav', '.insv', '.mp4'}:
+        return None
+
+    # Determine chunk type from file extension
+    if ext_lower == '.wav':
+        chunk_type = 'audio'
+    elif ext_lower in {'.insv', '.mp4'}:
+        chunk_type = 'video'
+    else:
+        return None
+
+    # Extract chunk number (look for _NN_ pattern where NN is 01, 02, etc.)
+    chunk_number = None
+
+    # Pattern: _NN_audio or _NN_video at end of filename
+    chunk_match = re.search(r'_(\d{2})_(?:audio|video)$', name, re.IGNORECASE)
+    if chunk_match:
+        chunk_number = int(chunk_match.group(1))
+    else:
+        # Fallback: look for any 2-digit number near end
+        fallback_match = re.search(r'_(\d{2})_', name)
+        if fallback_match:
+            chunk_number = int(fallback_match.group(1))
+
+    logger.debug(f"Simple parsing: {filename} → chunk_number={chunk_number}, chunk_type={chunk_type}")
+
+    return {
+        "file_name": filename,
+        "chunk_number": chunk_number,
+        "chunk_type": chunk_type,
+        "extension": ext_lower,
+        "parsing_method": "simple"
+    }
+
+
+def process_session_folder(blob_service_client: BlobServiceClient, container_name: str,
+                          folder_name: str, folder_data: Dict) -> Optional[Dict]:
+    """
+    Process a single session folder:
+    1. Parse metadata to get correct session ID
+    2. Group chunks by type
+    3. Return complete session info
+    """
+    logger.debug(f"Processing session folder: {folder_name}")
+
+    # Parse metadata files to get session ID
+    session_id = None
+    session_metadata = None
+
+    for meta_file in folder_data['metadata_files']:
+        # Extract session ID from metadata filename
+        extracted_id = extract_session_id_from_metadata_filename(meta_file['file_name'])
+        if extracted_id:
+            session_id = extracted_id
+            # Download and parse metadata content
+            try:
+                blob_client = blob_service_client.get_blob_client(
+                    container=container_name,
+                    blob=meta_file['blob_name']
+                )
+                content = blob_client.download_blob().readall().decode('utf-8')
+                session_metadata = parse_completion_metadata_json(content)
+                break
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to parse metadata {meta_file['file_name']}: {e}")
+                continue
+
+    if not session_id:
+        logger.warning(f"⚠️ No valid session ID found for folder: {folder_name}")
+        return None
+
+    # Group chunks by type
+    video_chunks = []
+    audio_chunks = []
+
+    for chunk in folder_data['chunks']:
+        chunk_entry = {
+            "chunk_number": chunk.get("chunk_number"),
+            "file_name": chunk["file_name"],
+            "chunk_type": chunk["chunk_type"],
+            "is_last_chunk": False,  # Will be set later
+            "chunk_data": chunk
+        }
+
+        if chunk["chunk_type"] == "video":
+            video_chunks.append(chunk_entry)
+        elif chunk["chunk_type"] == "audio":
+            audio_chunks.append(chunk_entry)
+
+    # Create session with same structure as existing code
+    session = {
+        "session_id": session_id,
+        "session_folder": folder_name,
+        "video_chunks": video_chunks,
+        "audio_chunks": audio_chunks,
+        "video_count": len(video_chunks),
+        "audio_count": len(audio_chunks),
+        "video_sequences": set(c.get("chunk_number") for c in video_chunks if c.get("chunk_number") is not None),
+        "audio_sequences": set(c.get("chunk_number") for c in audio_chunks if c.get("chunk_number") is not None),
+        "completion_detected": session_metadata is not None,
+        "completion_method": "metadata_json" if session_metadata else "none",
+        "session_metadata": session_metadata.get("session_metadata", {}) if session_metadata else {},
+        "expected_files": session_metadata.get("expected_files", {}) if session_metadata else {},
+        "has_audio_video_mismatch": False,  # Will be computed later
+        "session_type": "folder_based"  # Mark as using new approach
+    }
+
+    logger.info(f"✅ Processed session folder '{folder_name}' → session_id: '{session_id}' ({len(video_chunks)}V, {len(audio_chunks)}A)")
+    return session
+
+
+def discover_sessions_by_folder(blob_service_client: BlobServiceClient,
+                               container_name: str,
+                               base_prefix: str) -> Dict[str, Dict]:
+    """
+    Discover sessions by folder structure instead of filename parsing.
+
+    1. Find all session folders under base_prefix
+    2. Parse metadata files to get session IDs
+    3. Simple parse chunk files in each folder
+    4. Group chunks by folder, not by filename-derived session ID
+    """
+    logger.info(f"🔍 Discovering sessions by folder structure under: {base_prefix}")
+
+    try:
+        container_client = blob_service_client.get_container_client(container_name)
+        blobs = list(container_client.list_blobs(name_starts_with=base_prefix))
+
+        # Group files by session folder
+        session_folders = defaultdict(lambda: {
+            'chunks': [],
+            'metadata_files': [],
+            'folder_path': ''
+        })
+
+        for blob in blobs:
+            # Extract session folder: one-data-platform/session-name/filename
+            relative_path = blob.name[len(base_prefix):] if blob.name.startswith(base_prefix) else blob.name
+
+            if '/' in relative_path:
+                session_folder = relative_path.split('/')[0]
+                filename = relative_path.split('/')[-1]
+
+                if filename.endswith('_metadata.json'):
+                    session_folders[session_folder]['metadata_files'].append({
+                        'blob_name': blob.name,
+                        'file_name': filename,
+                        'size': blob.size
+                    })
+                else:
+                    # Try to parse as chunk
+                    chunk_info = parse_chunk_filename_simple(filename)
+                    if chunk_info:
+                        chunk_info.update({
+                            'blob_name': blob.name,
+                            'size': blob.size,
+                            'session_folder': session_folder
+                        })
+                        session_folders[session_folder]['chunks'].append(chunk_info)
+
+                session_folders[session_folder]['folder_path'] = f"{base_prefix}{session_folder}"
+
+        logger.info(f"📊 Found {len(session_folders)} session folders")
+
+        # Process each session folder
+        sessions = {}
+        for folder_name, folder_data in session_folders.items():
+            session = process_session_folder(blob_service_client, container_name, folder_name, folder_data)
+            if session:
+                sessions[session['session_id']] = session
+
+        logger.info(f"✅ Processed {len(sessions)} sessions using folder-based approach")
+        return sessions
+
+    except Exception as e:
+        logger.error(f"❌ Failed to discover sessions by folder: {e}")
+        return {}
+
+
+# Create a new version of parse_chunk_filename_complete that uses simple parsing
+def parse_chunk_filename_complete(filename: str) -> Optional[Dict]:
+    """
+    NEW VERSION - Uses simplified parsing approach.
+    Falls back to legacy parsing if simple parsing fails.
+    """
+    # Try simple parsing first
+    result = parse_chunk_filename_simple(filename)
+    if result:
+        # Convert simple result to legacy format for compatibility
+        return {
+            "file_name": result["file_name"],
+            "session_id": "folder_based",  # Will be overridden by folder-based discovery
+            "session_index": "unknown",
+            "uuid": "unknown",
+            "stream": "unknown",
+            "label": "unknown",
+            "timestamp": None,
+            "chunk_number": result["chunk_number"],
+            "chunk_type": result["chunk_type"],
+            "is_last_chunk": False,
+            "format": "simple",
+            "extension": result["extension"]
+        }
+
+    # Fallback to legacy parsing
+    logger.debug(f"Simple parsing failed for {filename}, trying legacy parsing")
+    return parse_chunk_filename_complete_legacy(filename)
 
 
 def group_chunks_by_session(parsed_chunks: list) -> Dict[str, Dict]:
@@ -381,8 +608,8 @@ def is_walkthrough_session(session_data: Dict) -> bool:
     
     return False
 
-def discover_sessions_basic(blob_service_client: BlobServiceClient,
-                          container_name: str, 
+def discover_sessions_basic_legacy(blob_service_client: BlobServiceClient,
+                          container_name: str,
                           input_prefix: str) -> Tuple[Dict[str, Dict], Dict[str, Dict]]:
     """
     Basic session discovery combining chunks and metadata.
@@ -461,6 +688,73 @@ def discover_sessions_basic(blob_service_client: BlobServiceClient,
     logger.info(f"📊 Discovery complete: {len(ready_sessions)} ready, {len(not_ready_sessions)} not ready")
     
     return ready_sessions, not_ready_sessions
+
+
+def discover_sessions_basic(blob_service_client: BlobServiceClient,
+                          container_name: str,
+                          input_prefix: str,
+                          use_folder_based: bool = True) -> Tuple[Dict[str, Dict], Dict[str, Dict]]:
+    """
+    NEW VERSION - Session discovery with folder-based approach option.
+
+    Args:
+        blob_service_client: Azure blob service client
+        container_name: Container name
+        input_prefix: Prefix to search under
+        use_folder_based: If True, use new folder-based approach. If False, use legacy approach.
+
+    Returns: (ready_sessions, not_ready_sessions)
+    """
+    if use_folder_based:
+        logger.info(f"🔍 Using FOLDER-BASED session discovery in {container_name}/{input_prefix}")
+
+        # Use new folder-based discovery
+        all_sessions = discover_sessions_by_folder(blob_service_client, container_name, input_prefix)
+
+        # Separate ready and not ready sessions
+        ready_sessions = {}
+        not_ready_sessions = {}
+
+        for session_id, session in all_sessions.items():
+            # Mark last chunks for each session
+            mark_last_chunks_for_session(session)
+
+            if session.get("completion_detected", False):
+                if is_walkthrough_session(session):
+                    session["domain"] = "Walkthrough"
+                    logger.info(f"Walkthrough session detected: {session_id}")
+                ready_sessions[session_id] = session
+                logger.info(f"✅ Ready session: {session_id} ({session.get('completion_method', 'unknown')})")
+            else:
+                not_ready_sessions[session_id] = session
+                logger.info(f"⏳ Not ready: {session_id} (no completion indicator)")
+
+        logger.info(f"📊 Folder-based discovery complete: {len(ready_sessions)} ready, {len(not_ready_sessions)} not ready")
+        return ready_sessions, not_ready_sessions
+
+    else:
+        logger.info(f"🔍 Using LEGACY session discovery in {container_name}/{input_prefix}")
+        return discover_sessions_basic_legacy(blob_service_client, container_name, input_prefix)
+
+
+def mark_last_chunks_for_session(session: Dict):
+    """
+    Mark the last chunks in a session based on chunk numbers.
+    """
+    # Video: mark only the max chunk_number as last
+    v_nums = [c.get("chunk_number") for c in session.get("video_chunks", []) if isinstance(c.get("chunk_number"), int)]
+    if v_nums:
+        v_max = max(v_nums)
+        for c in session["video_chunks"]:
+            c["is_last_chunk"] = (c.get("chunk_number") == v_max)
+
+    # Audio: mark only the max chunk_number as last
+    a_nums = [c.get("chunk_number") for c in session.get("audio_chunks", []) if isinstance(c.get("chunk_number"), int)]
+    if a_nums:
+        a_max = max(a_nums)
+        for c in session["audio_chunks"]:
+            c["is_last_chunk"] = (c.get("chunk_number") == a_max)
+
 
 class BasicDownloadManager:
     """
