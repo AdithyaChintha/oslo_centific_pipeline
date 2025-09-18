@@ -5613,7 +5613,7 @@ if __name__ == "__main__":
     
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Ray Pipeline with Integrated Blob Polling")
-    parser.add_argument("--mode", choices=["integrated", "standalone", "multi_chunks", "multi_sessions", "blob_polling"], default="multi_chunks",
+    parser.add_argument("--mode", choices=["integrated", "standalone", "multi_chunks", "multi_sessions", "blob_polling"], default="blob_polling",
                        help="Run mode: 'integrated' for blob polling + pipeline, 'standalone' for direct pipeline, 'multi_chunks' for single session, 'multi_sessions' for multiple sessions, 'blob_polling' for continuous blob polling (default: blob_polling)")
     parser.add_argument("--azure-config", default="blobfuse2_config.yaml",
                        help="Azure configuration file path")
