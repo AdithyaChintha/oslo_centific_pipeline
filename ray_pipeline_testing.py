@@ -2103,7 +2103,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
         
         logger.info(f"🎬 Dynamic ERP and audio processing completed for session: {session_id}")
         # =================================================================
-        import_consolidated_tasks_to_labelstudio(label_studio_tasks,pipeline_config)
+        import_consolidated_tasks_to_labelstudio(label_studio_tasks,pipeline_config, is_walkthrough)
         
         # Mark session as completed
         tracker.mark_session_complete()
@@ -2394,7 +2394,7 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
             audio_urls = {}
             view_shard_urls = {}
 
-        import_consolidated_tasks_to_labelstudio(label_studio_tasks,pipeline_config)
+        import_consolidated_tasks_to_labelstudio(label_studio_tasks,pipeline_config, False)
         # if azure_blob_client and azure_container:
         #     video_name_for_upload = os.path.basename(output_dir)
         #     upload_result = upload_output_directory_to_blob(
@@ -2537,7 +2537,7 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
             logger.warning("⚠️ Azure configuration missing - Label Studio tasks will have placeholder URLs")
             view1_shard_urls, view2_shard_urls, audio_shard_urls = {}, {}, {}
         # Import consolidated tasks to Label Studio
-        import_consolidated_tasks_to_labelstudio(label_studio_tasks,pipeline_config)
+        import_consolidated_tasks_to_labelstudio(label_studio_tasks,pipeline_config, False)
         
         # Upload output directory to Azure blob storage
         # if azure_blob_client and azure_container:
@@ -5201,7 +5201,7 @@ def _process_single_view(
     else:
         logger.warning(" Azure configuration missing - Label Studio tasks will have placeholder URLs")  
         video_urls, audio_urls = {}, {}
-        import_consolidated_tasks_to_labelstudio(label_studio_tasks, pipeline_config)
+        import_consolidated_tasks_to_labelstudio(label_studio_tasks, pipeline_config, False)
 
     # Upload output directory to Azure blob storage
     # if azure_blob_client and azure_container:
