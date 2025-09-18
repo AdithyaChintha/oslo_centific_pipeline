@@ -1,0 +1,1305 @@
+{
+  "original_video_id": "15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough",
+  "total_shards": 2,
+  "consolidated_shards": [
+    1,
+    2
+  ],
+  "status": "completed",
+  "shards": {
+    "shard_1": {
+      "shard_number": 1,
+      "data": {
+        "meta": "",
+        "audio": "",
+        "home_id": "15",
+        "video_top": "",
+        "video_left": "",
+        "video_name": "15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough",
+        "video_right": "",
+        "end_datetime": "",
+        "meta.actions": "",
+        "shard_number": 1,
+        "total_shards": 2,
+        "video_bottom": "",
+        "files_deleted": [],
+        "metadata_room": "Bedroom",
+        "start_datetime": "",
+        "total_duration": "",
+        "metadata_domain": "Walkthrough",
+        "processing_type": "",
+        "successful_views": 0,
+        "AI_PII_prediction": "",
+        "metadata_activity": "Day Walkthrough",
+        "metadata_lighting": "",
+        "segments_detected": "",
+        "AI_NSFW_prediction": "",
+        "AI_minor_prediction": "",
+        "AI_predicted_domain": "",
+        "AI_signal_prediction": "",
+        "meta.home_identifier": "",
+        "metadata_participant": 0,
+        "shard_offset_seconds": "",
+        "AI_predicted_activity": "",
+        "total_views_processed": 0,
+        "AI_lighting_prediction": "",
+        "AI_sensitive_prediction": "",
+        "meta.recording_datetime": "",
+        "video_level_domain_applied": false,
+        "video_level_activity_applied": false,
+        "AI_prediction_absent_participant": "",
+        "AI_prediction_participants_number": "",
+        "video_level_classification_timestamp": ""
+      },
+      "predictions": [
+        {
+          "id": 5307,
+          "result": [
+            {
+              "id": "people_count_summary_koL8RD",
+              "type": "people_analytics",
+              "value": {
+                "unique_people": 10,
+                "processing_view": "erp",
+                "max_simultaneous": 3,
+                "detection_approach": "erp_single_view_360",
+                "occupancy_timeline": [
+                  {
+                    "end": 1.0,
+                    "start": 0.0,
+                    "avg_people": 1,
+                    "max_people": 1,
+                    "end_ts": "00:00:01.000",
+                    "start_ts": "00:00:00.000"
+                  },
+                  {
+                    "end": 2.0,
+                    "start": 1.0,
+                    "avg_people": 1,
+                    "max_people": 1,
+                    "end_ts": "00:00:02.000",
+                    "start_ts": "00:00:01.000"
+                  }
+                ]
+              },
+              "to_name": "video_left",
+              "from_name": "people_counter",
+              "model_version": "yolo_people_counter_v1"
+            },
+            {
+              "id": "occupancy_timeline_jCflA0",
+              "type": "occupancy_data",
+              "value": {
+                "timeline": [
+                  {
+                    "end": 1.0,
+                    "start": 0.0,
+                    "avg_people": 1,
+                    "max_people": 1,
+                    "end_ts": "00:00:01.000",
+                    "start_ts": "00:00:00.000"
+                  },
+                  {
+                    "end": 2.0,
+                    "start": 1.0,
+                    "avg_people": 1,
+                    "max_people": 1,
+                    "end_ts": "00:00:02.000",
+                    "start_ts": "00:00:01.000"
+                  }
+                ],
+                "total_bins": 60,
+                "bin_size_sec": 1
+              },
+              "to_name": "video_left",
+              "from_name": "occupancy_timeline",
+              "model_version": "yolo_occupancy_tracker_v1"
+            },
+            {
+              "id": "consolidated_model_results",
+              "type": "model_results",
+              "value": {
+                "sensitive": [
+                  {
+                    "summary": {
+                      "confidence": 1,
+                      "sensitive_topics": [],
+                      "has_sensitive_content": false,
+                      "sensitive_topics_count": 0
+                    },
+                    "shard_name": "15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_day-walkthrough_20250906T00:00:00.000Z100600_01_audio_part0",
+                    "shard_path": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/audio_shards/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_day-walkthrough_20250906T00:00:00.000Z100600_01_audio_part0.wav",
+                    "transcript": "This is task 2 during the day time.",
+                    "processing_stats": {
+                      "timestamp": "2025-09-15T11:25:29.118096",
+                      "device_used": "cpu",
+                      "total_processing_time": 0.329158
+                    },
+                    "transcript_length": 35,
+                    "sensitive_analysis": {
+                      "analysis": "No sensitive topics",
+                      "confidence": 1,
+                      "sensitive_topics": [],
+                      "has_sensitive_content": false
+                    },
+                    "sensitive_detections": []
+                  }
+                ],
+                "view_results": {
+                  "erp": {
+                    "clap": {},
+                    "face": {},
+                    "nsfw": {},
+                    "yolo": {
+                      "fps": 29.97002997002997,
+                      "video": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/erp_shards/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_day-walkthrough_20250906T00:00:00.000Z100600_01_video_ERP_4096x2048_part0.mp4",
+                      "num_events": 5691,
+                      "spans_jsonl": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/shard_1/erp/yolo_output/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_day-walkthrough_20250906T00:00:00.000Z100600_01_video_ERP_4096x2048_part0_people_presence.json",
+                      "events_jsonl": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/shard_1/erp/yolo_output/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_day-walkthrough_20250906T00:00:00.000Z100600_01_video_ERP_4096x2048_part0_yolo_events.jsonl",
+                      "video_duration": 180.01316666666668,
+                      "people_presence": {
+                        "tracks": [
+                          {
+                            "spans": [
+                              {
+                                "end": 56.757,
+                                "start": 0.0,
+                                "end_ts": "00:00:56.757",
+                                "frames": 1666,
+                                "start_ts": "00:00:00.000"
+                              }
+                            ],
+                            "track_id": 1
+                          },
+                          {
+                            "spans": [
+                              {
+                                "end": 17.918,
+                                "start": 17.784,
+                                "end_ts": "00:00:17.918",
+                                "frames": 4,
+                                "start_ts": "00:00:17.784"
+                              }
+                            ],
+                            "track_id": 5
+                          }
+                        ],
+                        "summary": {
+                          "total_spans": 42,
+                          "total_tracks": 42,
+                          "people_number": 10,
+                          "min_duration_sec": 3
+                        }
+                      },
+                      "detections_count": 0,
+                      "people_analytics": {
+                        "bin_size_sec": 1,
+                        "count_summary": {
+                          "bins": 178,
+                          "unique_id": 42,
+                          "avg_of_avg": 1.153,
+                          "max_of_max": 3,
+                          "bin_size_sec": 1,
+                          "unique_people": 10,
+                          "min_duration_sec": 3
+                        },
+                        "timeline_bins": [
+                          {
+                            "end": 1.0,
+                            "start": 0.0,
+                            "end_ts": "00:00:01.000",
+                            "frames": 30,
+                            "start_ts": "00:00:00.000",
+                            "bin_index": 0,
+                            "avg_persons": 1,
+                            "max_persons": 1
+                          },
+                          {
+                            "end": 2.0,
+                            "start": 1.0,
+                            "end_ts": "00:00:02.000",
+                            "frames": 30,
+                            "start_ts": "00:00:01.000",
+                            "bin_index": 1,
+                            "avg_persons": 1,
+                            "max_persons": 1
+                          }
+                        ]
+                      },
+                      "people_count_json": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/shard_1/erp/yolo_output/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_day-walkthrough_20250906T00:00:00.000Z100600_01_video_ERP_4096x2048_part0_people_count_bins.json"
+                    },
+                    "audio": {},
+                    "scene": {},
+                    "motion": {},
+                    "success": true,
+                    "sensitive": {},
+                    "signal_quality": {},
+                    "flagged_segments": []
+                  },
+                  "back": {
+                    "clap": {
+                      "audio_results": {
+                        "success": true,
+                        "file_path": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/audio_shards/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_day-walkthrough_20250906T00:00:00.000Z100600_01_audio_part0.wav",
+                        "file_type": "audio",
+                        "sample_rate": 48000,
+                        "clap_timestamp": 4.31,
+                        "clap_confidence": 0.894,
+                        "candidates_found": 1,
+                        "duration_seconds": 30,
+                        "detection_parameters": {
+                          "threshold": 0.526,
+                          "clap_score_std": 0.117,
+                          "clap_score_mean": 0.234
+                        }
+                      },
+                      "video_results": {
+                        "success": true,
+                        "file_path": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/back_shards/back_1440x1440_part0.mp4",
+                        "file_type": "video",
+                        "sample_rate": 44100,
+                        "clap_timestamp": 2.64,
+                        "clap_confidence": 0.85,
+                        "candidates_found": 11,
+                        "duration_seconds": 30,
+                        "detection_parameters": {
+                          "threshold": 0.21,
+                          "clap_score_std": 0.069,
+                          "clap_score_mean": 0.038
+                        }
+                      },
+                      "combined_analysis": {
+                        "audio_clap": {
+                          "timestamp": 4.31,
+                          "confidence": 0.894,
+                          "original_audio_blob_url": null,
+                          "original_audio_blob_path": null,
+                          "original_full_audio_length": null
+                        },
+                        "video_clap": {
+                          "timestamp": 2.64,
+                          "confidence": 0.85,
+                          "original_video_length": null,
+                          "original_video_blob_url": null,
+                          "original_video_blob_path": null
+                        },
+                        "detected_clap": {
+                          "source": "audio",
+                          "timestamp": 4.31,
+                          "confidence": 0.894
+                        },
+                        "overall_success": true,
+                        "sources_processed": {
+                          "audio": true,
+                          "video": true
+                        }
+                      },
+                      "processing_metadata": {
+                        "audio_file": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/audio_shards/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_day-walkthrough_20250906T00:00:00.000Z100600_01_audio_part0.wav",
+                        "video_file": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/back_shards/back_1440x1440_part0.mp4",
+                        "output_file": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/shard_1/back/clap_output/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_day-walkthrough_20250906T00:00:00.000Z100600_01_audio_part0_combined_clap_detection.json",
+                        "processed_at": "2025-09-15T11:27:13.632824",
+                        "search_window_seconds": 30,
+                        "processing_time_seconds": 1.48
+                      }
+                    },
+                    "face": {
+                      "success": true,
+                      "chunks_processed": 1,
+                      "flagged_segments": [
+                        {
+                          "end_time": 179.0,
+                          "metadata": {
+                            "duration": 179,
+                            "age_stats": {
+                              "avg_age": null,
+                              "max_age": null,
+                              "min_age": null
+                            },
+                            "max_faces": 1,
+                            "frame_count": 180,
+                            "potential_minors": 0,
+                            "race_distribution": {},
+                            "detailed_face_data": [
+                              {
+                                "timestamp": 0.0,
+                                "face_analysis": {
+                                  "age": 25,
+                                  "gender_label": "Man",
+                                  "gender_scores": {
+                                    "Man": 91.90847778320312,
+                                    "Woman": 8.091522216796875
+                                  }
+                                }
+                              },
+                              {
+                                "timestamp": 1.0,
+                                "face_analysis": {
+                                  "age": 25,
+                                  "gender_label": "Man",
+                                  "gender_scores": {
+                                    "Man": 91.2650146484375,
+                                    "Woman": 8.734989166259766
+                                  }
+                                }
+                              }
+                            ],
+                            "gender_distribution": {},
+                            "emotion_distribution": {}
+                          },
+                          "priority": "low",
+                          "flag_type": "face_detected",
+                          "task_type": "face_detection",
+                          "confidence": 0.9,
+                          "start_time": 0.0,
+                          "description": "Face detection: 1 faces",
+                          "end_ts": "00:02:59.000",
+                          "start_ts": "00:00:00.000"
+                        }
+                      ],
+                      "total_faces_detected": 180,
+                      "total_processed_frames": 180,
+                      "detailed_analysis_summary": {
+                        "age_distribution": {
+                          "adults": 180,
+                          "minors": 0,
+                          "seniors": 0
+                        },
+                        "frames_with_faces": 180,
+                        "race_distribution": {},
+                        "total_unique_faces": 180,
+                        "gender_distribution": {
+                          "Man": 180
+                        },
+                        "emotion_distribution": {}
+                      },
+                      "total_processing_time_seconds": 28.92535090446472
+                    },
+                    "nsfw": {
+                      "success": true,
+                      "model_path": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/nsfw_model/model.onnx",
+                      "labels_path": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/nsfw_model/labels.json",
+                      "nsfw_timestamps": [
+                        {
+                          "frame": 570,
+                          "timestamp": 19.02,
+                          "chunk_file": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/back_shards/back_1440x1440_part0.mp4",
+                          "confidence": 1.1991,
+                          "prediction": "nsfw"
+                        },
+                        {
+                          "frame": 1560,
+                          "timestamp": 52.05,
+                          "chunk_file": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/back_shards/back_1440x1440_part0.mp4",
+                          "confidence": 1.3192,
+                          "prediction": "nsfw"
+                        }
+                      ],
+                      "successful_chunks": 1,
+                      "total_nsfw_detections": 22,
+                      "total_processing_time_seconds": 27.36
+                    },
+                    "yolo": {},
+                    "audio": [
+                      {
+                        "summary": {
+                          "total_segments": 1,
+                          "total_speakers": 1,
+                          "segments_with_pii": 0,
+                          "total_pii_detections": 0
+                        },
+                        "shard_name": "15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_day-walkthrough_20250906T00:00:00.000Z100600_01_audio_part0.wav",
+                        "shard_path": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/audio_shards/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_day-walkthrough_20250906T00:00:00.000Z100600_01_audio_part0.wav",
+                        "transcript": "This is task 2 during the day time.",
+                        "diarization": [
+                          {
+                            "speaker": "Speaker 1",
+                            "duration": 2.733749999999999,
+                            "end_time": 9.21096875,
+                            "start_time": 6.4772187500000005,
+                            "end_ts": "00:00:09.211",
+                            "start_ts": "00:00:06.477"
+                          }
+                        ],
+                        "audio_duration": 180,
+                        "pii_detections": [],
+                        "processing_stats": {
+                          "device_used": "cpu",
+                          "diarization_time": 13.89821,
+                          "transcription_time": 1.874335,
+                          "total_processing_time": 18.059764
+                        }
+                      }
+                    ],
+                    "scene": {
+                      "scenes": [
+                        {
+                          "end_time": 60.0,
+                          "start_time": 0.0,
+                          "description": "```json\n[\n  {\n    \"start_time\": 0.0,\n    \"end_time\": 24.87,\n    \"caption\": \"The video starts off with a closeup shot of a cluttered desk with several items scattered across it, including a computer monitor, mousepad, mouse, keyboard, and other small accessories like a USB drive and a power bank.\"\n  },\n  {\n    \"start_time\": 24.87,\n    \"end_time\": 36.59,\n    \"caption\": \"The camera then pans up to reveal a microphone positioned on the desk, along with some cables and a can of beverage nearby.\"\n  },\n  {\n    \"start_time\": 36.59,\n    \"end_time\": 105.82,\n    \"caption\": \"As the camera continues panning further into the room, it captures various corners of the space filled with stuffed toys, plushies, books, and decorative items.\"\n  },\n  {\n    \"start_time\": 105.82,\n    \"end_time\": 190.35,\n    \"caption\": \"Finally, the camera settles on a dining area with a table set against a window covered by blinds, allowing natural light to filter through.\"",
+                          "end_ts": "00:01:00.000",
+                          "start_ts": "00:00:00.000"
+                        }
+                      ],
+                      "video_path": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/back_shards/back_1440x1440_part0.mp4",
+                      "raw_response": "```json\n[\n  {\n    \"start_time\": 0.0,\n    \"end_time\": 24.87,\n    \"caption\": \"The video starts off with a closeup shot of a cluttered desk with several items scattered across it, including a computer monitor, mousepad, mouse, keyboard, and other small accessories like a USB drive and a power bank.\"\n  },\n  {\n    \"start_time\": 24.87,\n    \"end_time\": 36.59,\n    \"caption\": \"The camera then pans up to reveal a microphone positioned on the desk, along with some cables and a can of beverage nearby.\"\n  },\n  {\n    \"start_time\": 36.59,\n    \"end_time\": 105.82,\n    \"caption\": \"As the camera continues panning further into the room, it captures various corners of the space filled with stuffed toys, plushies, books, and decorative items.\"\n  },\n  {\n    \"start_time\": 105.82,\n    \"end_time\": 190.35,\n    \"caption\": \"Finally, the camera settles on a dining area with a table set against a window covered by blinds, allowing natural light to filter through.\"",
+                      "total_scenes": 1,
+                      "processing_info": {
+                        "model": "nvidia/Cosmos-Reason1-7B",
+                        "success": true,
+                        "max_model_len": 6144,
+                        "scenes_extracted": 1,
+                        "gpu_memory_utilization": 0.25
+                      }
+                    },
+                    "motion": {
+                      "success": true,
+                      "segments": [
+                        {
+                          "duration": 3.4701333333333335,
+                          "end_time": 21.187833333333334,
+                          "confidence": 0.36622033723459746,
+                          "start_time": 17.7177,
+                          "activity_type": "HIGH_ACTIVITY",
+                          "avg_motion_energy": 0.3234390663951211,
+                          "end_ts": "00:00:21.188",
+                          "start_ts": "00:00:17.718"
+                        },
+                        {
+                          "duration": 4.237566666666667,
+                          "end_time": 35.869166666666665,
+                          "confidence": 0.42900835941201865,
+                          "start_time": 31.6316,
+                          "activity_type": "HIGH_ACTIVITY",
+                          "avg_motion_energy": 0.21518537656751238,
+                          "end_ts": "00:00:35.869",
+                          "start_ts": "00:00:31.632"
+                        }
+                      ],
+                      "video_path": "combined_shards",
+                      "total_segments": 9,
+                      "motion_statistics": {
+                        "avg_motion_energy": 0,
+                        "total_motion_energy": 0
+                      },
+                      "video_duration_seconds": 180.01316666666668,
+                      "processing_time_seconds": 10.191263675689697
+                    },
+                    "success": true,
+                    "lighting": {
+                      "confidence": 0.555,
+                      "events_file": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/shard_1/back/lighting_output/back_1440x1440_part0_lighting_events.json",
+                      "per_second_file": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/shard_1/back/lighting_output/back_1440x1440_part0_lighting_per_second.json",
+                      "dominant_lighting": "Normal"
+                    },
+                    "sensitive": [
+                      {
+                        "summary": {
+                          "confidence": 1,
+                          "sensitive_topics": [],
+                          "has_sensitive_content": false,
+                          "sensitive_topics_count": 0
+                        },
+                        "shard_name": "15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_day-walkthrough_20250906T00:00:00.000Z100600_01_audio_part0",
+                        "shard_path": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/audio_shards/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_day-walkthrough_20250906T00:00:00.000Z100600_01_audio_part0.wav",
+                        "transcript": "This is task 2 during the day time.",
+                        "processing_stats": {
+                          "timestamp": "2025-09-15T11:28:54.963065",
+                          "device_used": "cpu",
+                          "total_processing_time": 0.325
+                        },
+                        "transcript_length": 35,
+                        "sensitive_analysis": {
+                          "analysis": "No sensitive topics",
+                          "confidence": 1,
+                          "sensitive_topics": [],
+                          "has_sensitive_content": false
+                        },
+                        "sensitive_detections": []
+                      }
+                    ],
+                    "signal_quality": {
+                      "video_path": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/back_shards/back_1440x1440_part0.mp4",
+                      "blur_segments": [
+                        {
+                          "end_time": 34.83,
+                          "start_time": 33.87,
+                          "end_ts": "00:00:34.830",
+                          "start_ts": "00:00:33.870"
+                        }
+                      ],
+                      "black_segments": []
+                    },
+                    "flagged_segments": [
+                      {
+                        "end_time": 60.0,
+                        "priority": "medium",
+                        "flag_type": "scene_content",
+                        "task_type": "scene_detection",
+                        "confidence": 0.8,
+                        "start_time": 0.0,
+                        "description": "```json\n[\n  {\n    \"start_time\": 0.0,\n    \"end_time\": 24.87,\n    \"caption\": \"The video starts off with a closeup shot of a cluttered desk with several items scattered across it, including a computer mo",
+                        "shard_index": 1,
+                        "end_ts": "00:01:00.000",
+                        "start_ts": "00:00:00.000"
+                      },
+                      {
+                        "end_time": 24.02,
+                        "priority": "high",
+                        "flag_type": "nsfw_content",
+                        "task_type": "nsfw_detection",
+                        "confidence": 1.1991,
+                        "start_time": 14.02,
+                        "description": "NSFW content detected",
+                        "shard_index": 1,
+                        "end_ts": "00:00:24.020",
+                        "start_ts": "00:00:14.020"
+                      }
+                    ]
+                  }
+                },
+                "people_summary": {
+                  "processing_approach": "multi_view",
+                  "total_unique_people": 10,
+                  "total_views_processed": 5,
+                  "max_simultaneous_people": 3,
+                  "avg_occupancy_across_views": 1.153,
+                  "views_with_people_detected": 1
+                },
+                "detection_flags": {
+                  "shard_type": "first",
+                  "shard_index": 0,
+                  "is_last_shard": false,
+                  "is_first_shard": true,
+                  "processing_type": "multi_view_equal_processing",
+                  "intro_transcript": "This is task 2 during the day time.",
+                  "successful_views": 5,
+                  "total_views_processed": 5,
+                  "is_last_shard_processed": false,
+                  "is_first_shard_processed": true,
+                  "is_intro_statement_there": true,
+                  "clap_detected_in_last_shard": false,
+                  "clap_detected_in_first_shard": false
+                }
+              },
+              "to_name": "data",
+              "from_name": "model_results",
+              "model_version": "consolidated_v1.0"
+            }
+          ],
+          "created_at": "2025-09-15T11:48:40.123846Z",
+          "updated_at": "2025-09-15T11:48:40.123857Z"
+        }
+      ],
+      "annotations": [
+        {
+          "id": 1,
+          "result": [
+            {
+              "id": "min_1",
+              "type": "choices",
+              "from_name": "val_pii_audio",
+              "to_name": "audio_main",
+              "value": {
+                "choices": [
+                  "Yes"
+                ]
+              }
+            },
+            {
+              "id": "min_2",
+              "type": "taxonomy",
+              "from_name": "domain_start_minute",
+              "to_name": "video_left",
+              "value": {
+                "taxonomy": [
+                  [
+                    "00"
+                  ]
+                ]
+              }
+            },
+            {
+              "id": "second_1",
+              "type": "taxonomy",
+              "from_name": "domain_start_second",
+              "to_name": "video_left",
+              "value": {
+                "taxonomy": [
+                  [
+                    "06"
+                  ]
+                ]
+              }
+            },
+            {
+              "id": "min_3",
+              "type": "labels",
+              "from_name": "audio_labels",
+              "to_name": "audio_main",
+              "value": {
+                "start": 1.0,
+                "end": 2.0,
+                "labels": [
+                  "Minimal Label"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "shard_2": {
+      "shard_number": 2,
+      "data": {
+        "meta": "",
+        "audio": "",
+        "home_id": "15",
+        "video_top": "",
+        "video_left": "",
+        "video_name": "15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough",
+        "video_right": "",
+        "end_datetime": "",
+        "meta.actions": "",
+        "shard_number": 2,
+        "total_shards": 2,
+        "video_bottom": "",
+        "files_deleted": [],
+        "metadata_room": "Bedroom",
+        "start_datetime": "",
+        "total_duration": "",
+        "metadata_domain": "Walkthrough",
+        "processing_type": "",
+        "successful_views": 0,
+        "AI_PII_prediction": "",
+        "metadata_activity": "Day Walkthrough",
+        "metadata_lighting": "",
+        "segments_detected": "",
+        "AI_NSFW_prediction": "",
+        "AI_minor_prediction": "",
+        "AI_predicted_domain": "",
+        "AI_signal_prediction": "",
+        "meta.home_identifier": "",
+        "metadata_participant": 0,
+        "shard_offset_seconds": "",
+        "AI_predicted_activity": "",
+        "total_views_processed": 0,
+        "AI_lighting_prediction": "",
+        "AI_sensitive_prediction": "",
+        "meta.recording_datetime": "",
+        "video_level_domain_applied": false,
+        "video_level_activity_applied": false,
+        "AI_prediction_absent_participant": "",
+        "AI_prediction_participants_number": "",
+        "video_level_classification_timestamp": ""
+      },
+      "predictions": [
+        {
+          "id": 5307,
+          "result": [
+            {
+              "id": "people_count_summary_koL8RD",
+              "type": "people_analytics",
+              "value": {
+                "unique_people": 10,
+                "processing_view": "erp",
+                "max_simultaneous": 3,
+                "detection_approach": "erp_single_view_360",
+                "occupancy_timeline": [
+                  {
+                    "end": 121.0,
+                    "start": 120.0,
+                    "avg_people": 1,
+                    "max_people": 1,
+                    "end_ts": "00:02:01.000",
+                    "start_ts": "00:02:00.000"
+                  },
+                  {
+                    "end": 122.0,
+                    "start": 121.0,
+                    "avg_people": 1,
+                    "max_people": 1,
+                    "end_ts": "00:02:02.000",
+                    "start_ts": "00:02:01.000"
+                  }
+                ]
+              },
+              "to_name": "video_left",
+              "from_name": "people_counter",
+              "model_version": "yolo_people_counter_v1"
+            },
+            {
+              "id": "occupancy_timeline_jCflA0",
+              "type": "occupancy_data",
+              "value": {
+                "timeline": [
+                  {
+                    "end": 121.0,
+                    "start": 120.0,
+                    "avg_people": 1,
+                    "max_people": 1,
+                    "end_ts": "00:02:01.000",
+                    "start_ts": "00:02:00.000"
+                  },
+                  {
+                    "end": 122.0,
+                    "start": 121.0,
+                    "avg_people": 1,
+                    "max_people": 1,
+                    "end_ts": "00:02:02.000",
+                    "start_ts": "00:02:01.000"
+                  }
+                ],
+                "total_bins": 60,
+                "bin_size_sec": 1
+              },
+              "to_name": "video_left",
+              "from_name": "occupancy_timeline",
+              "model_version": "yolo_occupancy_tracker_v1"
+            },
+            {
+              "id": "consolidated_model_results",
+              "type": "model_results",
+              "value": {
+                "sensitive": [
+                  {
+                    "summary": {
+                      "confidence": 1,
+                      "sensitive_topics": [],
+                      "has_sensitive_content": false,
+                      "sensitive_topics_count": 0
+                    },
+                    "shard_name": "15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_day-walkthrough_20250906T00:00:00.000Z100600_01_audio_part0",
+                    "shard_path": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/audio_shards/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_day-walkthrough_20250906T00:00:00.000Z100600_01_audio_part0.wav",
+                    "transcript": "This is task 2 during the day time.",
+                    "processing_stats": {
+                      "timestamp": "2025-09-15T11:25:29.118096",
+                      "device_used": "cpu",
+                      "total_processing_time": 0.329158
+                    },
+                    "transcript_length": 35,
+                    "sensitive_analysis": {
+                      "analysis": "No sensitive topics",
+                      "confidence": 1,
+                      "sensitive_topics": [],
+                      "has_sensitive_content": false
+                    },
+                    "sensitive_detections": []
+                  }
+                ],
+                "shard_info": {
+                  "shard_id": 1,
+                  "timestamp": "2025-09-15T11:30:44.338245Z",
+                  "video_name": "15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough",
+                  "shard_number": 1,
+                  "total_shards": 2,
+                  "processing_type": "multi_view_unwarped_equal",
+                  "successful_views": 5,
+                  "total_views_processed": 5
+                },
+                "view_results": {
+                  "erp": {
+                    "clap": {},
+                    "face": {},
+                    "nsfw": {},
+                    "yolo": {
+                      "fps": 29.97002997002997,
+                      "video": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/erp_shards/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_day-walkthrough_20250906T00:00:00.000Z100600_01_video_ERP_4096x2048_part0.mp4",
+                      "num_events": 5691,
+                      "spans_jsonl": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/shard_1/erp/yolo_output/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_day-walkthrough_20250906T00:00:00.000Z100600_01_video_ERP_4096x2048_part0_people_presence.json",
+                      "events_jsonl": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/shard_1/erp/yolo_output/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_day-walkthrough_20250906T00:00:00.000Z100600_01_video_ERP_4096x2048_part0_yolo_events.jsonl",
+                      "video_duration": 180.01316666666668,
+                      "people_presence": {
+                        "tracks": [
+                          {
+                            "spans": [
+                              {
+                                "end": 176.757,
+                                "start": 120.0,
+                                "end_ts": "00:02:56.757",
+                                "frames": 1666,
+                                "start_ts": "00:02:00.000"
+                              }
+                            ],
+                            "track_id": 1
+                          },
+                          {
+                            "spans": [
+                              {
+                                "end": 137.918,
+                                "start": 137.784,
+                                "end_ts": "00:02:17.918",
+                                "frames": 4,
+                                "start_ts": "00:02:17.784"
+                              }
+                            ],
+                            "track_id": 5
+                          }
+                        ],
+                        "summary": {
+                          "total_spans": 42,
+                          "total_tracks": 42,
+                          "people_number": 10,
+                          "min_duration_sec": 3
+                        }
+                      },
+                      "detections_count": 0,
+                      "people_analytics": {
+                        "bin_size_sec": 1,
+                        "count_summary": {
+                          "bins": 178,
+                          "unique_id": 42,
+                          "avg_of_avg": 1.153,
+                          "max_of_max": 3,
+                          "bin_size_sec": 1,
+                          "unique_people": 10,
+                          "min_duration_sec": 3
+                        },
+                        "timeline_bins": [
+                          {
+                            "end": 121.0,
+                            "start": 120.0,
+                            "end_ts": "00:02:01.000",
+                            "frames": 30,
+                            "start_ts": "00:02:00.000",
+                            "bin_index": 0,
+                            "avg_persons": 1,
+                            "max_persons": 1
+                          },
+                          {
+                            "end": 122.0,
+                            "start": 121.0,
+                            "end_ts": "00:02:02.000",
+                            "frames": 30,
+                            "start_ts": "00:02:01.000",
+                            "bin_index": 1,
+                            "avg_persons": 1,
+                            "max_persons": 1
+                          }
+                        ]
+                      },
+                      "people_count_json": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/shard_1/erp/yolo_output/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_day-walkthrough_20250906T00:00:00.000Z100600_01_video_ERP_4096x2048_part0_people_count_bins.json"
+                    },
+                    "audio": {},
+                    "scene": {},
+                    "motion": {},
+                    "success": true,
+                    "sensitive": {},
+                    "signal_quality": {},
+                    "flagged_segments": []
+                  },
+                  "back": {
+                    "clap": {
+                      "audio_results": {
+                        "success": true,
+                        "file_path": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/audio_shards/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_day-walkthrough_20250906T00:00:00.000Z100600_01_audio_part0.wav",
+                        "file_type": "audio",
+                        "sample_rate": 48000,
+                        "clap_timestamp": 124.31,
+                        "clap_confidence": 0.894,
+                        "candidates_found": 1,
+                        "duration_seconds": 30,
+                        "detection_parameters": {
+                          "threshold": 0.526,
+                          "clap_score_std": 0.117,
+                          "clap_score_mean": 0.234
+                        }
+                      },
+                      "video_results": {
+                        "success": true,
+                        "file_path": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/back_shards/back_1440x1440_part0.mp4",
+                        "file_type": "video",
+                        "sample_rate": 44100,
+                        "clap_timestamp": 122.64,
+                        "clap_confidence": 0.85,
+                        "candidates_found": 11,
+                        "duration_seconds": 30,
+                        "detection_parameters": {
+                          "threshold": 0.21,
+                          "clap_score_std": 0.069,
+                          "clap_score_mean": 0.038
+                        }
+                      },
+                      "combined_analysis": {
+                        "audio_clap": {
+                          "timestamp": 124.31,
+                          "confidence": 0.894,
+                          "original_audio_blob_url": null,
+                          "original_audio_blob_path": null,
+                          "original_full_audio_length": null
+                        },
+                        "video_clap": {
+                          "timestamp": 122.64,
+                          "confidence": 0.85,
+                          "original_video_length": null,
+                          "original_video_blob_url": null,
+                          "original_video_blob_path": null
+                        },
+                        "detected_clap": {
+                          "source": "audio",
+                          "timestamp": 124.31,
+                          "confidence": 0.894
+                        },
+                        "overall_success": true,
+                        "sources_processed": {
+                          "audio": true,
+                          "video": true
+                        }
+                      },
+                      "processing_metadata": {
+                        "audio_file": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/audio_shards/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_day-walkthrough_20250906T00:00:00.000Z100600_01_audio_part0.wav",
+                        "video_file": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/back_shards/back_1440x1440_part0.mp4",
+                        "output_file": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/shard_1/back/clap_output/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_day-walkthrough_20250906T00:00:00.000Z100600_01_audio_part0_combined_clap_detection.json",
+                        "processed_at": "2025-09-15T11:27:13.632824",
+                        "search_window_seconds": 30,
+                        "processing_time_seconds": 1.48
+                      }
+                    },
+                    "face": {
+                      "success": true,
+                      "chunks_processed": 1,
+                      "flagged_segments": [
+                        {
+                          "end_time": 299.0,
+                          "metadata": {
+                            "duration": 179,
+                            "age_stats": {
+                              "avg_age": null,
+                              "max_age": null,
+                              "min_age": null
+                            },
+                            "max_faces": 1,
+                            "frame_count": 180,
+                            "potential_minors": 0,
+                            "race_distribution": {},
+                            "detailed_face_data": [
+                              {
+                                "timestamp": 120.0,
+                                "face_analysis": {
+                                  "age": 25,
+                                  "gender_label": "Man",
+                                  "gender_scores": {
+                                    "Man": 91.90847778320312,
+                                    "Woman": 8.091522216796875
+                                  }
+                                }
+                              },
+                              {
+                                "timestamp": 121.0,
+                                "face_analysis": {
+                                  "age": 25,
+                                  "gender_label": "Man",
+                                  "gender_scores": {
+                                    "Man": 91.2650146484375,
+                                    "Woman": 8.734989166259766
+                                  }
+                                }
+                              }
+                            ],
+                            "gender_distribution": {},
+                            "emotion_distribution": {}
+                          },
+                          "priority": "low",
+                          "flag_type": "face_detected",
+                          "task_type": "face_detection",
+                          "confidence": 0.9,
+                          "start_time": 120.0,
+                          "description": "Face detection: 1 faces",
+                          "end_ts": "00:04:59.000",
+                          "start_ts": "00:02:00.000"
+                        }
+                      ],
+                      "total_faces_detected": 180,
+                      "total_processed_frames": 180,
+                      "detailed_analysis_summary": {
+                        "age_distribution": {
+                          "adults": 180,
+                          "minors": 0,
+                          "seniors": 0
+                        },
+                        "frames_with_faces": 180,
+                        "race_distribution": {},
+                        "total_unique_faces": 180,
+                        "gender_distribution": {
+                          "Man": 180
+                        },
+                        "emotion_distribution": {}
+                      },
+                      "total_processing_time_seconds": 28.92535090446472
+                    },
+                    "nsfw": {
+                      "success": true,
+                      "model_path": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/nsfw_model/model.onnx",
+                      "labels_path": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/nsfw_model/labels.json",
+                      "nsfw_timestamps": [
+                        {
+                          "frame": 570,
+                          "timestamp": 139.02,
+                          "chunk_file": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/back_shards/back_1440x1440_part0.mp4",
+                          "confidence": 1.1991,
+                          "prediction": "nsfw"
+                        },
+                        {
+                          "frame": 1560,
+                          "timestamp": 172.05,
+                          "chunk_file": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/back_shards/back_1440x1440_part0.mp4",
+                          "confidence": 1.3192,
+                          "prediction": "nsfw"
+                        }
+                      ],
+                      "successful_chunks": 1,
+                      "total_nsfw_detections": 22,
+                      "total_processing_time_seconds": 27.36
+                    },
+                    "yolo": {},
+                    "audio": [
+                      {
+                        "summary": {
+                          "total_segments": 1,
+                          "total_speakers": 1,
+                          "segments_with_pii": 0,
+                          "total_pii_detections": 0
+                        },
+                        "shard_name": "15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_day-walkthrough_20250906T00:00:00.000Z100600_01_audio_part0.wav",
+                        "shard_path": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/audio_shards/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_day-walkthrough_20250906T00:00:00.000Z100600_01_audio_part0.wav",
+                        "transcript": "This is task 2 during the day time.",
+                        "diarization": [
+                          {
+                            "speaker": "Speaker 1",
+                            "duration": 2.733749999999999,
+                            "end_time": 129.21096875,
+                            "start_time": 126.47721875,
+                            "end_ts": "00:02:09.211",
+                            "start_ts": "00:02:06.477"
+                          }
+                        ],
+                        "audio_duration": 180,
+                        "pii_detections": [],
+                        "processing_stats": {
+                          "device_used": "cpu",
+                          "diarization_time": 13.89821,
+                          "transcription_time": 1.874335,
+                          "total_processing_time": 18.059764
+                        }
+                      }
+                    ],
+                    "scene": {
+                      "scenes": [
+                        {
+                          "end_time": 180.0,
+                          "start_time": 120.0,
+                          "description": "```json\n[\n  {\n    \"start_time\": 0.0,\n    \"end_time\": 24.87,\n    \"caption\": \"The video starts off with a closeup shot of a cluttered desk with several items scattered across it, including a computer monitor, mousepad, mouse, keyboard, and other small accessories like a USB drive and a power bank.\"\n  },\n  {\n    \"start_time\": 24.87,\n    \"end_time\": 36.59,\n    \"caption\": \"The camera then pans up to reveal a microphone positioned on the desk, along with some cables and a can of beverage nearby.\"\n  },\n  {\n    \"start_time\": 36.59,\n    \"end_time\": 105.82,\n    \"caption\": \"As the camera continues panning further into the room, it captures various corners of the space filled with stuffed toys, plushies, books, and decorative items.\"\n  },\n  {\n    \"start_time\": 105.82,\n    \"end_time\": 190.35,\n    \"caption\": \"Finally, the camera settles on a dining area with a table set against a window covered by blinds, allowing natural light to filter through.\"",
+                          "end_ts": "00:03:00.000",
+                          "start_ts": "00:02:00.000"
+                        }
+                      ],
+                      "video_path": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/back_shards/back_1440x1440_part0.mp4",
+                      "raw_response": "```json\n[\n  {\n    \"start_time\": 0.0,\n    \"end_time\": 24.87,\n    \"caption\": \"The video starts off with a closeup shot of a cluttered desk with several items scattered across it, including a computer monitor, mousepad, mouse, keyboard, and other small accessories like a USB drive and a power bank.\"\n  },\n  {\n    \"start_time\": 24.87,\n    \"end_time\": 36.59,\n    \"caption\": \"The camera then pans up to reveal a microphone positioned on the desk, along with some cables and a can of beverage nearby.\"\n  },\n  {\n    \"start_time\": 36.59,\n    \"end_time\": 105.82,\n    \"caption\": \"As the camera continues panning further into the room, it captures various corners of the space filled with stuffed toys, plushies, books, and decorative items.\"\n  },\n  {\n    \"start_time\": 105.82,\n    \"end_time\": 190.35,\n    \"caption\": \"Finally, the camera settles on a dining area with a table set against a window covered by blinds, allowing natural light to filter through.\"",
+                      "total_scenes": 1,
+                      "processing_info": {
+                        "model": "nvidia/Cosmos-Reason1-7B",
+                        "success": true,
+                        "max_model_len": 6144,
+                        "scenes_extracted": 1,
+                        "gpu_memory_utilization": 0.25
+                      }
+                    },
+                    "motion": {
+                      "success": true,
+                      "segments": [
+                        {
+                          "duration": 3.4701333333333335,
+                          "end_time": 141.18783333333334,
+                          "confidence": 0.36622033723459746,
+                          "start_time": 137.7177,
+                          "activity_type": "HIGH_ACTIVITY",
+                          "avg_motion_energy": 0.3234390663951211,
+                          "end_ts": "00:02:21.188",
+                          "start_ts": "00:02:17.718"
+                        },
+                        {
+                          "duration": 4.237566666666667,
+                          "end_time": 155.86916666666667,
+                          "confidence": 0.42900835941201865,
+                          "start_time": 151.6316,
+                          "activity_type": "HIGH_ACTIVITY",
+                          "avg_motion_energy": 0.21518537656751238,
+                          "end_ts": "00:02:35.869",
+                          "start_ts": "00:02:31.632"
+                        }
+                      ],
+                      "video_path": "combined_shards",
+                      "total_segments": 9,
+                      "motion_statistics": {
+                        "avg_motion_energy": 0,
+                        "total_motion_energy": 0
+                      },
+                      "video_duration_seconds": 180.01316666666668,
+                      "processing_time_seconds": 10.191263675689697
+                    },
+                    "success": true,
+                    "lighting": {
+                      "confidence": 0.555,
+                      "events_file": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/shard_1/back/lighting_output/back_1440x1440_part0_lighting_events.json",
+                      "per_second_file": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/shard_1/back/lighting_output/back_1440x1440_part0_lighting_per_second.json",
+                      "dominant_lighting": "Normal"
+                    },
+                    "sensitive": [
+                      {
+                        "summary": {
+                          "confidence": 1,
+                          "sensitive_topics": [],
+                          "has_sensitive_content": false,
+                          "sensitive_topics_count": 0
+                        },
+                        "shard_name": "15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_day-walkthrough_20250906T00:00:00.000Z100600_01_audio_part0",
+                        "shard_path": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/audio_shards/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_day-walkthrough_20250906T00:00:00.000Z100600_01_audio_part0.wav",
+                        "transcript": "This is task 2 during the day time.",
+                        "processing_stats": {
+                          "timestamp": "2025-09-15T11:28:54.963065",
+                          "device_used": "cpu",
+                          "total_processing_time": 0.325
+                        },
+                        "transcript_length": 35,
+                        "sensitive_analysis": {
+                          "analysis": "No sensitive topics",
+                          "confidence": 1,
+                          "sensitive_topics": [],
+                          "has_sensitive_content": false
+                        },
+                        "sensitive_detections": []
+                      }
+                    ],
+                    "signal_quality": {
+                      "video_path": "/home/nvcoe_admin/pavan/geo/insta360-video-activity-segmentation/outmain2withdn/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/back_shards/back_1440x1440_part0.mp4",
+                      "blur_segments": [
+                        {
+                          "end_time": 154.82999999999998,
+                          "start_time": 153.87,
+                          "end_ts": "00:02:34.830",
+                          "start_ts": "00:02:33.870"
+                        }
+                      ],
+                      "black_segments": []
+                    },
+                    "flagged_segments": [
+                      {
+                        "end_time": 180.0,
+                        "priority": "medium",
+                        "flag_type": "scene_content",
+                        "task_type": "scene_detection",
+                        "confidence": 0.8,
+                        "start_time": 120.0,
+                        "description": "```json\n[\n  {\n    \"start_time\": 0.0,\n    \"end_time\": 24.87,\n    \"caption\": \"The video starts off with a closeup shot of a cluttered desk with several items scattered across it, including a computer mo",
+                        "shard_index": 1,
+                        "end_ts": "00:03:00.000",
+                        "start_ts": "00:02:00.000"
+                      },
+                      {
+                        "end_time": 144.02,
+                        "priority": "high",
+                        "flag_type": "nsfw_content",
+                        "task_type": "nsfw_detection",
+                        "confidence": 1.1991,
+                        "start_time": 134.02,
+                        "description": "NSFW content detected",
+                        "shard_index": 1,
+                        "end_ts": "00:02:24.020",
+                        "start_ts": "00:02:14.020"
+                      }
+                    ]
+                  }
+                },
+                "people_summary": {
+                  "processing_approach": "multi_view",
+                  "total_unique_people": 10,
+                  "total_views_processed": 5,
+                  "max_simultaneous_people": 3,
+                  "avg_occupancy_across_views": 1.153,
+                  "views_with_people_detected": 1
+                },
+                "detection_flags": {
+                  "shard_type": "first",
+                  "shard_index": 0,
+                  "is_last_shard": false,
+                  "is_first_shard": true,
+                  "processing_type": "multi_view_equal_processing",
+                  "intro_transcript": "This is task 2 during the day time.",
+                  "successful_views": 5,
+                  "total_views_processed": 5,
+                  "is_last_shard_processed": false,
+                  "is_first_shard_processed": true,
+                  "is_intro_statement_there": true,
+                  "clap_detected_in_last_shard": false,
+                  "clap_detected_in_first_shard": false
+                }
+              },
+              "to_name": "data",
+              "from_name": "model_results",
+              "model_version": "consolidated_v1.0"
+            }
+          ],
+          "created_at": "2025-09-15T11:48:40.123846Z",
+          "updated_at": "2025-09-15T11:48:40.123857Z"
+        }
+      ],
+      "annotations": [
+        {
+          "id": 1,
+          "result": [
+            {
+              "id": "min_1",
+              "type": "choices",
+              "from_name": "val_pii_audio",
+              "to_name": "audio_main",
+              "value": {
+                "choices": [
+                  "Yes"
+                ]
+              }
+            },
+            {
+              "id": "min_2",
+              "type": "taxonomy",
+              "from_name": "activity_start_minute",
+              "to_name": "video_left",
+              "value": {
+                "taxonomy": [
+                  [
+                    "02"
+                  ]
+                ]
+              }
+            },
+            {
+              "id": "second_1",
+              "type": "taxonomy",
+              "from_name": "activity_start_second",
+              "to_name": "video_left",
+              "value": {
+                "taxonomy": [
+                  [
+                    "06"
+                  ]
+                ]
+              }
+            },
+            {
+              "id": "min_3",
+              "type": "labels",
+              "from_name": "audio_labels",
+              "to_name": "audio_main",
+              "value": {
+                "start": 121.0,
+                "end": 122.0,
+                "labels": [
+                  "Minimal Label"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

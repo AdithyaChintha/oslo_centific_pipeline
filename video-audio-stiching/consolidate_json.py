@@ -417,7 +417,7 @@ class ConsolidationPipeline:
             "start", "end", "start_time", "end_time",
             "clap_timestamp", "timestamp_seconds", "timestamp"
         }
-        array_time_keys = {"nsfw_timestamps"}
+        array_time_keys = {} 
         ts_string_keys = {"start_ts", "end_ts"}
 
         counters = defaultdict(lambda: {"total": 0, "adjusted": 0})
@@ -709,6 +709,7 @@ class ConsolidationPipeline:
         try:
             video_id = shard_json["data"]["video_name"]
             offset_variable=shard_json["data"]["metadata_domain"]
+            print(offset_variable)
             shard_number = int(shard_json["data"]["shard_number"])
             total_shards = int(shard_json["data"].get("total_shards", 0))
 
@@ -724,6 +725,7 @@ class ConsolidationPipeline:
                 offset_seconds=compute_shard_offset(shard_number)
             else:
                 offset_seconds=(shard_number-1)*default_duration
+            print(offset_seconds)
 
             shard_key = f"shard_{shard_number}"
             shard_entry = {
