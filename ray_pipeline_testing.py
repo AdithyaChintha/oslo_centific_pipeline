@@ -1819,6 +1819,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
             
             for video_id, video_download_result in video_downloads:
                 local_video_path = video_download_result['local_path']
+                #local_video_path = "VID_20250809_094836_00_045.insv" #temp for debug
                 logger.info(f"local_video_path:{local_video_path}")
                 
                 # Initialize tracking for this video chunk
@@ -1863,46 +1864,77 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                     logger.error(f"Invalid flat_result for sharding: {flat_result}")
                     continue  # Skip to next chunk
 
-                for view_name, view_path in flat_result.items():
-                    # Split this view into 180s shards with sequential part numbering
-                    logger.info(f"Processing sharding for view:{view_name} at {view_path} starting from part{global_part_idx}")
-                    update_tracking(chunk_id, f"view_sharding.{view_name}", "processing")
+                view_names = list(flat_result.keys())
+                logger.info(f"Processing sharding for views={view_names} starting from part{global_part_idx}")
+                try:
+                    update_tracking(chunk_id, "view_sharding", "processing", views=view_names)
+                except Exception:
+                    logger.debug("Failed to update tracking: view_sharding processing")
+
+                split_tasks = []  # [(vn, ref, out_dir)]
+                duration_sec = 180  # keep 180s by default; change if needed
+                overlap_sec = 60 if is_walkthrough else 0
+
+                for vn, vp in flat_result.items():
+                    out_dir = os.path.join(output_dir, f"{vn}_shards")
+                    os.makedirs(out_dir, exist_ok=True)
+                    view_shard_urls.setdefault(vn, {})  # keep structure for later upload
+
+                    if is_walkthrough:
+                        logger.info("=" * 120)
+                        logger.info("🔄 Walkthrough video splitting - View: %s, Path: %s, Duration: %ss, Overlap: %ss, Step: %ss",
+                                    vn, vp, duration_sec, overlap_sec, max(0, duration_sec - overlap_sec))
+                        logger.info("=" * 120)
+                        ref = split_video_into_shards_with_overlap.remote(
+                            vp, output_dir=out_dir, duration_sec=duration_sec, overlap_sec=overlap_sec, start_idx=global_part_idx
+                        )
+                    else:
+                        logger.info("=" * 120)
+                        logger.info("📹 Normal video splitting - View: %s, Path: %s, Duration: %ss, Overlap: 0s", vn, vp, duration_sec)
+                        logger.info("=" * 120)
+                        ref = split_video_into_shards.remote(
+                            vp, output_dir=out_dir, duration_sec=duration_sec, start_idx=global_part_idx
+                        )
+                    split_tasks.append((vn, ref, out_dir))
+
+                # Prefer parallel; on failure, error tracking
+                try:
+                    results = ray.get([ref for _, ref, _ in split_tasks])  # List[List[str]]
+                except Exception as e:
+                    logger.error(f"Parallel split_video_into_shards failed: {e}")
+
+
+                # Rename shards to ensure global sequential numbering across all views
+                for (vn, _, out_dir), shards in zip(split_tasks, results):
+                    shards = shards or []
+                    renumbered = []
+                    for old_path in shards:
+                        base, ext = os.path.splitext(old_path)
+                        # rename to global_part_idx
+                        new_path = os.path.join(out_dir, f"{vn}_part{global_part_idx:04d}{ext or '.mp4'}")
+                        if new_path != old_path:
+                            try:
+                                os.replace(old_path, new_path)  
+                            except Exception as rn_ex:
+                                logger.warning(f"Rename shard failed ({old_path} -> {new_path}): {rn_ex}; keeping original")
+                                new_path = old_path
+                        renumbered.append(new_path)
+                        global_part_idx += 1
+                    
+                    
+                    # record in view_shards
+                    view_shards[vn] = view_shards.get(vn, []) + renumbered
                     try:
-                        if not is_walkthrough:
-                            # BIG DEBUG STATEMENT FOR NORMAL SPLITTING
-                            logger.info("=" * 120)
-                            logger.info("📹 Normal video splitting - View: %s, Path: %s, Duration: 180s, Overlap: 0s", view_name, view_path)
-                            logger.info("=" * 120)
-                            
-                            shards = ray.get(split_video_into_shards.remote(
-                                view_path, 
-                                output_dir=os.path.join(output_dir, f"{view_name}_shards"), 
-                                duration_sec=180,
-                                start_idx=global_part_idx  # Pass the global part index
-                            ))
-                            view_shards[view_name] = view_shards.get(view_name, []) + shards
-                            update_tracking(chunk_id, f"view_sharding.{view_name}", "completed",
-                                        shard_count=len(shards), shard_paths=shards)
-                        else:
-                            # BIG DEBUG STATEMENT FOR WALKTHROUGH SPLITTING
-                            logger.info("=" * 120)
-                            logger.info("🔄 Walkthrough video splitting - View: %s, Path: %s, Duration: 180s, Overlap: 60s, Step: 120s", view_name, view_path)
-                            logger.info("=" * 120)
-                            
-                            shards = ray.get(split_video_into_shards_with_overlap.remote(
-                                view_path, 
-                                output_dir=os.path.join(output_dir, f"{view_name}_shards"), 
-                                duration_sec=180,
-                                overlap_sec=60,  # 60 seconds overlap
-                                start_idx=global_part_idx  # Pass the global part index
-                            ))
-                            view_shards[view_name] = view_shards.get(view_name, []) + shards
-                            update_tracking(chunk_id, f"view_sharding.{view_name}", "completed",
-                                        shard_count=len(shards), shard_paths=shards)
-                    except Exception as e:
-                        logger.error(f"Error sharding {view_name}: {e}")
-                        update_tracking(chunk_id, f"view_sharding.{view_name}", "error",
-                                       error_message=str(e))
+                        update_tracking(
+                            chunk_id, f"view_sharding.{vn}", "completed",
+                            shard_count=len(renumbered), shard_paths=renumbered
+                        )
+                        global_part_idx = 0  # Reset for next view
+                    except Exception:
+                        logger.debug(f"Failed to update tracking for {vn}")
+
+                logger.info(f"Sharding done; global_part_idx now: {global_part_idx}")
+                # Store the shards for this chunk
                 
                 # Update global part index based on the number of shards created
                 if flat_result:
@@ -1944,8 +1976,8 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                         chunk_audio_shards = ray.get(split_audio_into_shards_with_overlap.remote(
                             local_audio_path,
                             output_dir=os.path.join(output_dir, "audio_shards"),
-                            duration_sec=180,
-                            overlap_sec=60,  # 60 seconds overlap
+                            duration_sec=duration_sec,
+                            overlap_sec=overlap_sec,  # 60 seconds overlap
                             start_idx=global_part_idx  # Pass the global part index
                         ))
                     else:
@@ -1958,7 +1990,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                         chunk_audio_shards = ray.get(split_audio_into_shards.remote(
                             local_audio_path,
                             output_dir=os.path.join(output_dir, "audio_shards"),
-                            duration_sec=180,
+                            duration_sec=duration_sec,
                             start_idx=global_part_idx  # Pass the global part index
                         ))
                     audio_shards.extend(chunk_audio_shards)
@@ -2232,11 +2264,12 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
                 flat_result = None
                 raise RuntimeError(f"Failed to convert one 360 file: {str(e)}")
 
+        duration_sec = 5
         # Split audio once into 60s shards (reused per view by index)
         audio_shards = ray.get(split_audio_into_shards.remote(
             input_audio_path,
             output_dir=os.path.join(output_dir, "audio_shards"),
-            duration_sec=60
+            duration_sec=duration_sec
         ))
 
         # Optionally upload audio shards for LS streaming
@@ -2260,25 +2293,41 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
             logger.error(f"Invalid flat_result for unwarped view processing: {flat_result}")
             return {"status": "error", "error": "Failed to process unwarped views due to invalid result"}
 
+        # Launch all split jobs in parallel and collect refs
+        _split_refs = []
+        _split_order = []
         for view_name, view_path in flat_result.items():
-            # Split this view into 60s shards
-            shards = ray.get(split_video_into_shards.remote(
-                view_path, 
-                output_dir=os.path.join(output_dir, f"{view_name}_shards"), 
-                duration_sec=60
-            ))
-            view_shards[view_name] = shards
-
-            # Upload shards if Azure is configured
-            # if azure_blob_client and azure_container and azure_output_prefix and azure_account_name and azure_account_key:
-            #     view_shard_urls[view_name] = generate_azure_shard_urls(
-            #         azure_blob_client, azure_container, shards,
-            #         f"{azure_output_prefix}/unwarped_shards/{view_name}",
-            #         azure_account_name, azure_account_key
-            #     )
-            # else:
-            #     view_shard_urls[view_name] = {}
+            ref = split_video_into_shards.remote(
+                view_path,
+                output_dir=os.path.join(output_dir, f"{view_name}_shards"),
+                duration_sec=duration_sec
+            )
+            _split_refs.append(ref)
+            _split_order.append(view_name)
+            # initialize urls dict for this view (filled later after upload)
             view_shard_urls[view_name] = {}
+
+        # Execute all splits concurrently and map results back to view names
+        try:
+            _split_results = ray.get(_split_refs)
+        except Exception as e:
+            logger.error(f"Parallel split_video_into_shards failed: {e}")
+            # Fallback: try sequentially so we still produce something
+            _split_results = []
+            for view_name, view_path in flat_result.items():
+                try:
+                    shards = ray.get(split_video_into_shards.remote(
+                        view_path,
+                        output_dir=os.path.join(output_dir, f"{view_name}_shards"),
+                        duration_sec=duration_sec
+                    ))
+                except Exception as ex:
+                    logger.error(f"Sequential split failed for {view_name}: {ex}")
+                    shards = []
+                _split_results.append(shards)
+
+        for vn, shards in zip(_split_order, _split_results):
+            view_shards[vn] = shards if shards is not None else []
 
         # Find the minimum shard count across all views to avoid index errors
         min_shards = min(len(shards) for shards in view_shards.values()) if view_shards else 0
@@ -5564,7 +5613,7 @@ if __name__ == "__main__":
     
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Ray Pipeline with Integrated Blob Polling")
-    parser.add_argument("--mode", choices=["integrated", "standalone", "multi_chunks", "multi_sessions", "blob_polling"], default="blob_polling",
+    parser.add_argument("--mode", choices=["integrated", "standalone", "multi_chunks", "multi_sessions", "blob_polling"], default="multi_chunks",
                        help="Run mode: 'integrated' for blob polling + pipeline, 'standalone' for direct pipeline, 'multi_chunks' for single session, 'multi_sessions' for multiple sessions, 'blob_polling' for continuous blob polling (default: blob_polling)")
     parser.add_argument("--azure-config", default="blobfuse2_config.yaml",
                        help="Azure configuration file path")

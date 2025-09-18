@@ -34,7 +34,7 @@ def _ffprobe_duration(path: str) -> float:
     return float(out.stdout.strip())
 
 # ---------- public API ----------
-@ray.remote(num_gpus=0.5)
+@ray.remote(num_gpus=0)
 def split_video_into_shards(
     video_path: str,
     output_dir: str = "/tmp/shards",
@@ -80,7 +80,7 @@ def split_video_into_shards(
     results = ray.get(futures)
     return [r for r in results if r is not None]
 
-@ray.remote(num_gpus=0.5)
+@ray.remote(num_gpus=0)
 def split_video_into_shards_with_overlap(
     video_path: str,
     output_dir: str = "/tmp/shards",
@@ -133,7 +133,7 @@ def split_video_into_shards_with_overlap(
     return [r for r in results if r is not None]
 
 # ---------- per-shard task ----------
-@ray.remote
+@ray.remote(num_gpus=0.2)
 def _shard_task(
     video_path: str,
     start_time: float,
