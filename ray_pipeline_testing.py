@@ -22,7 +22,7 @@ from utils.blob_utils import (
     detect_stuck_videos, reset_stuck_videos,
     poll_azure_videos_with_checklist, poll_azure_videos, find_corresponding_audio,
     download_video_audio_pair, download_video_audio_pair_simple, cleanup_downloaded_files,
-    upload_output_directory_to_blob, upload_output_directory_with_sas, 
+    upload_output_directory_to_blob, upload_output_directory_with_sas, upload_output_directory_with_sas_optimized,
     update_labelstudio_tasks_with_new_urls, validate_shard_urls, load_pipeline_config,
     save_video_list_progress
 )
@@ -2088,10 +2088,14 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
         
         if blob_client and container_name:
             video_name_for_upload = os.path.basename(output_dir)
-            upload_result = upload_output_directory_with_sas(
+            upload_config = pipeline_config.get('blob_upload', {})
+
+            upload_result = upload_output_directory_with_sas_optimized(
                 output_dir, blob_client, container_name,
                 azure_output_prefix, video_name_for_upload,
-                account_name, account_key
+                account_name, account_key,
+                365,  # sas_expiry_days
+                upload_config  # config dict with blob_upload settings
             )
             logger.info(f" Multi-view upload result: {' Success' if upload_result['success'] else '❌ Failed'}")
             
@@ -2413,10 +2417,14 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
         
         if azure_blob_client and azure_container:
             video_name_for_upload = os.path.basename(output_dir)
-            upload_result = upload_output_directory_with_sas(
-                output_dir, azure_blob_client, azure_container,
+            upload_config = pipeline_config.get('blob_upload', {})
+
+            upload_result = upload_output_directory_with_sas_optimized(
+                output_dir, blob_client, container_name,
                 azure_output_prefix, video_name_for_upload,
-                azure_account_name, azure_account_key
+                account_name, account_key,
+                365,  # sas_expiry_days
+                upload_config  # config dict with blob_upload settings
             )
             logger.info(f" Multi-view upload result: {' Success' if upload_result['success'] else '❌ Failed'}")
             
@@ -2557,10 +2565,14 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
 
         if azure_blob_client and azure_container:
             video_name = os.path.basename(output_dir)
-            upload_result = upload_output_directory_with_sas(
-                output_dir, azure_blob_client, azure_container,
-                azure_output_prefix, video_name,
-                azure_account_name, azure_account_key
+            upload_config = pipeline_config.get('blob_upload', {})
+
+            upload_result = upload_output_directory_with_sas_optimized(
+                output_dir, blob_client, container_name,
+                azure_output_prefix, video_name_for_upload,
+                account_name, account_key,
+                365,  # sas_expiry_days
+                upload_config  # config dict with blob_upload settings
             )
             logger.info(f"📤 Dual-view upload result: {'✅ Success' if upload_result['success'] else '❌ Failed'}")
             
@@ -5223,10 +5235,14 @@ def _process_single_view(
     
     if azure_blob_client and azure_container:
         video_name = os.path.basename(output_dir)
-        upload_result = upload_output_directory_with_sas(
-            output_dir, azure_blob_client, azure_container,
-            azure_output_prefix, video_name,
-            azure_account_name, azure_account_key
+        upload_config = pipeline_config.get('blob_upload', {})
+
+        upload_result = upload_output_directory_with_sas_optimized(
+            output_dir, blob_client, container_name,
+            azure_output_prefix, video_name_for_upload,
+            account_name, account_key,
+            365,  # sas_expiry_days
+            upload_config  # config dict with blob_upload settings
         )
         logger.info(f" Single-view upload result: {' Success' if upload_result['success'] else '❌ Failed'}")
         
