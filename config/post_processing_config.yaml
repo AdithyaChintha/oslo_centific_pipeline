@@ -1,0 +1,25 @@
+label_studio:
+  # Label Studio server URL
+  server_url: "https://annotations-stg.oneforma2.com/api"
+  
+  # API token for Label Studio
+  api_token: ${LABEL_STUDIO_API_TOKEN}
+  
+  # Project ID
+  project_id: "5392"
+
+  view_id: "8433"
+
+  page_size: "100"
+
+# 5392/data?tab=8433
+azure_storage:
+  AZURE_STORAGE_CONNECTION_STRING: ${AZURE_STORAGE_CONNECTION_STRING}
+
+  intermediate_master_json_container: "masters"
+
+  final_master_json_container: "final-masters"
+  
+polling:
+  # Polling interval in seconds
+  interval_seconds: "300"
