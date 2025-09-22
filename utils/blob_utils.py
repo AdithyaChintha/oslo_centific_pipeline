@@ -790,11 +790,31 @@ def upload_file_worker_enhanced(file_info):
                             block_id += 1
 
                     # Commit all blocks
-                    blob_client.commit_block_list(block_list)
+                    from azure.storage.blob import ContentSettings
+                    content_type = None
+                    file_ext = file_path.suffix.lower()
+                    if file_ext == ".mp4":
+                        content_type = "video/mp4"
+                    elif file_ext == ".wav":
+                        content_type = "audio/wav"
+
+                    if content_type:
+                        content_settings = ContentSettings(content_type=content_type)
+                        blob_client.commit_block_list(block_list, content_settings=content_settings)
+                    else:
+                        blob_client.commit_block_list(block_list)
                 else:
                     # Small file - direct upload with max_concurrency
                     with open(file_path, "rb") as data:
-                        blob_client.upload_blob(data, overwrite=True, max_concurrency=4)
+                        # Determine content type based on file extension
+                        content_type = None
+                        file_ext = file_path.suffix.lower()
+                        if file_ext == ".mp4":
+                            content_type = "video/mp4"
+                        elif file_ext == ".wav":
+                            content_type = "audio/wav"
+
+                        blob_client.upload_blob(data, overwrite=True, max_concurrency=4, content_type=content_type)
 
                 return {
                     "success": True,

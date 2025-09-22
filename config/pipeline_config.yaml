@@ -81,7 +81,7 @@ blob_upload:
   use_optimized: true
 
   # Upload performance settings
-  max_workers: 8              # Number of parallel upload threads
+  max_workers: 10              # Number of parallel upload threads
   chunk_size_mb: 4            # Chunk size for large files (MB)
   retry_attempts: 3           # Number of retry attempts for failed uploads
   enable_compression: false   # Enable file compression (future feature)

@@ -1715,7 +1715,7 @@ def process_single_session(session_path: str, session_id: str, output_base_dir: 
         pipeline_result = pipeline_main_multichunks(
             download_results=download_result,
             output_dir=session_output_dir,
-            azure_output_prefix=f"processed/{session_id}",
+            azure_output_prefix=f"{pipeline_config['azure_storage']['output_blob_prefix']}{session_id}",
             blob_client=create_azure_blob_client(azure_config),
             container_name=azure_config.get('container'),
             account_name=azure_config.get('account-name'),
