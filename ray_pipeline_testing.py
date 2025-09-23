@@ -1749,15 +1749,21 @@ def process_single_session(session_path: str, session_id: str, output_base_dir: 
         # Upload CSV file to blob storage
         try:
             if azure_config and csv_file_path and os.path.exists(csv_file_path):
-                blob_client = create_azure_blob_client(azure_config)
+                blob_service_client = create_azure_blob_client(azure_config)
                 csv_filename = os.path.basename(csv_file_path)
                 csv_blob_path = f"{pipeline_config['azure_storage']['output_blob_prefix']}{session_id}/timing_analysis/{csv_filename}"
+                container_name = azure_config.get('container')
 
                 logger.info(f"📤 Uploading CSV to blob: {csv_blob_path}")
 
+                # Get the specific blob client for this file
+                blob_client = blob_service_client.get_blob_client(
+                    container=container_name,
+                    blob=csv_blob_path
+                )
+
                 with open(csv_file_path, 'rb') as csv_file:
                     blob_client.upload_blob(
-                        name=csv_blob_path,
                         data=csv_file,
                         overwrite=True
                     )
