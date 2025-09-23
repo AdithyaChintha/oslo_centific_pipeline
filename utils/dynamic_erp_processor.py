@@ -68,7 +68,8 @@ def find_audio_file_in_blob_storage(
     container_name: str,
     blob_base_path: str,
     session_id: str,
-    account_key: str
+    account_key: str,
+    input_blob_prefix: str
 ) -> Optional[str]:
     """
     Dynamically find the audio file in blob storage for a given session.
@@ -91,17 +92,8 @@ def find_audio_file_in_blob_storage(
         # Try multiple search patterns for audio files
         # The audio files are in /instavideo/test_audio/{session_id}/, not in the processed path
         search_patterns = [
-            f"test_audio/{session_id}",
-            f"test_audio/{session_id}/",
-            f"test_audio/{session_id}/{session_id}",
-            f"test_audio/{session_id}/audio",
-            f"test_audio/{session_id}/4views",
             # Also try the original blob_base_path patterns as fallback
-            f"{blob_base_path.rstrip('/')}/{session_id}",
-            f"{blob_base_path.rstrip('/')}/{session_id}/{session_id}",
-            f"{blob_base_path.rstrip('/')}",
-            f"{blob_base_path.rstrip('/')}/{session_id}/audio",
-            f"{blob_base_path.rstrip('/')}/{session_id}/4views"
+            f"{input_blob_prefix.rstrip('/')}/{session_id}",
         ]
         
         audio_files = []
@@ -245,7 +237,8 @@ def process_erp_and_audio_dynamically(
     container_name: str,
     blob_base_path: str,
     account_key: str,
-    downscale_erp: bool = False
+    downscale_erp: bool = False,
+    input_blob_prefix: str = None
 ) -> Tuple[Optional[str], Optional[str]]:
     """
     Dynamically process ERP video and audio files for a session.
@@ -341,7 +334,8 @@ def process_erp_and_audio_dynamically(
             container_name=container_name,
             blob_base_path=blob_base_path,
             session_id=session_id,
-            account_key=account_key
+            account_key=account_key,
+            input_blob_prefix = input_blob_prefix
         )
         
         if not full_audio_link:
@@ -368,7 +362,8 @@ def integrate_erp_audio_with_labelstudio_tasks(
     container_name: str,
     blob_base_path: str,
     account_key: str,
-    labelstudio_tasks: list
+    labelstudio_tasks: list,
+    input_blob_prefix: str
 ) -> list:
     """
     Integrate ERP video and audio URLs with existing Label Studio tasks.
@@ -396,7 +391,8 @@ def integrate_erp_audio_with_labelstudio_tasks(
             container_name=container_name,
             blob_base_path=blob_base_path,
             account_key=account_key,
-            downscale_erp=False
+            downscale_erp=False,
+            input_blob_prefix = input_blob_prefix
         )
         
         # Update each Label Studio task with the new URLs

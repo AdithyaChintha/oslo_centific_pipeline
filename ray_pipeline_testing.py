@@ -1726,7 +1726,8 @@ def process_single_session(session_path: str, session_id: str, output_base_dir: 
             account_name=azure_config.get('account-name'),
             account_key=azure_config.get('account-key'),
             local_download_dir=pipeline_config['local_storage']['temp_download_dir'],
-            timer=timer
+            timer=timer,
+            input_blob_prefix=pipeline_config['azure_storage']['input_blob_prefix']
         )
         
         processing_time = time.time() - start_time
@@ -1792,7 +1793,7 @@ def extract_video_name_from_path(video_path: str) -> str:
     name = os.path.splitext(filename)[0]
     return name
 
-def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_output_prefix: str=None, blob_client:str = None, container_name:str = None, account_name: str = None, account_key: str = None, local_download_dir: str = None, timer=None):
+def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_output_prefix: str=None, blob_client:str = None, container_name:str = None, account_name: str = None, account_key: str = None, local_download_dir: str = None, timer=None, input_blob_prefix = None):
     
     try:
         if not ray.is_initialized():
@@ -2257,7 +2258,8 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
             container_name=container_name,
             blob_base_path=azure_output_prefix,
             account_key=account_key,
-            labelstudio_tasks=label_studio_tasks
+            labelstudio_tasks=label_studio_tasks,
+            input_blob_prefix=input_blob_prefix
         )
         
         logger.info(f"🎬 Dynamic ERP and audio processing completed for session: {session_id}")
