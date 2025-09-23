@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
 """
-complete_pipeline4.py
+push_new_blobs_final.py
 
-Watermark + tie-break pipeline that pushes new blobs from an Azure source container
-to an OpenAI container, and stores per-submission manifests into a separate Azure
-"submission-manifests" container (if configured). Falls back to local manifest storage.
-
-Usage:
-    python complete_pipeline4.py --config config.yaml
+Complete updated pipeline:
+ - watermark + tie-break selection
+ - container- and blob-level SAS generation (from connection string account key)
+ - azcopy server-to-server copy when SAS available
+ - robust partner uploads with URL-encoding, masking, retries, and AuthenticationFailed diagnostics
+ - remote manifest upload (optional), local fallback
+ - summary printed at end (success/failed lists)
 
 Requirements:
     pip install azure-storage-blob requests pyyaml python-dateutil
+    azcopy installed if using azcopy mode
+
+Run:
+    python push_new_blobs_final.py --config config.yaml
 """
+
+
 import os
 import sys
 import json
@@ -20,25 +27,39 @@ import uuid
 import time
 import base64
 import logging
+import subprocess
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Any
-import mimetypes
-import time
-import json
-import requests
+from typing import Dict, List, Tuple, Optional
+from urllib.parse import quote
 
 import requests
 import yaml
 from dateutil import parser as dtparser
-from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
+from azure.storage.blob import (
+    BlobServiceClient,
+    BlobClient,
+    ContainerClient,
+    generate_blob_sas,
+    generate_container_sas,
+    BlobSasPermissions,
+    ContainerSasPermissions,
+)
 from azure.core.exceptions import ResourceNotFoundError, AzureError
+from dotenv import load_dotenv
 
+dotenv_path = os.path.join(os.path.dirname(__file__), "..", ".env")
+load_dotenv(dotenv_path)
+
+# -------------------------
 # Logging
+# -------------------------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("data_pusher")
 
-# ---------- Utilities ----------
+# -------------------------
+# Helpers
+# -------------------------
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -77,7 +98,20 @@ def parse_iso_to_utc(iso_str: str) -> datetime:
     dt = dtparser.parse(iso_str)
     return dt.astimezone(timezone.utc)
 
-# ---------- Config ----------
+def mask_sas(url: str) -> str:
+    """Return a masked version of URL showing base and last 8 chars of token for debugging."""
+    if not url:
+        return "<empty>"
+    if "?" not in url:
+        return url
+    base, q = url.split("?", 1)
+    if len(q) <= 8:
+        return base + "?***"
+    return base + "?***" + q[-8:]
+
+# -------------------------
+# Config loader
+# -------------------------
 class ConfigLoader:
     def __init__(self, config_path: str):
         self.config_path = config_path
@@ -95,12 +129,10 @@ class ConfigLoader:
             node = node[k]
         return node
 
-# ---------- Watermark Store ----------
+# -------------------------
+# Watermark store
+# -------------------------
 class WatermarkStore:
-    """
-    Stores watermark JSON locally:
-      {"watermark_ts": "<ISO UTC>", "watermark_last_blob": "<blob-name>"}
-    """
     def __init__(self, watermark_file: str):
         self.watermark_file = watermark_file
         ensure_dir(str(Path(self.watermark_file).parent))
@@ -116,7 +148,9 @@ class WatermarkStore:
         atomic_write_json(self.watermark_file, obj)
         self._wm = obj
 
-# ---------- Azure source client ----------
+# -------------------------
+# Azure source client
+# -------------------------
 class AzureSourceClient:
     def __init__(self, connection_string: str, container_name: str):
         self.conn_str = connection_string
@@ -158,233 +192,401 @@ class AzureSourceClient:
     def download_metadata_to_path(self, metadata_blob_name: str, dest_path: str) -> None:
         self.download_blob_to_path(metadata_blob_name, dest_path)
 
-# ---------- Partner uploader (OpenAI Containers + Container-Files + Responses) ---------
+# -------------------------
+# Partner uploader
+# -------------------------
+# class PartnerUploader:
+#     def __init__(self, openai_api_key: str, containers_api: str, submissions_api: str, upload_retry: int = 3, upload_retry_delay: int = 5):
+#         self.openai_api_key = openai_api_key
+#         self.containers_api = containers_api
+#         self.submissions_api = submissions_api
+#         self.upload_retry = upload_retry
+#         self.upload_retry_delay = upload_retry_delay
+
+#     def create_partner_container(self, purpose: str = "ingestion", extra_body: Optional[dict] = None) -> dict:
+#         headers = {"Authorization": f"Bearer {self.openai_api_key}", "Content-Type": "application/json"}
+#         body = {"purpose": purpose}
+#         if extra_body:
+#             body.update(extra_body)
+#         r = requests.post(self.containers_api, json=body, headers=headers)
+#         if not r.ok:
+#             logger.error("Partner create container failed: status=%s body=%s", r.status_code, r.text)
+#             r.raise_for_status()
+#         return r.json()
+
+#     def post_submission(self, container_id: str) -> dict:
+#         headers = {"Authorization": f"Bearer {self.openai_api_key}", "Content-Type": "application/json"}
+#         body = {"container_id": container_id}
+#         r = requests.post(self.submissions_api, json=body, headers=headers)
+#         if not r.ok:
+#             logger.error("Partner post submission failed: status=%s body=%s", r.status_code, r.text)
+#             r.raise_for_status()
+#         return r.json()
+
+#     def upload_file_to_partner_using_sas(self, partner_container_sas: str, blob_name: str, local_file_path: str) -> None:
+#         """
+#         Upload local file to partner container using partner container SAS.
+#         Uses retries and URL-encoding; handles AuthenticationFailed logging hints.
+#         """
+#         safe_blob = quote(blob_name, safe="/")
+#         dest_url = partner_container_sas.rstrip("/") + "/" + safe_blob
+#         logger.debug("Upload dest (masked): %s", mask_sas(dest_url))
+
+#         attempt = 0
+#         last_exc = None
+#         while attempt < self.upload_retry:
+#             attempt += 1
+#             try:
+#                 dest_blob = BlobClient.from_blob_url(dest_url)
+#                 with open(local_file_path, "rb") as f:
+#                     dest_blob.upload_blob(f, overwrite=True)
+#                 return
+#             except Exception as e:
+#                 last_exc = e
+#                 txt = str(e)
+#                 if "AuthenticationFailed" in txt or "Server failed to authenticate the request" in txt or "403" in txt:
+#                     logger.error("AuthenticationFailed while uploading %s. Masked dest: %s", blob_name, mask_sas(dest_url))
+#                     logger.error("Common causes: expired/incorrect SAS token, missing 'w' permission on SAS, VM clock skew, or URL mangling.")
+#                     logger.debug("Full upload exception: %s", txt)
+#                     # do not keep retrying if auth failed — but allow a couple attempts (maybe transient)
+#                 else:
+#                     logger.warning("Upload attempt %d failed for %s: %s", attempt, blob_name, txt)
+#                 if attempt < self.upload_retry:
+#                     time.sleep(self.upload_retry_delay)
+#         # if we exit loop with last_exc, raise it
+#         raise last_exc
 
 
-import os
-import requests
-from typing import Optional, Dict, Any, List
-import logging
 
-logger = logging.getLogger("data_pusher")
+# -------------------------
+# PartnerUploader (REPLACE this in your script)
+# -------------------------
+from urllib.parse import urlparse, parse_qs, urlunparse
+
+# class PartnerUploader:
+#     def __init__(self, openai_api_key: str, containers_api: str, submissions_api: str, upload_retry: int = 3, upload_retry_delay: int = 5):
+#         self.openai_api_key = openai_api_key
+#         self.containers_api = containers_api
+#         self.submissions_api = submissions_api
+#         self.upload_retry = upload_retry
+#         self.upload_retry_delay = upload_retry_delay
+
+#     def create_partner_container(self, purpose: str = "ingestion", extra_body: Optional[dict] = None) -> dict:
+#         headers = {"Authorization": f"Bearer {self.openai_api_key}", "Content-Type": "application/json"}
+#         body = {"purpose": purpose}
+#         if extra_body:
+#             body.update(extra_body)
+#         r = requests.post(self.containers_api, json=body, headers=headers)
+#         if not r.ok:
+#             logger.error("Partner create container failed: status=%s body=%s", r.status_code, r.text)
+#             r.raise_for_status()
+#         return r.json()
+
+#     def post_submission(self, container_id: str) -> dict:
+#         headers = {"Authorization": f"Bearer {self.openai_api_key}", "Content-Type": "application/json"}
+#         body = {"container_id": container_id}
+#         r = requests.post(self.submissions_api, json=body, headers=headers)
+#         if not r.ok:
+#             logger.error("Partner post submission failed: status=%s body=%s", r.status_code, r.text)
+#             r.raise_for_status()
+#         return r.json()
+
+#     # --------- helpers ----------
+#     def _mask(self, url: str) -> str:
+#         return mask_sas(url)
+
+#     def _is_dfs_endpoint(self, url: str) -> bool:
+#         parsed = urlparse(url)
+#         return parsed.netloc.endswith(".dfs.core.windows.net")
+
+#     def _convert_dfs_to_blob(self, url: str) -> str:
+#         """
+#         Convert a dfs.core.windows.net URL to blob.core.windows.net preserving path and query.
+#         If url is already a blob endpoint, returns unchanged.
+#         """
+#         parsed = urlparse(url)
+#         if not self._is_dfs_endpoint(url):
+#             return url
+#         blob_netloc = parsed.netloc.replace(".dfs.core.windows.net", ".blob.core.windows.net")
+#         new_parsed = parsed._replace(netloc=blob_netloc)
+#         return urlunparse(new_parsed)
+
+#     def _inspect_sas(self, url: str) -> Tuple[Optional[str], Optional[str]]:
+#         """
+#         Return (sp, se) from SAS query if present (masked). sp = permissions, se = expiry.
+#         """
+#         if "?" not in url:
+#             return None, None
+#         parsed = urlparse(url)
+#         q = parse_qs(parsed.query)
+#         sp = q.get("sp", [None])[0]
+#         se = q.get("se", [None])[0]
+#         return sp, se
+
+#     # --------- upload ----------
+#     def upload_file_to_partner_using_sas(self, partner_container_sas: str, blob_name: str, local_file_path: str) -> None:
+#         """
+#         Upload local file to partner container using partner container SAS.
+#         - Handles dfs->blob conversion (if partner returned a dfs endpoint).
+#         - URL-encodes blob_name safely.
+#         - Performs retries and logs helpful diagnostics when AuthenticationFailed occurs.
+#         """
+#         # encode blob name (preserve '/')
+#         safe_blob = quote(blob_name, safe="/")
+#         # build candidate dest (do not mutate partner_container_sas)
+#         dest_candidate = partner_container_sas.rstrip("/") + "/" + safe_blob
+
+#         # If partner SAS looks like DFS endpoint, convert to blob endpoint for BlobClient
+#         if self._is_dfs_endpoint(partner_container_sas):
+#             converted = self._convert_dfs_to_blob(partner_container_sas)
+#             dest_url = converted.rstrip("/") + "/" + safe_blob
+#             logger.debug("Converted DFS->Blob endpoint for upload.")
+#         else:
+#             dest_url = dest_candidate
+
+#         # Log masked info and SAS permissions (masked)
+#         sp, se = self._inspect_sas(partner_container_sas)
+#         logger.info("Upload dest (masked): %s", self._mask(dest_url))
+#         logger.info("Partner SAS permissions (sp)=%s expiry(se)=%s (masked)", sp if sp else "<none>", se if se else "<none>")
+
+#         attempt = 0
+#         last_exc = None
+#         while attempt < self.upload_retry:
+#             attempt += 1
+#             try:
+#                 dest_blob = BlobClient.from_blob_url(dest_url)
+#                 with open(local_file_path, "rb") as f:
+#                     dest_blob.upload_blob(f, overwrite=True)
+#                 logger.debug("Upload succeeded for %s", blob_name)
+#                 return
+#             except Exception as e:
+#                 last_exc = e
+#                 txt = str(e)
+#                 # If it's an auth issue, give actionable logs and don't blind-retry forever
+#                 if "AuthenticationFailed" in txt or "Server failed to authenticate the request" in txt or "403" in txt:
+#                     logger.error("AuthenticationFailed while uploading %s. Masked dest: %s", blob_name, self._mask(dest_url))
+#                     logger.error("Common causes: expired/incorrect SAS token, missing 'w' permission on SAS, VM clock skew, or URL mangling.")
+#                     logger.debug("Full upload exception: %s", txt)
+#                     # don't do many retries for auth failure, but attempt a small number
+#                 else:
+#                     logger.warning("Upload attempt %d failed for %s: %s", attempt, blob_name, txt)
+#                 if attempt < self.upload_retry:
+#                     time.sleep(self.upload_retry_delay)
+
+#         # if we exit loop, raise last exception
+#         raise last_exc
+
+#     # --------- small test helper (manual) ----------
+#     def test_upload_small_file(self, partner_container_sas: str) -> Tuple[bool, str]:
+#         """
+#         Attempt to upload a tiny file to the partner SAS to test write permission quickly.
+#         Returns (success_bool, message).
+#         """
+#         tmp = Path("/tmp") / f"az_test_{uuid.uuid4().hex}.bin"
+#         try:
+#             tmp.write_bytes(b"ok")
+#             test_blob = f"__test__azcopy__{uuid.uuid4().hex}.bin"
+#             try:
+#                 self.upload_file_to_partner_using_sas(partner_container_sas, test_blob, str(tmp))
+#                 return True, f"test upload succeeded -> {test_blob}"
+#             finally:
+#                 try:
+#                     tmp.unlink()
+#                 except Exception:
+#                     pass
+#         except Exception as e:
+#             return False, str(e)
+from urllib.parse import urlparse, parse_qs, quote, urlunparse
+from azure.storage.filedatalake import DataLakeFileClient
+
 
 class PartnerUploader:
     """
-    PartnerUploader that:
-      - create_partner_container -> POST /v1/containers
-      - upload_file_to_container -> tries POST /v1/containers/{id}/files (multipart) for small files;
-          falls back to Uploads API (create -> parts -> complete) and then attaches file_id via POST /v1/containers/{id}/files (JSON {"file_id":...})
-      - post_submission -> creates a Responses run using a tools entry that references the container (avoids top-level 'container' param)
+    Upload helper that supports:
+      - ADLS Gen2 directory SAS (dfs.core.windows.net + sr=d) via DataLakeFileClient
+      - Blob/container SAS (blob.core.windows.net) via BlobClient
     """
-    OPENAI_BASE = "https://api.openai.com/v1"
 
-    def __init__(
-        self,
-        openai_api_key: str,
-        containers_api: Optional[str] = None,
-        container_files_api: Optional[str] = None,
-        submissions_api: Optional[str] = None,
-        single_request_max_bytes: int = 50 * 1024 * 1024,  # threshold for single-request upload (tuneable)
-        upload_part_size: int = 64 * 1024 * 1024,         # 32 MiB part size for Uploads API
-    ):
+    def __init__(self, openai_api_key: str, containers_api: str, submissions_api: str, upload_retry: int = 3, upload_retry_delay: int = 5):
         self.openai_api_key = openai_api_key
-        self.containers_api = containers_api or f"{self.OPENAI_BASE}/containers"
-        self.container_files_api = container_files_api or f"{self.OPENAI_BASE}/container_files"
-        self.responses_api = submissions_api or f"{self.OPENAI_BASE}/responses"
-        self.single_request_max_bytes = int(single_request_max_bytes)
-        self.upload_part_size = int(upload_part_size)
+        self.containers_api = containers_api
+        self.submissions_api = submissions_api
+        self.upload_retry = upload_retry
+        self.upload_retry_delay = upload_retry_delay
 
-    def _auth_headers(self, content_type: Optional[str] = None) -> Dict[str, str]:
-        h = {"Authorization": f"Bearer {self.openai_api_key}"}
-        if content_type:
-            h["Content-Type"] = content_type
-        return h
-
-    # -----------------------
-    # Container creation
-    # -----------------------
-    def create_partner_container(self, name: Optional[str] = None, purpose: str = "ingestion", extra_body: Optional[dict] = None) -> Dict[str, Any]:
-        """
-        Create a container in OpenAI. Returns parsed JSON (expects 'id').
-        """
-        body = {"name": name}
-        # if name:
-        #     body["name"] = name
-        # if extra_body:
-        #     body.update(extra_body)
-
-        url = self.containers_api
-        logger.info("Creating container via %s", url)
-        r = requests.post(url, headers=self._auth_headers("application/json"), json=body, timeout=120)
-        if not r.ok:
-            logger.error("Failed creating container: status=%s body=%s", r.status_code, r.text)
-            r.raise_for_status()
-        return r.json()
-
-    # -----------------------
-    # Uploads API helpers (create -> parts -> complete)
-    # -----------------------
-    def _create_upload(self, filename: str, total_bytes: int, purpose: str = "responses", mime_type: str = "application/octet-stream") -> Dict[str, Any]:
-        url = f"{self.OPENAI_BASE}/uploads"
-        body = {"filename": filename, "bytes": total_bytes, "purpose": purpose, "mime_type": mime_type}
-        r = requests.post(url, headers=self._auth_headers("application/json"), json=body, timeout=30)
-        r.raise_for_status()
-        return r.json()
-
-    def _add_upload_part(self, upload_id: str, part_bytes: bytes) -> Dict[str, Any]:
-        url = f"{self.OPENAI_BASE}/uploads/{upload_id}/parts"
-        files = {"data": ("chunk", part_bytes)}
-        r = requests.post(url, headers=self._auth_headers(), files=files, timeout=300)
-        r.raise_for_status()
-        return r.json()
-
-    def _complete_upload(self, upload_id: str, part_ids: List[str]) -> Dict[str, Any]:
-        url = f"{self.OPENAI_BASE}/uploads/{upload_id}/complete"
-        r = requests.post(url, headers=self._auth_headers("application/json"), json={"part_ids": part_ids}, timeout=30)
-        r.raise_for_status()
-        return r.json()
-
-    def _upload_file_in_parts(self, local_file_path: str, purpose: str = "responses") -> Dict[str, Any]:
-        total_bytes = os.path.getsize(local_file_path)
-        filename = os.path.basename(local_file_path)
-        create_resp = self._create_upload(filename, total_bytes, purpose)
-        upload_id = create_resp.get("id") or create_resp.get("upload", {}).get("id")
-        if not upload_id:
-            raise RuntimeError(f"Upload create did not return upload id: {create_resp}")
-
-        part_ids: List[str] = []
-        with open(local_file_path, "rb") as fh:
-            while True:
-                chunk = fh.read(self.upload_part_size)
-                if not chunk:
-                    break
-                resp = self._add_upload_part(upload_id, chunk)
-                pid = resp.get("id") or resp.get("part_id") or (resp.get("part") or {}).get("id")
-                if not pid:
-                    raise RuntimeError(f"Upload part did not return a part id: {resp}")
-                part_ids.append(pid)
-
-        complete_resp = self._complete_upload(upload_id, part_ids)
-        return complete_resp
-
-
-    def _multipart_post_to_containers_files(self, container_id: str, blob_name: str, local_file_path: str, mime_type_override: Optional[str] = None) -> requests.Response:
-        """
-        POST multipart to /v1/containers/{container_id}/files with a single 'file' part.
-        Pass explicit content-type for the file part when possible.
-        Returns requests.Response (caller checks .ok/.status_code).
-        """
-        url = f"{self.containers_api.rstrip('/')}/{container_id}/files"
-        headers = {"Authorization": f"Bearer {self.openai_api_key}"}  # let requests set boundary
-
-        mime_type = mime_type_override
-        if not mime_type:
-            _, ext = os.path.splitext(blob_name)
-            if ext.lower() == ".insv":
-                mime_type = "application/octet-stream"
-            else:
-                mime_type = "application/json"
-
-
-        # Send file with explicit content-type for the part: (filename, fileobj, content_type)
-        with open(local_file_path, "rb") as fh:
-            files = {"file": (blob_name, fh, mime_type)}
-            resp = requests.post(url, headers=headers, files=files, timeout=300)
-        return resp
-
-    def _attach_file_id_to_container(self, container_id: str, file_id: str) -> Dict[str, Any]:
-        url = f"{self.containers_api.rstrip('/')}/{container_id}/files"
-        r = requests.post(url, headers=self._auth_headers("application/json"), json={"file_id": file_id}, timeout=30)
-        r.raise_for_status()
-        return r.json()
-
-    # -----------------------
-    # Public upload method
-    # -----------------------
-    def upload_file_to_container(self, container_id: str, blob_name: str, local_file_path: str) -> Dict[str, Any]:
-        """
-        High-level upload:
-          - Try direct multipart to /v1/containers/{id}/files first if size <= threshold.
-          - If that fails due to 413 or size > threshold, use Uploads API then attach file_id.
-        Returns JSON response from successful attach (container-file object).
-        """
-        size = os.path.getsize(local_file_path)
-
-        # Try direct multipart when small
-        if size <= self.single_request_max_bytes:
-            try:
-                logger.info("Attempting direct multipart upload to container %s for %s (size=%d)", container_id, blob_name, size)
-                r = self._multipart_post_to_containers_files(container_id, blob_name, local_file_path)
-                if r.ok:
-                    logger.info("Direct multipart upload succeeded")
-                    return r.json()
-                if r.status_code == 413:
-                    logger.warning("Direct multipart upload rejected with 413 (too large). Falling back.")
-                    # fall through to parts flow
-                else:
-                    logger.warning("Direct multipart returned status %s: %s", r.status_code, r.text[:1000])
-                    # For non-413 errors, attempt parts flow as fallback
-            except requests.RequestException as e:
-                logger.warning("Direct multipart attempt failed: %s; will try parts flow", e)
-
-        # Upload via Uploads API parts flow
-        logger.info("Uploading in parts via Uploads API: %s (size=%d)", blob_name, size)
-        completed_upload_resp = self._upload_file_in_parts(local_file_path, purpose="responses")
-        # extract file id
-        file_id = None
-        if isinstance(completed_upload_resp, dict):
-            file_obj = completed_upload_resp.get("file") or completed_upload_resp.get("file_object")
-            if isinstance(file_obj, dict):
-                file_id = file_obj.get("id") or file_obj.get("file_id")
-            if not file_id:
-                file_id = completed_upload_resp.get("id") or completed_upload_resp.get("file_id")
-        if not file_id:
-            raise RuntimeError(f"Could not find file id in completed upload response: {completed_upload_resp}")
-
-        # attach file id to container
-        logger.info("Attaching uploaded file id %s to container %s", file_id, container_id)
-        attach_resp = self._attach_file_id_to_container(container_id, file_id)
-        return attach_resp
-
-    # -----------------------
-    # Post submission (Responses)
-    # -----------------------
-    def post_submission(self, container_id: str, model: str = "gpt-4o-mini", prompt: Optional[str] = None, extra_body: Optional[dict] = None) -> Dict[str, Any]:
-        """
-        Create a Responses run referencing the container via tools config.
-        """
-        if prompt is None:
-            prompt = "Please process the uploaded files in the provided container."
-
-        tools_payload = [
-            {
-                "type": "code_interpreter",
-                "container": {"type": "existing", "id": container_id}
-            }
-        ]
-
-        body: Dict[str, Any] = {
-            "model": model,
-            "input": prompt,
-            "tools": tools_payload
-        }
+    def create_partner_container(self, purpose: str = "ingestion", extra_body: Optional[dict] = None) -> dict:
+        headers = {"Authorization": f"Bearer {self.openai_api_key}", "Content-Type": "application/json"}
+        body = {"purpose": purpose}
         if extra_body:
             body.update(extra_body)
-
-        r = requests.post(self.responses_api, headers=self._auth_headers("application/json"), json=body, timeout=120)
+        r = requests.post(self.containers_api, json=body, headers=headers)
         if not r.ok:
-            logger.error("Failed creating response (post_submission): status=%s body=%s", r.status_code, r.text)
+            logger.error("Partner create container failed: status=%s body=%s", r.status_code, r.text)
             r.raise_for_status()
         return r.json()
 
+    def post_submission(self, container_id: str) -> dict:
+        headers = {"Authorization": f"Bearer {self.openai_api_key}", "Content-Type": "application/json"}
+        body = {"container_id": container_id}
+        r = requests.post(self.submissions_api, json=body, headers=headers)
+        if not r.ok:
+            logger.error("Partner post submission failed: status=%s body=%s", r.status_code, r.text)
+            r.raise_for_status()
+        return r.json()
 
-# ----------------------------------------------------------------------------------------------
+    # ---------- helpers ----------
+    def _mask(self, url: str) -> str:
+        return mask_sas(url)
 
-# ---------- Remote manifests helper ----------
+    def _parse_sas_info(self, url: str) -> dict:
+        parsed = urlparse(url)
+        q = parse_qs(parsed.query)
+        return {"netloc": parsed.netloc, "path": parsed.path, "sp": q.get("sp", [None])[0], "se": q.get("se", [None])[0], "sr": q.get("sr", [None])[0]}
+
+    def _is_dfs_dir_sas(self, url: str) -> bool:
+        info = self._parse_sas_info(url)
+        return (info["netloc"].endswith(".dfs.core.windows.net") or info["netloc"].endswith(".dfs.azure") ) and info["sr"] == "d"
+
+    def _build_file_url_for_dfs_dir_sas(self, dir_sas: str, blob_name: str) -> str:
+        """
+        dir_sas: full SAS URL pointing to directory (i.e. https://account.dfs.core.windows.net/<filesystem>/<dir>?<sas>)
+        blob_name: the relative path under that directory we want to upload (may include slashes)
+        Returns: full file URL including SAS (suitable for DataLakeFileClient.from_file_url)
+        """
+        if "?" not in dir_sas:
+            raise ValueError("dir_sas missing SAS query")
+        base, sas = dir_sas.split("?", 1)
+        base = base.rstrip("/")
+        # Append encoded path
+        # ADLS path separator is '/', so we encode each path segment
+        parts = blob_name.split("/")
+        encoded_parts = [quote(p, safe="") for p in parts]
+        appended = "/".join(encoded_parts)
+        file_url = f"{base}/{appended}?{sas}"
+        return file_url
+
+    def _build_dest_url_for_blob_sas(self, container_sas: str, blob_name: str) -> str:
+        if "?" not in container_sas:
+            raise ValueError("container_sas missing SAS query")
+        base, sas = container_sas.split("?", 1)
+        base = base.rstrip("/")
+        parsed = urlparse(base)
+        # If base path already includes more than container (i.e., a specific blob path), assume blob-level SAS and return as-is
+        path_parts = [p for p in parsed.path.split("/") if p]
+        if len(path_parts) > 1:
+            # base already references a blob; don't append
+            return container_sas
+        safe_blob = quote(blob_name, safe="/")
+        return f"{base}/{safe_blob}?{sas}"
+
+    # ---------- main upload ----------
+    def upload_file_to_partner_using_sas(self, partner_container_sas: str, blob_name: str, local_file_path: str) -> None:
+        """
+        Upload local file to partner container using partner SAS.
+        Automatically chooses DataLakeFileClient if partner SAS points to DFS directory (sr=d).
+        Encodes path segments correctly; retries on transient errors; provides actionable logs on auth failure.
+        """
+        # Show masked info
+        info = self._parse_sas_info(partner_container_sas)
+        logger.info("Partner SAS netloc=%s path=%s sp=%s se=%s sr=%s (masked)", info["netloc"], info["path"], info["sp"], info["se"], info["sr"])
+        logger.info("Masked partner SAS: %s", self._mask(partner_container_sas))
+
+        last_exc = None
+        attempt = 0
+
+        if self._is_dfs_dir_sas(partner_container_sas):
+            # ADLS Gen2 directory SAS -> use DataLakeFileClient
+            file_url = self._build_file_url_for_dfs_dir_sas(partner_container_sas, blob_name)
+            logger.info("Uploading to ADLS Gen2 directory via DataLakeFileClient. Masked dest: %s", self._mask(file_url))
+            while attempt < self.upload_retry:
+                attempt += 1
+                try:
+                    # client = DataLakeFileClient.from_file_url(file_url)
+                    from urllib.parse import urlparse, unquote
+
+                    # ... inside the ADLS upload branch ...
+                    parsed = urlparse(file_url)
+                    # parsed.path is like '/<filesystem>/<maybe/path/to/blob>'
+                    path_parts = [p for p in parsed.path.split("/") if p]
+                    if len(path_parts) < 2:
+                        raise RuntimeError(f"Cannot parse filesystem/file path from ADLS URL: {file_url}")
+                    filesystem = path_parts[0]
+                    file_path = "/".join(path_parts[1:])  # ADLS path (may contain '/')
+                    # SAS token is the query part
+                    sas_token = parsed.query  # this is the query string without the leading '?'
+                    # Build account (endpoint) URL for DataLakeFileClient constructor
+                    account_url = f"{parsed.scheme}://{parsed.netloc}"
+
+                    # Instantiate DataLakeFileClient using constructor compatible with older SDKs
+                    client = DataLakeFileClient(account_url, filesystem, file_path, credential=sas_token)
+
+
+
+                    # upload_data will handle chunking; overwrite True
+                    with open(local_file_path, "rb") as f:
+                        data = f.read()
+                    client.upload_data(data, overwrite=True)
+                    return
+                except Exception as e:
+                    last_exc = e
+                    txt = str(e)
+                    if "AuthenticationFailed" in txt or "Signature" in txt or "403" in txt:
+                        logger.error("AuthenticationFailed (ADLS) while uploading %s. Masked dest: %s", blob_name, self._mask(file_url))
+                        logger.error("Common causes: SAS missing 'w' permission, SAS expired, or URL was malformed.")
+                        logger.debug("Full ADLS upload exception: %s", txt)
+                    else:
+                        logger.warning("Attempt %d failed for ADLS upload %s: %s", attempt, blob_name, txt)
+                    if attempt < self.upload_retry:
+                        time.sleep(self.upload_retry_delay)
+            raise last_exc
+
+        else:
+            # Blob endpoint (use BlobClient)
+            dest_url = self._build_dest_url_for_blob_sas(partner_container_sas, blob_name)
+            logger.info("Uploading to Blob endpoint. Masked dest: %s", self._mask(dest_url))
+            while attempt < self.upload_retry:
+                attempt += 1
+                try:
+                    dest_blob = BlobClient.from_blob_url(dest_url)
+                    with open(local_file_path, "rb") as f:
+                        dest_blob.upload_blob(f, overwrite=True)
+                    return
+                except Exception as e:
+                    last_exc = e
+                    txt = str(e)
+                    if "AuthenticationFailed" in txt or "Signature" in txt or "403" in txt:
+                        logger.error("AuthenticationFailed (Blob) while uploading %s. Masked dest: %s", blob_name, self._mask(dest_url))
+                        logger.error("Common causes: SAS missing 'w' permission, SAS expired, or URL was malformed.")
+                        logger.debug("Full Blob upload exception: %s", txt)
+                    else:
+                        logger.warning("Attempt %d failed for Blob upload %s: %s", attempt, blob_name, txt)
+                    if attempt < self.upload_retry:
+                        time.sleep(self.upload_retry_delay)
+            raise last_exc
+
+    # ---------- small test helper ----------
+    def test_upload_small_file(self, partner_container_sas: str) -> Tuple[bool, str]:
+        tmp = Path("/tmp") / f"az_test_{uuid.uuid4().hex}.bin"
+        try:
+            tmp.write_bytes(b"ok")
+            test_blob = f"__test__{uuid.uuid4().hex}.bin"
+            try:
+                self.upload_file_to_partner_using_sas(partner_container_sas, test_blob, str(tmp))
+                return True, f"test upload succeeded -> {test_blob}"
+            finally:
+                try:
+                    tmp.unlink()
+                except Exception:
+                    pass
+        except Exception as e:
+            return False, str(e)
+
+
+
+# -------------------------
+# Remote manifests uploader (optional)
+# -------------------------
 class RemoteManifestsUploader:
-    """
-    Uploads manifests to a configured Azure container (creates container if missing).
-    """
     def __init__(self, enabled: bool, connection_string: Optional[str], container_name: Optional[str], prefix: Optional[str] = None):
         self.enabled = bool(enabled)
         self.conn_str = connection_string
@@ -393,11 +595,10 @@ class RemoteManifestsUploader:
         self._client: Optional[ContainerClient] = None
         if self.enabled:
             if not self.conn_str or not self.container_name:
-                raise ValueError("remote_manifests.enabled true but connection_string/container_name missing")
+                raise ValueError("remote_manifests enabled but connection string/container_name missing")
             svc = BlobServiceClient.from_connection_string(self.conn_str)
             self._client = svc.get_container_client(self.container_name)
             try:
-                # create container if not exists
                 self._client.create_container()
             except Exception:
                 pass
@@ -408,16 +609,18 @@ class RemoteManifestsUploader:
         blob_name = blob_name or f"{self.prefix}{now_utc().strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex}.json"
         blob_client = self._client.get_blob_client(blob_name)
         data = json.dumps(manifest, indent=2, ensure_ascii=False).encode("utf-8")
-        blob_client.upload_blob(data, overwrite=True, content_settings=None)
+        blob_client.upload_blob(data, overwrite=True)
         return blob_name
 
-# ---------- Orchestrator ----------
+# -------------------------
+# Orchestrator
+# -------------------------
 class DataPushOrchestrator:
     def __init__(self, cfg: ConfigLoader):
         self.cfg = cfg
 
         # OpenAI API key
-        self.openai_key = cfg.get("openai", "api_key") or os.getenv(cfg.get("openai", "api_key_env", default="OPENAI_API_KEY"))
+        self.openai_key = os.getenv('OPENAI_API_KEY')
         if not self.openai_key:
             raise SystemExit("OpenAI API key not found in config or environment")
 
@@ -427,27 +630,28 @@ class DataPushOrchestrator:
         if not self.source_conn or not self.source_container:
             raise SystemExit("Azure source connection string or container name missing in config or env")
 
+        # source SAS or its env var name (optional)
         self.source_sas = cfg.get("azure_source", "container_sas") or os.getenv(cfg.get("azure_source", "container_sas_env", default=""))
         self.source_prefix = cfg.get("azure_source", "source_prefix", default=None)
 
-        # partner / OpenAI endpoints config (you can override in config)
-        self.containers_api = cfg.get("openai", "containers_api", default=f"https://api.openai.com/v1/containers")
-        self.container_files_api = cfg.get("openai", "container_files_api", default=f"https://api.openai.com/v1/container_files")
-        self.submissions_api = cfg.get("openai", "submissions_api", default=f"https://api.openai.com/v1/responses")
+        # partner endpoints
+        self.containers_api = cfg.get("openai", "containers_api", default="https://api.openai.com/v1/training_data/containers")
+        self.submissions_api = cfg.get("openai", "submissions_api", default="https://api.openai.com/v1/training_data/submissions")
         self.purpose = cfg.get("openai", "purpose", default="ingestion")
 
-        # dedupe safety
+        # dedupe safety window
         self.safety_window_minutes = int(cfg.get("deduplication", "safety_window_minutes", default=2))
 
-        # local paths
+        # paths
         self.manifests_dir = cfg.get("local_paths", "manifests_dir", default="./local_manifests")
         self.watermark_file = cfg.get("local_paths", "watermark_file", default=str(Path(self.manifests_dir) / "watermark.json"))
         self.work_dir = cfg.get("local_paths", "work_dir", default="./work")
         ensure_dir(self.manifests_dir)
         ensure_dir(self.work_dir)
 
-        # azcopy flag kept but we won't use azcopy in this variant
-        self.use_azcopy = False
+        # azcopy config
+        self.use_azcopy = bool(cfg.get("azure_partner", "use_azcopy", default=False))
+        self.azcopy_path = cfg.get("azure_partner", "azcopy_path", default="azcopy")
 
         # submission behavior
         self.auto_submit = bool(cfg.get("submission", "auto_submit", default=True))
@@ -468,10 +672,75 @@ class DataPushOrchestrator:
         # helpers
         self.watermark_store = WatermarkStore(self.watermark_file)
         self.source_client = AzureSourceClient(self.source_conn, self.source_container)
-        # instantiate uploader with configured endpoints
-        self.uploader = PartnerUploader(self.openai_key, containers_api=self.containers_api, submissions_api=self.submissions_api)
+        self.uploader = PartnerUploader(self.openai_key, self.containers_api, self.submissions_api)
 
-    # fingerprint & safety
+        # SAS generation internals
+        self._generated_container_sas: Optional[str] = None
+        self._account_name, self._account_key = self._parse_account_from_connstr(self.source_conn)
+
+    # -------------------------
+    # Account parsing and SAS generation
+    # -------------------------
+    def _parse_account_from_connstr(self, conn_str: str) -> Tuple[Optional[str], Optional[str]]:
+        if not conn_str:
+            return None, None
+        parts = {}
+        for part in conn_str.split(";"):
+            if "=" in part:
+                k, v = part.split("=", 1)
+                parts[k] = v
+        return parts.get("AccountName"), parts.get("AccountKey")
+
+    def generate_container_sas_url(self, expiry_minutes: int = 60) -> Optional[str]:
+        if not self._account_name or not self._account_key:
+            return None
+        try:
+            sas_token = generate_container_sas(
+                account_name=self._account_name,
+                container_name=self.source_container,
+                account_key=self._account_key,
+                permission=ContainerSasPermissions(read=True, list=True),
+                expiry=datetime.utcnow() + timedelta(minutes=expiry_minutes)
+            )
+            url = f"https://{self._account_name}.blob.core.windows.net/{self.source_container}?{sas_token}"
+            logger.debug("Generated container SAS (masked): %s", mask_sas(url))
+            return url
+        except Exception as e:
+            logger.warning("Failed to generate container SAS: %s", e)
+            return None
+
+    def generate_blob_sas_url(self, blob_name: str, expiry_minutes: int = 60) -> Optional[str]:
+        if not self._account_name or not self._account_key:
+            return None
+        try:
+            sas_token = generate_blob_sas(
+                account_name=self._account_name,
+                container_name=self.source_container,
+                blob_name=blob_name,
+                account_key=self._account_key,
+                permission=BlobSasPermissions(read=True),
+                expiry=datetime.utcnow() + timedelta(minutes=expiry_minutes)
+            )
+            url = f"https://{self._account_name}.blob.core.windows.net/{self.source_container}/{quote(blob_name, safe='')}" + f"?{sas_token}"
+            logger.debug("Generated blob SAS (masked): %s", mask_sas(url))
+            return url
+        except Exception as e:
+            logger.warning("Failed to generate blob SAS for %s: %s", blob_name, e)
+            return None
+
+    def ensure_container_sas(self) -> Optional[str]:
+        if self.source_sas:
+            return self.source_sas
+        if self._generated_container_sas:
+            return self._generated_container_sas
+        sas = self.generate_container_sas_url(expiry_minutes=60)
+        if sas:
+            self._generated_container_sas = sas
+        return sas
+
+    # -------------------------
+    # Watermark & selection
+    # -------------------------
     def fingerprint_from_blob_props(self, blob_props: dict) -> dict:
         md5 = blob_props.get("content_md5")
         if md5:
@@ -535,11 +804,12 @@ class DataPushOrchestrator:
             else:
                 logger.info("SKIP (watermark) %s last_modified=%s", name, last_mod_iso)
 
-        # sort ascending by (last_modified, name)
         candidates.sort(key=lambda t: (parse_iso_to_utc(t[2]), t[0]))
         return candidates
 
-    # metadata/content-type
+    # -------------------------
+    # metadata helpers
+    # -------------------------
     def determine_content_type(self, blob_name: str) -> str:
         ln = blob_name.lower()
         if ln.endswith(".json"):
@@ -551,25 +821,57 @@ class DataPushOrchestrator:
     def generate_metadata_obj(self, blob_name: str) -> dict:
         return {"content-type": self.determine_content_type(blob_name), "version": "001"}
 
-    # main run (adapted to use new OpenAI container upload flow; azcopy path removed)
+    # -------------------------
+    # azcopy wrapper
+    # -------------------------
+    def copy_blob_via_azcopy(self, source_url: str, partner_container_sas: str, blob_name: str) -> None:
+        src = source_url
+        # If source_url is a container SAS (no blob path), append properly encoded blob name
+        if "?" in source_url and (f"/{self.source_container}/" in source_url or source_url.rstrip().endswith(self.source_container) or source_url.rstrip().endswith(self.source_container + "?") or source_url.rstrip().endswith(self.source_container + "/")):
+            src = source_url.rstrip("/") + "/" + quote(blob_name, safe="")
+        else:
+            # If source_url seems to be a blob SAS already, assume it contains blob path
+            pass
+        dst = partner_container_sas.rstrip("/") + "/" + quote(blob_name, safe="")
+        cmd = [self.azcopy_path, "copy", src, dst, "--overwrite=false"]
+        logger.info("Running azcopy: %s", " ".join(cmd))
+        subprocess.check_call(cmd)
+
+    # -------------------------
+    # choose best source URL for azcopy
+    # -------------------------
+    def get_best_source_url_for_blob(self, blob_name: str) -> Optional[str]:
+        if self.source_sas:
+            return self.source_sas
+        container_sas = self.ensure_container_sas()
+        if container_sas:
+            return container_sas
+        blob_sas = self.generate_blob_sas_url(blob_name, expiry_minutes=60)
+        return blob_sas
+
+    # -------------------------
+    # run loop
+    # -------------------------
     def run_once(self) -> None:
-        logger.info("Starting run (watermark mode).")
+        logger.info("Starting data push run (final).")
         to_send = self.blobs_to_send()
         if not to_send:
-            logger.info("No blobs eligible. Exiting.")
+            logger.info("No blobs eligible for sending. Exiting.")
             return
 
-        # create OpenAI container
-        logger.info("Creating OpenAI container via Containers API")
-        try:
-            create_resp = self.uploader.create_partner_container(name=f"ingest-{uuid.uuid4().hex}", purpose=self.purpose)
-        except Exception as e:
-            logger.error("Failed to create container: %s", e)
-            raise
-
+        # create partner container
+        logger.info("Creating partner container via partner API")
+        create_resp = self.uploader.create_partner_container(purpose=self.purpose)
         container_id = create_resp.get("id") or create_resp.get("container_id") or create_resp.get("container")
-        if not container_id:
-            raise RuntimeError(f"Unexpected create response (no container id): {create_resp}")
+        partner_container_sas = (
+            create_resp.get("container_url")
+            or create_resp.get("url")
+            or create_resp.get("container_sas")
+            or create_resp.get("sas_url")
+        )
+        if not container_id or not partner_container_sas:
+            raise RuntimeError(f"Unexpected partner create response: {create_resp}")
+        logger.info("Partner container created. Masked SAS: %s", mask_sas(partner_container_sas))
 
         submission_manifest = {
             "container_id": container_id,
@@ -579,61 +881,75 @@ class DataPushOrchestrator:
         }
         processed: List[Tuple[str, str]] = []
 
+        # Pre-generate container SAS if possible to reuse
+        if not self.source_sas:
+            self.ensure_container_sas()
+
         for blob_name, fp, last_mod_iso in to_send:
-            logger.info("Processing %s", blob_name)
+            logger.info("Processing: %s", blob_name)
             metadata_blob_name = blob_name + ".metadata.json"
             tmp_blob_path = str(Path(self.work_dir) / f"{uuid.uuid4().hex}_{Path(blob_name).name}")
             tmp_meta_path = str(Path(self.work_dir) / f"{uuid.uuid4().hex}_{Path(metadata_blob_name).name}")
+            upload_status = "failed: unknown"
 
             try:
-                # download the blob locally
-                logger.info("Downloading blob %s", blob_name)
-                self.source_client.download_blob_to_path(blob_name, tmp_blob_path)
+                if self.use_azcopy:
+                    source_for_azcopy = self.get_best_source_url_for_blob(blob_name)
+                    if source_for_azcopy:
+                        try:
+                            logger.info("Using azcopy for blob: %s (source_sas masked: %s)", blob_name, mask_sas(source_for_azcopy))
+                            self.copy_blob_via_azcopy(source_for_azcopy, partner_container_sas, blob_name)
+                            # metadata: copy if exists else generate and upload
+                            try:
+                                if self.source_client.metadata_blob_exists(metadata_blob_name):
+                                    self.copy_blob_via_azcopy(source_for_azcopy, partner_container_sas, metadata_blob_name)
+                                else:
+                                    with open(tmp_meta_path, "w", encoding="utf-8") as fm:
+                                        json.dump(self.generate_metadata_obj(blob_name), fm)
+                                    # upload metadata via partner SAS using uploader helper (handles encoding & retries)
+                                    self.uploader.upload_file_to_partner_using_sas(partner_container_sas, metadata_blob_name, tmp_meta_path)
+                            except Exception as e_meta:
+                                logger.warning("Metadata copy/upload warning for %s: %s", metadata_blob_name, e_meta)
+                            upload_status = "success"
+                        except subprocess.CalledProcessError as e:
+                            logger.error("azcopy command failed for %s: %s", blob_name, e)
+                            raise
+                    else:
+                        logger.info("No usable source SAS for azcopy; falling back to SDK for %s", blob_name)
+                        raise RuntimeError("No source SAS for azcopy")
+                else:
+                    raise RuntimeError("Azcopy disabled by config")
 
-                # # download or generate metadata
-                # if self.source_client.metadata_blob_exists(metadata_blob_name):
-                #     logger.info("Downloading metadata %s", metadata_blob_name)
-                #     try:
-                #         self.source_client.download_metadata_to_path(metadata_blob_name, tmp_meta_path)
-                #     except Exception as e:
-                #         logger.warning("Failed to download metadata %s: %s - generating instead", metadata_blob_name, e)
-                #         with open(tmp_meta_path, "w", encoding="utf-8") as fm:
-                #             json.dump(self.generate_metadata_obj(blob_name), fm)
-                # else:
-                #     logger.info("Generating metadata for %s", blob_name)
-                #     with open(tmp_meta_path, "w", encoding="utf-8") as fm:
-                #         json.dump(self.generate_metadata_obj(blob_name), fm)
+            except Exception as az_err:
+                # Fallback to SDK download/upload path
+                logger.info("Falling back to SDK download/upload for %s due to: %s", blob_name, az_err)
+                try:
+                    self.source_client.download_blob_to_path(blob_name, tmp_blob_path)
 
-                # upload blob file
-                logger.info("Uploading blob %s -> container %s", blob_name, container_id)
-                up_resp_blob = self.uploader.upload_file_to_container(container_id, blob_name, tmp_blob_path)
-                # # upload metadata file
-                # logger.info("Uploading metadata %s -> container %s", metadata_blob_name, container_id)
-                # up_resp_meta = self.uploader.upload_file_to_container(container_id, metadata_blob_name, tmp_meta_path)
+                    if self.source_client.metadata_blob_exists(metadata_blob_name):
+                        try:
+                            self.source_client.download_metadata_to_path(metadata_blob_name, tmp_meta_path)
+                        except Exception as e:
+                            logger.warning("Failed to download metadata %s: %s - generating instead", metadata_blob_name, e)
+                            with open(tmp_meta_path, "w", encoding="utf-8") as fm:
+                                json.dump(self.generate_metadata_obj(blob_name), fm)
+                    else:
+                        with open(tmp_meta_path, "w", encoding="utf-8") as fm:
+                            json.dump(self.generate_metadata_obj(blob_name), fm)
 
-                # store file-level details in manifest
-                submission_manifest["files"].append({
-                    "blob_name": blob_name,
-                    "fingerprint": fp,
-                    # "metadata_blob": metadata_blob_name,
-                    "upload_status": "success",
-                    "uploaded_at": now_iso(),
-                    "upload_response": {
-                        "blob": up_resp_blob,
-                        # "metadata": up_resp_meta
-                    }
-                })
-                processed.append((last_mod_iso, blob_name))
+                    # Upload blob and metadata via partner SAS (uploader handles encoding & retries)
+                    try:
+                        self.uploader.upload_file_to_partner_using_sas(partner_container_sas, blob_name, tmp_blob_path)
+                        self.uploader.upload_file_to_partner_using_sas(partner_container_sas, metadata_blob_name, tmp_meta_path)
+                        upload_status = "success"
+                    except Exception as upl_ex:
+                        logger.error("Upload via partner SAS failed for %s: %s", blob_name, upl_ex)
+                        upload_status = f"failed: {str(upl_ex)}"
 
-            except Exception as e:
-                logger.error("Error processing %s: %s", blob_name, e, exc_info=True)
-                submission_manifest["files"].append({
-                    "blob_name": blob_name,
-                    "fingerprint": fp,
-                    # "metadata_blob": metadata_blob_name,
-                    "upload_status": f"failed: {str(e)}",
-                    "uploaded_at": now_iso()
-                })
+                except Exception as dl_ex:
+                    logger.error("Download failed for %s: %s", blob_name, dl_ex, exc_info=True)
+                    upload_status = f"failed: {str(dl_ex)}"
+
             finally:
                 for p in (tmp_blob_path, tmp_meta_path):
                     try:
@@ -642,7 +958,17 @@ class DataPushOrchestrator:
                     except Exception:
                         pass
 
-        # persist manifest: remote if configured else local
+            submission_manifest["files"].append({
+                "blob_name": blob_name,
+                "fingerprint": fp,
+                "metadata_blob": metadata_blob_name,
+                "upload_status": upload_status,
+                "uploaded_at": now_iso()
+            })
+            if upload_status == "success":
+                processed.append((last_mod_iso, blob_name))
+
+        # persist submission manifest (remote if configured, else local)
         manifest_blob_name = f"{now_utc().strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex}.json"
         manifest_uploaded = False
         remote_blob_path = None
@@ -659,43 +985,36 @@ class DataPushOrchestrator:
             atomic_write_json(local_path, submission_manifest)
             logger.info("Wrote submission manifest locally to %s", local_path)
 
-        # submit to OpenAI Responses (auto_submit)
-        # submission_response = None
-        # if self.auto_submit:
-        #     attempt = 0
-        #     while attempt < self.retry_attempts:
-        #         attempt += 1
-        #         try:
-        #             logger.info("Posting submission to Responses API (attempt %d)", attempt)
-        #             # choose model and prompt from config if present
-        #             model = self.cfg.get("submission", "model", default=self.cfg.get("openai", "model", default="gpt-4o-mini"))
-        #             prompt = self.cfg.get("submission", "prompt", default=f"Process files in container {container_id} and return a JSON summary.")
-        #             extra_body = self.cfg.get("submission", "responses_extra_body", default=None)
-        #             submission_response = self.uploader.post_submission(container_id, model=model, prompt=prompt, extra_body=extra_body)
-        #             logger.info("Submission posted successfully")
-        #             break
-        #         except Exception as e:
-        #             logger.error("Submission attempt %d failed: %s", attempt, e)
-        #             if attempt < self.retry_attempts:
-        #                 time.sleep(self.retry_delay_seconds)
-        #             else:
-        #                 logger.error("All submission attempts failed")
+        # POST submission to partner (with retries)
+        submission_response = None
+        if self.auto_submit:
+            attempt = 0
+            while attempt < self.retry_attempts:
+                attempt += 1
+                try:
+                    logger.info("Posting submission to partner (attempt %d)", attempt)
+                    submission_response = self.uploader.post_submission(container_id)
+                    logger.info("Submission posted successfully")
+                    break
+                except Exception as e:
+                    logger.error("Submission attempt %d failed: %s", attempt, e)
+                    if attempt < self.retry_attempts:
+                        time.sleep(self.retry_delay_seconds)
+                    else:
+                        logger.error("All submission attempts failed")
 
-        # if submission_response:
-        #     submission_manifest["submission_response"] = submission_response
-        #     # update remote or local manifest with submission response
-        #     if manifest_uploaded:
-        #         try:
-        #             # overwrite remote manifest with updated content
-        #             self.remote_manifests.upload_manifest_dict(submission_manifest, blob_name=manifest_blob_name)
-        #         except Exception:
-        #             pass
-        #     else:
-        #         # overwrite local
-        #         local_path = str(Path(self.manifests_dir) / manifest_blob_name)
-        #         atomic_write_json(local_path, submission_manifest)
+        if submission_response:
+            submission_manifest["submission_response"] = submission_response
+            # update manifest storage with submission_response
+            if manifest_uploaded:
+                try:
+                    self.remote_manifests.upload_manifest_dict(submission_manifest, blob_name=manifest_blob_name)
+                except Exception:
+                    pass
+            else:
+                atomic_write_json(str(Path(self.manifests_dir) / manifest_blob_name), submission_manifest)
 
-        # advance watermark using processed successes
+        # Advance watermark using processed successes only
         if processed:
             processed_dt_and_names: List[Tuple[datetime, str]] = []
             for ts_iso, name in processed:
@@ -712,13 +1031,38 @@ class DataPushOrchestrator:
             self.watermark_store.set_watermark(watermark_iso, watermark_last_blob)
             logger.info("Advanced watermark to %s last_blob=%s", watermark_iso, watermark_last_blob)
         else:
-            logger.info("No successful processed blobs; watermark unchanged")
+            logger.info("No blobs processed successfully; watermark unchanged")
+
+        # -------------------------
+        # Summary printed to terminal
+        # -------------------------
+        total = len(to_send)
+        success_files = [f["blob_name"] for f in submission_manifest["files"] if f["upload_status"] == "success"]
+        failed_files = [f["blob_name"] for f in submission_manifest["files"] if f["upload_status"] != "success"]
+
+        print("\n" + "=" * 72)
+        print("SUMMARY")
+        print(f"Total blobs considered: {total}")
+        print(f"Successfully uploaded: {len(success_files)}")
+        for b in success_files:
+            print(f"  ✓ {b}")
+        print(f"Failed uploads: {len(failed_files)}")
+        for b in failed_files:
+            # print a trimmed explanation if available
+            entry = next((x for x in submission_manifest["files"] if x["blob_name"] == b), None)
+            reason = entry["upload_status"] if entry else ""
+            print(f"  ✖ {b} -> {reason}")
+        wm_ts, wm_blob = self.watermark_store.get_watermark()
+        print(f"Advanced watermark: {wm_ts} , last_blob: {wm_blob}")
+        print("=" * 72 + "\n")
 
         logger.info("Run finished.")
 
-# ---------- CLI ----------
+# -------------------------
+# CLI entrypoint
+# -------------------------
 def main():
-    parser = argparse.ArgumentParser(description="Push new blobs using watermark and store submission manifests remotely.")
+    parser = argparse.ArgumentParser(description="Push new blobs (final) with SAS & azcopy support.")
     parser.add_argument("--config", "-c", required=True, help="Path to YAML config")
     args = parser.parse_args()
 
