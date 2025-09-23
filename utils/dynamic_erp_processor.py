@@ -72,15 +72,19 @@ def find_audio_file_in_blob_storage(
     input_blob_prefix: str
 ) -> Optional[str]:
     """
-    Dynamically find the audio file in blob storage for a given session.
-    
+    Find the uploaded audio file in the results folder and generate SAS URL.
+
+    This function looks for audio files that were copied to the results folder
+    during pipeline processing and uploaded with the session results.
+
     Args:
         blob_service_client: Azure BlobServiceClient instance
         container_name: Azure container name
-        blob_base_path: Base blob path (e.g., "test_mulitsession/")
+        blob_base_path: Base blob path for results (e.g., "test_output_performance_csv/")
         session_id: Session ID to match audio file
         account_key: Azure storage account key
-        
+        input_blob_prefix: Input blob prefix (not used in new implementation)
+
     Returns:
         Optional[str]: SAS URL to the audio file if found, None otherwise
     """
@@ -89,60 +93,49 @@ def find_audio_file_in_blob_storage(
         logger.info(f"🔍 Blob base path: {blob_base_path}")
         logger.info(f"🔍 Container: {container_name}")
         
-        # Try multiple search patterns for audio files
-        # The audio files are in /instavideo/test_audio/{session_id}/, not in the processed path
-        search_patterns = [
-            # Also try the original blob_base_path patterns as fallback
-            f"{input_blob_prefix.rstrip('/')}/{session_id}",
-        ]
-        
+        # Search for audio files in the centralized audio_files folder
+        # Pattern: {blob_base_path}/{session_id}/audio_files/*.wav
+        search_pattern = f"{blob_base_path.rstrip('/')}/{session_id}/audio_files"
+        logger.info(f"🔍 Searching in audio_files folder pattern: {search_pattern}")
+
         audio_files = []
-        for pattern in search_patterns:
-            logger.info(f"🔍 Searching in pattern: {pattern}")
-            
-            try:
-                blobs = blob_service_client.get_container_client(container_name).list_blobs(
-                    name_starts_with=pattern
-                )
-                
-                for blob in blobs:
-                    blob_name = blob.name.lower()
-                    # Look for .wav files that contain the session ID
-                    if blob_name.endswith('.wav') and session_id in blob_name:
-                        audio_files.append(blob.name)
-                        logger.info(f"🎵 Found audio file: {blob.name}")
-                        
-                        # Also check for any .wav files in the same directory structure
-                    elif blob_name.endswith('.wav') and pattern in blob_name:
-                        audio_files.append(blob.name)
-                        logger.info(f"🎵 Found audio file (pattern match): {blob.name}")
-                        
-            except Exception as e:
-                logger.warning(f"⚠️ Error searching pattern {pattern}: {e}")
-                continue
+        try:
+            blobs = blob_service_client.get_container_client(container_name).list_blobs(
+                name_starts_with=search_pattern
+            )
+
+            for blob in blobs:
+                blob_name = blob.name.lower()
+                # Look for .wav files in the audio_files folder
+                if blob_name.endswith('.wav') and '/audio_files/' in blob_name:
+                    audio_files.append(blob.name)
+                    logger.info(f"🎵 Found audio file: {blob.name}")
+
+        except Exception as e:
+            logger.warning(f"⚠️ Error searching pattern {search_pattern}: {e}")
         
         # Remove duplicates
         audio_files = list(set(audio_files))
         
         if not audio_files:
             logger.warning(f"⚠️ No audio files found for session: {session_id}")
-            logger.info(f"🔍 Searched patterns: {search_patterns}")
-            
-            # Debug: List all blobs in the base path to understand the structure
-            logger.info(f"🔍 Debug: Listing all blobs in base path: {blob_base_path}")
+            logger.info(f"🔍 Searched pattern: {search_pattern}")
+
+            # Debug: List all blobs in the audio_files folder
+            logger.info(f"🔍 Debug: Listing all blobs in audio_files folder: {search_pattern}")
             try:
                 all_blobs = blob_service_client.get_container_client(container_name).list_blobs(
-                    name_starts_with=blob_base_path.rstrip('/')
+                    name_starts_with=search_pattern
                 )
                 blob_count = 0
                 for blob in all_blobs:
-                    if blob_count < 20:  # Limit to first 20 blobs for debugging
+                    if blob_count < 10:  # Limit to first 10 blobs for debugging
                         logger.info(f"🔍 Debug blob: {blob.name}")
                     blob_count += 1
-                logger.info(f"🔍 Debug: Found {blob_count} total blobs in base path")
+                logger.info(f"🔍 Debug: Found {blob_count} total blobs in audio_files folder")
             except Exception as e:
                 logger.warning(f"⚠️ Debug listing failed: {e}")
-            
+
             return None
         
         # Use the first audio file found

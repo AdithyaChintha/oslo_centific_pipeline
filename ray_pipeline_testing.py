@@ -2064,7 +2064,20 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
             for audio_id, audio_download_result in audio_downloads:
                 local_audio_path = audio_download_result['local_path']
                 logger.info(f"local_audio_path:{local_audio_path}")
-                
+
+                # Copy original audio file to centralized audio_files folder for upload
+                import shutil
+                audio_files_dir = os.path.join(output_dir, "audio_files")
+                os.makedirs(audio_files_dir, exist_ok=True)
+
+                original_audio_filename = os.path.basename(local_audio_path)
+                output_audio_path = os.path.join(audio_files_dir, original_audio_filename)
+                try:
+                    shutil.copy2(local_audio_path, output_audio_path)
+                    logger.info(f"✅ Copied original audio file to audio_files folder: {output_audio_path}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to copy audio file to audio_files folder: {e}")
+
                 # Initialize tracking for this audio chunk
                 audio_chunk_id = extract_chunk_id_from_path(local_audio_path) or f"{audio_id}-audio"
                 audio_sequence_number = extract_sequence_number_from_path(local_audio_path) or audio_id
