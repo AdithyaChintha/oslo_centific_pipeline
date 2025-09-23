@@ -9,6 +9,8 @@ import time
 import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional
+from datetime import datetime
+import time
 
 # Setup paths
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -96,7 +98,7 @@ def analyze_motion_energy_only(
 
 
 @ray.remote
-def compute_motion_energy(shard_paths, sensitivity_level="medium", save_detailed_data=False):
+def compute_motion_energy(shard_paths, sensitivity_level="medium", save_detailed_data=False, enable_timing=False, timing_id=None):
     """
     Process multiple video shards in parallel and combine motion energy results.
     
@@ -108,8 +110,26 @@ def compute_motion_energy(shard_paths, sensitivity_level="medium", save_detailed
     Returns:
         Combined motion analysis results
     """
+    start_time = time.time() if enable_timing else None
+    start_time_iso = datetime.utcnow().isoformat() + "Z" if enable_timing else None
     if not shard_paths:
-        return {"success": False, "error": "No shard paths provided"}
+        error_result = {"success": False, "error": "No shard paths provided"}
+
+        # Add timing data for early error case if timing was enabled
+        if enable_timing and start_time:
+            end_time = time.time()
+            end_time_iso = datetime.utcnow().isoformat() + "Z"
+            execution_time = end_time - start_time
+
+            error_result["timing"] = {
+                "execution_time": execution_time,
+                "start_time": start_time_iso,
+                "end_time": end_time_iso,
+                "timing_id": timing_id,
+                "status": "failed"
+            }
+
+        return error_result
     
     # Process all shards in parallel
     shard_futures = [
@@ -145,8 +165,9 @@ def compute_motion_energy(shard_paths, sensitivity_level="medium", save_detailed
     
     # Sort segments by start time
     combined_segments.sort(key=lambda x: x["start_time"])
-    
-    return {
+
+    # Build the base result dictionary
+    result = {
         "success": True,
         "video_path": "combined_shards",
         "video_duration_seconds": total_duration,
@@ -155,6 +176,23 @@ def compute_motion_energy(shard_paths, sensitivity_level="medium", save_detailed
         "motion_statistics": motion_stats,
         "segments": combined_segments
     }
+
+    # Add timing data only if timing is enabled
+    if enable_timing and start_time:
+        end_time = time.time()
+        end_time_iso = datetime.utcnow().isoformat() + "Z"
+        execution_time = end_time - start_time
+
+        result["timing"] = {
+            "execution_time": execution_time,
+            "start_time": start_time_iso,
+            "end_time": end_time_iso,
+            "timing_id": timing_id,
+            "status": "completed"
+        }
+
+    return result
+
 
 
 if __name__ == "__main__":
