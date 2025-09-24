@@ -74,3 +74,19 @@ logging:
   # Log file path (null = no file logging)
   log_file: "./azure_video_processor.log"
   cleanup_temp_dir: true                      # Remove temporary download director
+
+# Blob Upload Optimization Configuration
+blob_upload:
+  # Enable optimized parallel upload (set to true to activate)
+  use_optimized: true
+
+  # Upload performance settings
+  max_workers: 10              # Number of parallel upload threads
+  chunk_size_mb: 4            # Chunk size for large files (MB)
+  retry_attempts: 3           # Number of retry attempts for failed uploads
+  enable_compression: false   # Enable file compression (future feature)
+  progress_reporting: true    # Enable detailed progress logging
+
+  # File categorization thresholds
+  small_file_threshold_mb: 1   # Files <1MB considered "critical"
+  large_file_threshold_mb: 10  # Files >10MB use specialized handling

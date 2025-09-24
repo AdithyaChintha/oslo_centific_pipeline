@@ -3,7 +3,13 @@ import numpy as np
 import ray
 
 @ray.remote
-def detect_blur_and_black_segments(video_path: str, blur_thresh=100.0, black_thresh=10.0, segment_seconds=1.0):
+def detect_blur_and_black_segments(video_path: str, blur_thresh=100.0, black_thresh=10.0, segment_seconds=1.0, enable_timing=False, timing_id=None):
+    from datetime import datetime
+    import time
+
+    start_time = time.time() if enable_timing else None
+    start_time_iso = datetime.utcnow().isoformat() + "Z" if enable_timing else None
+
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -52,8 +58,26 @@ def detect_blur_and_black_segments(video_path: str, blur_thresh=100.0, black_thr
         current_frame += segment_frames
 
     cap.release()
-    return {
+
+    # Build the base result dictionary
+    result = {
         "video_path": video_path,
         "blur_segments": blur_segments,
         "black_segments": black_segments
     }
+
+    # Add timing data only if timing is enabled
+    if enable_timing and start_time:
+        end_time = time.time()
+        end_time_iso = datetime.utcnow().isoformat() + "Z"
+        execution_time = end_time - start_time
+
+        result["timing"] = {
+            "execution_time": execution_time,
+            "start_time": start_time_iso,
+            "end_time": end_time_iso,
+            "timing_id": timing_id,
+            "status": "completed"
+        }
+
+    return result

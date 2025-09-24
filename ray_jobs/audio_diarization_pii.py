@@ -422,8 +422,13 @@ class AudioDiarizationActor:
 
 
 @ray.remote
-def process_audio_diarization(shard_paths, output_dir=None):
+def process_audio_diarization(shard_paths, output_dir=None,  enable_timing=False, timing_id=None):
     """Factory function for Ray pipeline integration"""
+    from datetime import datetime
+    import time
+
+    start_time = time.time() if enable_timing else None
+    start_time_iso = datetime.utcnow().isoformat() + "Z" if enable_timing else None
     actor = AudioDiarizationActor.remote()
     try:
         results = ray.get(actor.process_shards.remote(shard_paths))
@@ -455,8 +460,39 @@ def process_audio_diarization(shard_paths, output_dir=None):
                 complete_file = os.path.join(output_dir, f"{base_name}_complete_results.json")
                 with open(complete_file, 'w', encoding='utf-8') as f:
                     json.dump(result, f, indent=2)
+            
+            if enable_timing and start_time:
+                end_time = time.time()
+                end_time_iso = datetime.utcnow().isoformat() + "Z"
+                execution_time = end_time - start_time
+
+                results["timing"] = {
+                    "execution_time": execution_time,
+                    "start_time": start_time_iso,
+                    "end_time": end_time_iso,
+                    "timing_id": timing_id,
+                    "status": "completed"
+                }
         
         return results
+    except Exception as e:
+        # ADD: Include timing in error case
+        if enable_timing and start_time:
+            end_time = time.time()
+            end_time_iso = datetime.utcnow().isoformat() + "Z"
+            execution_time = end_time - start_time
+
+            return {
+                "error": str(e),
+                "timing": {
+                    "execution_time": execution_time,
+                    "start_time": start_time_iso,
+                    "end_time": end_time_iso,
+                    "timing_id": timing_id,
+                    "status": "failed"
+                }
+            }
+        raise
     finally:
         try:
             ray.kill(actor)

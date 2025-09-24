@@ -5,6 +5,8 @@ import os
 import json
 import yaml
 import pathlib
+from datetime import datetime
+import time
 
 # Conditional imports to handle dependency issues
 try:
@@ -33,7 +35,7 @@ def clear_gpu_memory():
         gc.collect()
 
 @ray.remote(num_gpus=1, max_calls=1, max_retries=0)
-def detect_scenes(video_path, prompt_path, output_dir=None):
+def detect_scenes(video_path, prompt_path, output_dir=None, enable_timing=False, timing_id=None):
     """
     Detects scenes in a video file using the nvidia/Cosmos-Reason1-7B model.
     Fixed to properly save results to output directory.
@@ -43,6 +45,8 @@ def detect_scenes(video_path, prompt_path, output_dir=None):
         prompt_path: Path to the prompt configuration YAML file  
         output_dir: Output directory to save results
     """
+    start_time = time.time() if enable_timing else None
+    start_time_iso = datetime.utcnow().isoformat() + "Z" if enable_timing else None
     if not VLLM_AVAILABLE:
         return {
             "success": False,
@@ -194,6 +198,18 @@ def detect_scenes(video_path, prompt_path, output_dir=None):
                 "scenes_extracted": len(parsed_scenes)
             }
         }
+        if enable_timing and start_time:
+            end_time = time.time()
+            end_time_iso = datetime.utcnow().isoformat() + "Z"
+            execution_time = end_time - start_time
+
+            result["timing"] = {
+                "execution_time": execution_time,
+                "start_time": start_time_iso,
+                "end_time": end_time_iso,
+                "timing_id": timing_id,
+                "status": "completed"
+            }
 
         # FIXED: Save results to output directory if provided
         if output_dir:
@@ -229,11 +245,25 @@ def detect_scenes(video_path, prompt_path, output_dir=None):
             "raw_response": f"Error: Scene detection failed - {str(e)}",
             "total_scenes": 0,
             "processing_info": {
-                "model": "nvidia/Cosmos-Reason1-7B", 
+                "model": "nvidia/Cosmos-Reason1-7B",
                 "success": False,
                 "error": str(e)
             }
         }
+
+        # Add timing data for failed case
+        if enable_timing and start_time:
+            end_time = time.time()
+            end_time_iso = datetime.utcnow().isoformat() + "Z"
+            execution_time = end_time - start_time
+
+            error_result["timing"] = {
+                "execution_time": execution_time,
+                "start_time": start_time_iso,
+                "end_time": end_time_iso,
+                "timing_id": timing_id,
+                "status": "failed"
+            }
         
         # FIXED: Save error result to output directory if provided
         if output_dir:
