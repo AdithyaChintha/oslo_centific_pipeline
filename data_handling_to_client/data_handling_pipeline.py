@@ -1,23 +1,13 @@
 #!/usr/bin/env python3
 """
-push_new_blobs_final.py
+push_new_blobs_with_remote_watermark.py
 
-Complete updated pipeline:
- - watermark + tie-break selection
- - container- and blob-level SAS generation (from connection string account key)
- - azcopy server-to-server copy when SAS available
- - robust partner uploads with URL-encoding, masking, retries, and AuthenticationFailed diagnostics
- - remote manifest upload (optional), local fallback
- - summary printed at end (success/failed lists)
-
-Requirements:
-    pip install azure-storage-blob requests pyyaml python-dateutil
-    azcopy installed if using azcopy mode
+Same pipeline as before but with watermark reading from remote manifests container first,
+and writing watermark.json to remote manifests container (in addition to local file).
 
 Run:
-    python push_new_blobs_final.py --config config.yaml
+    python push_new_blobs_with_remote_watermark.py --config config.yaml
 """
-
 
 import os
 import sys
@@ -31,22 +21,15 @@ import subprocess
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
-from urllib.parse import quote
-from urllib.parse import urlparse, parse_qs, quote, urlunparse
-from azure.storage.filedatalake import DataLakeFileClient
+from urllib.parse import quote, urlparse, parse_qs, urlunparse
 
 import requests
 import yaml
 from dateutil import parser as dtparser
-from azure.storage.blob import (
-    BlobServiceClient,
-    BlobClient,
-    ContainerClient,
-    generate_blob_sas,
-    generate_container_sas,
-    BlobSasPermissions,
-    ContainerSasPermissions,
-)
+
+from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
+from azure.storage.blob import generate_blob_sas, generate_container_sas, BlobSasPermissions, ContainerSasPermissions
+from azure.storage.filedatalake import DataLakeFileClient
 from azure.core.exceptions import ResourceNotFoundError, AzureError
 from dotenv import load_dotenv
 
@@ -132,23 +115,106 @@ class ConfigLoader:
         return node
 
 # -------------------------
-# Watermark store
+# RemoteManifestsUploader (extended)
+# -------------------------
+class RemoteManifestsUploader:
+    """
+    Uploads manifests to a configured Azure container (creates container if missing).
+    Also supports downloading a blob as text for watermark retrieval.
+    """
+    def __init__(self, enabled: bool, connection_string: Optional[str], container_name: Optional[str], prefix: Optional[str] = None):
+        self.enabled = bool(enabled)
+        self.conn_str = connection_string
+        self.container_name = container_name
+        self.prefix = (prefix or "").lstrip("/")
+        self._client: Optional[ContainerClient] = None
+        if self.enabled:
+            if not self.conn_str or not self.container_name:
+                raise ValueError("remote_manifests enabled but connection string/container_name missing")
+            svc = BlobServiceClient.from_connection_string(self.conn_str)
+            self._client = svc.get_container_client(self.container_name)
+            try:
+                self._client.create_container()
+            except Exception:
+                pass
+
+    def _apply_prefix(self, blob_name: str) -> str:
+        if not self.prefix:
+            return blob_name
+        return f"{self.prefix.rstrip('/')}/{blob_name}"
+
+    def upload_manifest_dict(self, manifest: dict, blob_name: Optional[str] = None) -> str:
+        if not self.enabled or not self._client:
+            raise RuntimeError("Remote manifests not enabled/configured")
+        blob_name = blob_name or f"{now_utc().strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex}.json"
+        blob_name = self._apply_prefix(blob_name)
+        blob_client = self._client.get_blob_client(blob_name)
+        data = json.dumps(manifest, indent=2, ensure_ascii=False).encode("utf-8")
+        blob_client.upload_blob(data, overwrite=True)
+        return blob_name
+
+    def download_blob_as_text(self, blob_name: str) -> Optional[str]:
+        """
+        Download a blob and return its content as text (str). Returns None on errors/not found.
+        """
+        if not self.enabled or not self._client:
+            return None
+        blob_name = self._apply_prefix(blob_name)
+        try:
+            blob_client = self._client.get_blob_client(blob_name)
+            stream = blob_client.download_blob()
+            return stream.content_as_text(encoding="utf-8")
+        except ResourceNotFoundError:
+            logger.debug("Remote watermark blob not found: %s", blob_name)
+            return None
+        except Exception as e:
+            logger.warning("Failed to download remote blob %s: %s", blob_name, e)
+            return None
+
+# -------------------------
+# Watermark store (reads remote first)
 # -------------------------
 class WatermarkStore:
-    def __init__(self, watermark_file: str):
-        self.watermark_file = watermark_file
-        ensure_dir(str(Path(self.watermark_file).parent))
-        self._wm = read_json_if_exists(self.watermark_file) or {}
+    """
+    Reads watermark from remote manifests container first (if provided), falls back to local file.
+    set_watermark writes both local and remote (if configured).
+    """
+    def __init__(self, local_path: str, remote_manifests: Optional[RemoteManifestsUploader] = None):
+        self.local_path = Path(local_path)
+        ensure_dir(str(self.local_path.parent))
+        self.remote_manifests = remote_manifests
 
     def get_watermark(self) -> Tuple[Optional[str], Optional[str]]:
-        ts = self._wm.get("watermark_ts")
-        lb = self._wm.get("watermark_last_blob")
-        return ts, lb
+        # Try remote first
+        if self.remote_manifests and self.remote_manifests.enabled:
+            try:
+                txt = self.remote_manifests.download_blob_as_text("watermark.json")
+                if txt:
+                    obj = json.loads(txt)
+                    return obj.get("watermark_ts"), obj.get("watermark_last_blob")
+            except Exception as e:
+                logger.warning("Could not read watermark.json from remote manifests: %s", e)
+        # Fallback local
+        try:
+            if self.local_path.exists():
+                obj = read_json_if_exists(str(self.local_path))
+                return obj.get("watermark_ts"), obj.get("watermark_last_blob")
+        except Exception as e:
+            logger.warning("Could not read local watermark.json: %s", e)
+        return None, None
 
     def set_watermark(self, watermark_ts_iso: str, watermark_last_blob: Optional[str]) -> None:
         obj = {"watermark_ts": watermark_ts_iso, "watermark_last_blob": watermark_last_blob or ""}
-        atomic_write_json(self.watermark_file, obj)
-        self._wm = obj
+        # write local
+        atomic_write_json(str(self.local_path), obj)
+        # write remote (best-effort)
+        if self.remote_manifests and self.remote_manifests.enabled:
+            try:
+                # overwrite remote watermark.json
+                self.remote_manifests.upload_manifest_dict(obj, blob_name="watermark.json")
+                logger.info("Uploaded watermark.json to remote manifests container.")
+            except Exception as e:
+                logger.warning("Failed to upload watermark.json to remote manifests: %s", e)
 
 # -------------------------
 # Azure source client
@@ -195,18 +261,9 @@ class AzureSourceClient:
         self.download_blob_to_path(metadata_blob_name, dest_path)
 
 # -------------------------
-# Partner uploader
+# PartnerUploader (supports ADLS dir SAS and blob SAS)
 # -------------------------
-
-
-
 class PartnerUploader:
-    """
-    Upload helper that supports:
-      - ADLS Gen2 directory SAS (dfs.core.windows.net + sr=d) via DataLakeFileClient
-      - Blob/container SAS (blob.core.windows.net) via BlobClient
-    """
-
     def __init__(self, openai_api_key: str, containers_api: str, submissions_api: str, upload_retry: int = 3, upload_retry_delay: int = 5):
         self.openai_api_key = openai_api_key
         self.containers_api = containers_api
@@ -235,9 +292,6 @@ class PartnerUploader:
         return r.json()
 
     # ---------- helpers ----------
-    def _mask(self, url: str) -> str:
-        return mask_sas(url)
-
     def _parse_sas_info(self, url: str) -> dict:
         parsed = urlparse(url)
         q = parse_qs(parsed.query)
@@ -245,20 +299,13 @@ class PartnerUploader:
 
     def _is_dfs_dir_sas(self, url: str) -> bool:
         info = self._parse_sas_info(url)
-        return (info["netloc"].endswith(".dfs.core.windows.net") or info["netloc"].endswith(".dfs.azure") ) and info["sr"] == "d"
+        return info["netloc"].endswith(".dfs.core.windows.net") and info["sr"] == "d"
 
     def _build_file_url_for_dfs_dir_sas(self, dir_sas: str, blob_name: str) -> str:
-        """
-        dir_sas: full SAS URL pointing to directory (i.e. https://account.dfs.core.windows.net/<filesystem>/<dir>?<sas>)
-        blob_name: the relative path under that directory we want to upload (may include slashes)
-        Returns: full file URL including SAS (suitable for DataLakeFileClient.from_file_url)
-        """
         if "?" not in dir_sas:
             raise ValueError("dir_sas missing SAS query")
         base, sas = dir_sas.split("?", 1)
         base = base.rstrip("/")
-        # Append encoded path
-        # ADLS path separator is '/', so we encode each path segment
         parts = blob_name.split("/")
         encoded_parts = [quote(p, safe="") for p in parts]
         appended = "/".join(encoded_parts)
@@ -271,25 +318,18 @@ class PartnerUploader:
         base, sas = container_sas.split("?", 1)
         base = base.rstrip("/")
         parsed = urlparse(base)
-        # If base path already includes more than container (i.e., a specific blob path), assume blob-level SAS and return as-is
         path_parts = [p for p in parsed.path.split("/") if p]
         if len(path_parts) > 1:
-            # base already references a blob; don't append
+            # base already has a blob path -> return as is
             return container_sas
         safe_blob = quote(blob_name, safe="/")
         return f"{base}/{safe_blob}?{sas}"
 
     # ---------- main upload ----------
     def upload_file_to_partner_using_sas(self, partner_container_sas: str, blob_name: str, local_file_path: str) -> None:
-        """
-        Upload local file to partner container using partner SAS.
-        Automatically chooses DataLakeFileClient if partner SAS points to DFS directory (sr=d).
-        Encodes path segments correctly; retries on transient errors; provides actionable logs on auth failure.
-        """
-        # Show masked info
         info = self._parse_sas_info(partner_container_sas)
         logger.info("Partner SAS netloc=%s path=%s sp=%s se=%s sr=%s (masked)", info["netloc"], info["path"], info["sp"], info["se"], info["sr"])
-        logger.info("Masked partner SAS: %s", self._mask(partner_container_sas))
+        logger.info("Masked partner SAS: %s", mask_sas(partner_container_sas))
 
         last_exc = None
         attempt = 0
@@ -297,32 +337,23 @@ class PartnerUploader:
         if self._is_dfs_dir_sas(partner_container_sas):
             # ADLS Gen2 directory SAS -> use DataLakeFileClient
             file_url = self._build_file_url_for_dfs_dir_sas(partner_container_sas, blob_name)
-            logger.info("Uploading to ADLS Gen2 directory via DataLakeFileClient. Masked dest: %s", self._mask(file_url))
+            logger.info("Uploading to ADLS Gen2 directory via DataLakeFileClient. Masked dest: %s", mask_sas(file_url))
             while attempt < self.upload_retry:
                 attempt += 1
                 try:
-                    # client = DataLakeFileClient.from_file_url(file_url)
-                    from urllib.parse import urlparse, unquote
-
-                    # ... inside the ADLS upload branch ...
-                    parsed = urlparse(file_url)
-                    # parsed.path is like '/<filesystem>/<maybe/path/to/blob>'
-                    path_parts = [p for p in parsed.path.split("/") if p]
-                    if len(path_parts) < 2:
-                        raise RuntimeError(f"Cannot parse filesystem/file path from ADLS URL: {file_url}")
-                    filesystem = path_parts[0]
-                    file_path = "/".join(path_parts[1:])  # ADLS path (may contain '/')
-                    # SAS token is the query part
-                    sas_token = parsed.query  # this is the query string without the leading '?'
-                    # Build account (endpoint) URL for DataLakeFileClient constructor
-                    account_url = f"{parsed.scheme}://{parsed.netloc}"
-
-                    # Instantiate DataLakeFileClient using constructor compatible with older SDKs
-                    client = DataLakeFileClient(account_url, filesystem, file_path, credential=sas_token)
-
-
-
-                    # upload_data will handle chunking; overwrite True
+                    # older SDKs may not have from_file_url; construct manually
+                    try:
+                        client = DataLakeFileClient.from_file_url(file_url)  # type: ignore[attr-defined]
+                    except AttributeError:
+                        parsed = urlparse(file_url)
+                        path_parts = [p for p in parsed.path.split("/") if p]
+                        if len(path_parts) < 2:
+                            raise RuntimeError(f"Cannot parse filesystem/file path from ADLS URL: {file_url}")
+                        filesystem = path_parts[0]
+                        file_path = "/".join(path_parts[1:])
+                        sas_token = parsed.query
+                        account_url = f"{parsed.scheme}://{parsed.netloc}"
+                        client = DataLakeFileClient(account_url, filesystem, file_path, credential=sas_token)
                     with open(local_file_path, "rb") as f:
                         data = f.read()
                     client.upload_data(data, overwrite=True)
@@ -331,7 +362,7 @@ class PartnerUploader:
                     last_exc = e
                     txt = str(e)
                     if "AuthenticationFailed" in txt or "Signature" in txt or "403" in txt:
-                        logger.error("AuthenticationFailed (ADLS) while uploading %s. Masked dest: %s", blob_name, self._mask(file_url))
+                        logger.error("AuthenticationFailed (ADLS) while uploading %s. Masked dest: %s", blob_name, mask_sas(file_url))
                         logger.error("Common causes: SAS missing 'w' permission, SAS expired, or URL was malformed.")
                         logger.debug("Full ADLS upload exception: %s", txt)
                     else:
@@ -341,9 +372,9 @@ class PartnerUploader:
             raise last_exc
 
         else:
-            # Blob endpoint (use BlobClient)
+            # Blob endpoint
             dest_url = self._build_dest_url_for_blob_sas(partner_container_sas, blob_name)
-            logger.info("Uploading to Blob endpoint. Masked dest: %s", self._mask(dest_url))
+            logger.info("Uploading to Blob endpoint. Masked dest: %s", mask_sas(dest_url))
             while attempt < self.upload_retry:
                 attempt += 1
                 try:
@@ -355,7 +386,7 @@ class PartnerUploader:
                     last_exc = e
                     txt = str(e)
                     if "AuthenticationFailed" in txt or "Signature" in txt or "403" in txt:
-                        logger.error("AuthenticationFailed (Blob) while uploading %s. Masked dest: %s", blob_name, self._mask(dest_url))
+                        logger.error("AuthenticationFailed (Blob) while uploading %s. Masked dest: %s", blob_name, mask_sas(dest_url))
                         logger.error("Common causes: SAS missing 'w' permission, SAS expired, or URL was malformed.")
                         logger.debug("Full Blob upload exception: %s", txt)
                     else:
@@ -381,37 +412,6 @@ class PartnerUploader:
         except Exception as e:
             return False, str(e)
 
-
-
-# -------------------------
-# Remote manifests uploader (optional)
-# -------------------------
-class RemoteManifestsUploader:
-    def __init__(self, enabled: bool, connection_string: Optional[str], container_name: Optional[str], prefix: Optional[str] = None):
-        self.enabled = bool(enabled)
-        self.conn_str = connection_string
-        self.container_name = container_name
-        self.prefix = prefix or ""
-        self._client: Optional[ContainerClient] = None
-        if self.enabled:
-            if not self.conn_str or not self.container_name:
-                raise ValueError("remote_manifests enabled but connection string/container_name missing")
-            svc = BlobServiceClient.from_connection_string(self.conn_str)
-            self._client = svc.get_container_client(self.container_name)
-            try:
-                self._client.create_container()
-            except Exception:
-                pass
-
-    def upload_manifest_dict(self, manifest: dict, blob_name: Optional[str] = None) -> str:
-        if not self.enabled or not self._client:
-            raise RuntimeError("Remote manifests not enabled/configured")
-        blob_name = blob_name or f"{self.prefix}{now_utc().strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex}.json"
-        blob_client = self._client.get_blob_client(blob_name)
-        data = json.dumps(manifest, indent=2, ensure_ascii=False).encode("utf-8")
-        blob_client.upload_blob(data, overwrite=True)
-        return blob_name
-
 # -------------------------
 # Orchestrator
 # -------------------------
@@ -426,11 +426,12 @@ class DataPushOrchestrator:
 
         # Azure source
         self.source_conn = cfg.get("azure_source", "connection_string", default="AZURE_SOURCE_CONN")
+        # self.source_conn = os.getenv(self.source_conn_env)
         self.source_container = cfg.get("azure_source", "container_name")
         if not self.source_conn or not self.source_container:
             raise SystemExit("Azure source connection string or container name missing in config or env")
 
-        # source SAS or its env var name (optional)
+        # source SAS
         self.source_sas = cfg.get("azure_source", "container_sas") or os.getenv(cfg.get("azure_source", "container_sas_env", default=""))
         self.source_prefix = cfg.get("azure_source", "source_prefix", default=None)
 
@@ -458,7 +459,7 @@ class DataPushOrchestrator:
         self.retry_attempts = int(cfg.get("submission", "retry_attempts", default=3))
         self.retry_delay_seconds = int(cfg.get("submission", "retry_delay_seconds", default=60))
 
-        # remote manifests config
+        # remote manifests config - create this BEFORE WatermarkStore so store can read remote watermark
         rconf = cfg.get("remote_manifests", default={})
         self.remote_manifests_enabled = bool(rconf.get("enabled", False))
         if self.remote_manifests_enabled:
@@ -469,8 +470,8 @@ class DataPushOrchestrator:
         else:
             self.remote_manifests = RemoteManifestsUploader(False, None, None)
 
-        # helpers
-        self.watermark_store = WatermarkStore(self.watermark_file)
+        # helpers (watermark store uses remote_manifests)
+        self.watermark_store = WatermarkStore(self.watermark_file, remote_manifests=self.remote_manifests)
         self.source_client = AzureSourceClient(self.source_conn, self.source_container)
         self.uploader = PartnerUploader(self.openai_key, self.containers_api, self.submissions_api)
 
@@ -479,7 +480,7 @@ class DataPushOrchestrator:
         self._account_name, self._account_key = self._parse_account_from_connstr(self.source_conn)
 
     # -------------------------
-    # Account parsing and SAS generation
+    # Account parsing + SAS generation
     # -------------------------
     def _parse_account_from_connstr(self, conn_str: str) -> Tuple[Optional[str], Optional[str]]:
         if not conn_str:
@@ -626,12 +627,8 @@ class DataPushOrchestrator:
     # -------------------------
     def copy_blob_via_azcopy(self, source_url: str, partner_container_sas: str, blob_name: str) -> None:
         src = source_url
-        # If source_url is a container SAS (no blob path), append properly encoded blob name
         if "?" in source_url and (f"/{self.source_container}/" in source_url or source_url.rstrip().endswith(self.source_container) or source_url.rstrip().endswith(self.source_container + "?") or source_url.rstrip().endswith(self.source_container + "/")):
             src = source_url.rstrip("/") + "/" + quote(blob_name, safe="")
-        else:
-            # If source_url seems to be a blob SAS already, assume it contains blob path
-            pass
         dst = partner_container_sas.rstrip("/") + "/" + quote(blob_name, safe="")
         cmd = [self.azcopy_path, "copy", src, dst, "--overwrite=false"]
         logger.info("Running azcopy: %s", " ".join(cmd))
@@ -653,7 +650,7 @@ class DataPushOrchestrator:
     # run loop
     # -------------------------
     def run_once(self) -> None:
-        logger.info("Starting data push run (final).")
+        logger.info("Starting data push run (with remote watermark).")
         to_send = self.blobs_to_send()
         if not to_send:
             logger.info("No blobs eligible for sending. Exiting.")
@@ -673,6 +670,16 @@ class DataPushOrchestrator:
             raise RuntimeError(f"Unexpected partner create response: {create_resp}")
         logger.info("Partner container created. Masked SAS: %s", mask_sas(partner_container_sas))
 
+        # optional quick test
+        try:
+            ok, msg = self.uploader.test_upload_small_file(partner_container_sas)
+            logger.info("Partner SAS quick test: %s - %s", ok, msg)
+            if not ok:
+                logger.error("Partner SAS quick test failed; aborting run.")
+                return
+        except Exception as e:
+            logger.warning("Partner SAS quick test raised: %s", e)
+
         submission_manifest = {
             "container_id": container_id,
             "create_response": create_resp,
@@ -681,7 +688,7 @@ class DataPushOrchestrator:
         }
         processed: List[Tuple[str, str]] = []
 
-        # Pre-generate container SAS if possible to reuse
+        # Pre-generate container SAS if possible
         if not self.source_sas:
             self.ensure_container_sas()
 
@@ -699,14 +706,12 @@ class DataPushOrchestrator:
                         try:
                             logger.info("Using azcopy for blob: %s (source_sas masked: %s)", blob_name, mask_sas(source_for_azcopy))
                             self.copy_blob_via_azcopy(source_for_azcopy, partner_container_sas, blob_name)
-                            # metadata: copy if exists else generate and upload
                             try:
                                 if self.source_client.metadata_blob_exists(metadata_blob_name):
                                     self.copy_blob_via_azcopy(source_for_azcopy, partner_container_sas, metadata_blob_name)
                                 else:
                                     with open(tmp_meta_path, "w", encoding="utf-8") as fm:
                                         json.dump(self.generate_metadata_obj(blob_name), fm)
-                                    # upload metadata via partner SAS using uploader helper (handles encoding & retries)
                                     self.uploader.upload_file_to_partner_using_sas(partner_container_sas, metadata_blob_name, tmp_meta_path)
                             except Exception as e_meta:
                                 logger.warning("Metadata copy/upload warning for %s: %s", metadata_blob_name, e_meta)
@@ -721,7 +726,6 @@ class DataPushOrchestrator:
                     raise RuntimeError("Azcopy disabled by config")
 
             except Exception as az_err:
-                # Fallback to SDK download/upload path
                 logger.info("Falling back to SDK download/upload for %s due to: %s", blob_name, az_err)
                 try:
                     self.source_client.download_blob_to_path(blob_name, tmp_blob_path)
@@ -737,7 +741,6 @@ class DataPushOrchestrator:
                         with open(tmp_meta_path, "w", encoding="utf-8") as fm:
                             json.dump(self.generate_metadata_obj(blob_name), fm)
 
-                    # Upload blob and metadata via partner SAS (uploader handles encoding & retries)
                     try:
                         self.uploader.upload_file_to_partner_using_sas(partner_container_sas, blob_name, tmp_blob_path)
                         self.uploader.upload_file_to_partner_using_sas(partner_container_sas, metadata_blob_name, tmp_meta_path)
@@ -768,7 +771,7 @@ class DataPushOrchestrator:
             if upload_status == "success":
                 processed.append((last_mod_iso, blob_name))
 
-        # persist submission manifest (remote if configured, else local)
+        # persist submission manifest remotely or locally
         manifest_blob_name = f"{now_utc().strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex}.json"
         manifest_uploaded = False
         remote_blob_path = None
@@ -785,7 +788,7 @@ class DataPushOrchestrator:
             atomic_write_json(local_path, submission_manifest)
             logger.info("Wrote submission manifest locally to %s", local_path)
 
-        # POST submission to partner (with retries)
+        # post submission
         submission_response = None
         if self.auto_submit:
             attempt = 0
@@ -805,7 +808,6 @@ class DataPushOrchestrator:
 
         if submission_response:
             submission_manifest["submission_response"] = submission_response
-            # update manifest storage with submission_response
             if manifest_uploaded:
                 try:
                     self.remote_manifests.upload_manifest_dict(submission_manifest, blob_name=manifest_blob_name)
@@ -814,7 +816,7 @@ class DataPushOrchestrator:
             else:
                 atomic_write_json(str(Path(self.manifests_dir) / manifest_blob_name), submission_manifest)
 
-        # Advance watermark using processed successes only
+        # advance watermark based on successes
         if processed:
             processed_dt_and_names: List[Tuple[datetime, str]] = []
             for ts_iso, name in processed:
@@ -828,14 +830,13 @@ class DataPushOrchestrator:
             names_at_max = [n for t, n in processed_dt_and_names if t == max_dt]
             watermark_last_blob = max(names_at_max) if names_at_max else ""
             watermark_iso = max_dt.isoformat()
+            # write both local and remote inside WatermarkStore.set_watermark
             self.watermark_store.set_watermark(watermark_iso, watermark_last_blob)
             logger.info("Advanced watermark to %s last_blob=%s", watermark_iso, watermark_last_blob)
         else:
             logger.info("No blobs processed successfully; watermark unchanged")
 
-        # -------------------------
-        # Summary printed to terminal
-        # -------------------------
+        # summary
         total = len(to_send)
         success_files = [f["blob_name"] for f in submission_manifest["files"] if f["upload_status"] == "success"]
         failed_files = [f["blob_name"] for f in submission_manifest["files"] if f["upload_status"] != "success"]
@@ -848,7 +849,6 @@ class DataPushOrchestrator:
             print(f"  ✓ {b}")
         print(f"Failed uploads: {len(failed_files)}")
         for b in failed_files:
-            # print a trimmed explanation if available
             entry = next((x for x in submission_manifest["files"] if x["blob_name"] == b), None)
             reason = entry["upload_status"] if entry else ""
             print(f"  ✖ {b} -> {reason}")
@@ -859,10 +859,10 @@ class DataPushOrchestrator:
         logger.info("Run finished.")
 
 # -------------------------
-# CLI entrypoint
+# CLI
 # -------------------------
 def main():
-    parser = argparse.ArgumentParser(description="Push new blobs (final) with SAS & azcopy support.")
+    parser = argparse.ArgumentParser(description="Push new blobs (remote watermark) with SAS & azcopy support.")
     parser.add_argument("--config", "-c", required=True, help="Path to YAML config")
     args = parser.parse_args()
 

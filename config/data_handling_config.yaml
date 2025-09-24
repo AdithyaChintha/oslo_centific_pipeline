@@ -36,7 +36,7 @@ remote_manifests:
   enabled: true                    # set to true to upload manifests to an azure container
   connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"   # env var name for Azure storage conn for manifests container
   container_name: "submission-summary"         # container where manifests will be stored
-  prefix: None           # optional blob path prefix inside manifests container
+  prefix: ""          # optional blob path prefix inside manifests container
 
 logging:
   level: "INFO"
