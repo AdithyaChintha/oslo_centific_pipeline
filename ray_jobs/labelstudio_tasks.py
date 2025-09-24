@@ -806,6 +806,7 @@ def generate_multiview_4view_labelstudio_task(shard_output_dir, assigned_views,
     # Extract metadata fields with fallbacks
     if session_metadata:
         home_id = session_metadata.get("home_id", "")
+        moderator_id = session_metadata.get("moderator_id", "")
         start_datetime = session_metadata.get("start_datetime", "")
         end_datetime = session_metadata.get("end_datetime", "")
         
@@ -908,7 +909,7 @@ def generate_multiview_4view_labelstudio_task(shard_output_dir, assigned_views,
             "total_views_processed": len(assigned_views),
             "full_video_link":"",
             "full_audio_link":"",
-            "moderator_id":""
+            "moderator_id": moderator_id
         },
         "predictions": [{
             "model_version": "multi_view_4view_v1.0",

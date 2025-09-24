@@ -424,6 +424,7 @@ def parse_completion_metadata_json(completion_content: str) -> Optional[Dict]:
                 "id": metadata["id"],
                 "home_id": metadata["home_id"],
                 "participant_id": metadata["participant_id"],
+                "moderator_id": metadata.get("moderator_id", ""),
                 "activity": metadata["activity"],
                 "specific_activity": metadata.get("specific_activity", ""),
                 "domain": metadata.get("domain", ""),

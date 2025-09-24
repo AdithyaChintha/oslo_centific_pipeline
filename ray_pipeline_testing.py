@@ -1846,6 +1846,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
             logger.info(f"   Activity: {session_metadata.get('activity', 'Unknown')}")
             logger.info(f"   Domain: {session_metadata.get('domain', 'Unknown')}")
             logger.info(f"   Duration: {session_metadata.get('duration_minutes', 'Unknown')} minutes")
+            logger.info(f"   Moderator ID: {session_metadata.get('moderator_id', 'Not set')}")
         else:
             logger.warning(f"⚠️ No session metadata available for session: {session_id}")
             # Create default metadata structure
