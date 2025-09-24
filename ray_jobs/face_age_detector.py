@@ -526,13 +526,19 @@ def parse_timestamp(timestamp_str: str) -> float:
         return 0.0
 
 @ray.remote(num_gpus=0.06, max_calls=1)
-def process_video_chunks_for_face_detection(chunk_paths: list, config=None, 
+def process_video_chunks_for_face_detection(chunk_paths: list, config=None,
                                           frame_interval: int = None, save_frames: bool = False,
-                                          chunk_duration_sec: int = 60):
+                                          chunk_duration_sec: int = 60, enable_timing=False, timing_id=None):
     """
     Process video chunks for face age detection with proper result aggregation.
     Fixed to avoid nested Ray remote calls.
     """
+    from datetime import datetime
+    import time
+
+    start_time = time.time() if enable_timing else None
+    start_time_iso = datetime.utcnow().isoformat() + "Z" if enable_timing else None
+
     try:
         # Process chunks sequentially using the sync version
         all_flagged_segments = []
@@ -602,8 +608,9 @@ def process_video_chunks_for_face_detection(chunk_paths: list, config=None,
         combined_detailed_analysis["gender_distribution"] = dict(combined_detailed_analysis["gender_distribution"])
         combined_detailed_analysis["emotion_distribution"] = dict(combined_detailed_analysis["emotion_distribution"])
         combined_detailed_analysis["race_distribution"] = dict(combined_detailed_analysis["race_distribution"])
-        
-        return {
+
+        # Build the base result dictionary
+        result = {
             "total_faces_detected": total_faces,
             "total_processed_frames": total_frames,
             "flagged_segments": all_flagged_segments,
@@ -612,10 +619,28 @@ def process_video_chunks_for_face_detection(chunk_paths: list, config=None,
             "total_processing_time_seconds": total_processing_time,
             "success": True
         }
+
+        # Add timing data only if timing is enabled
+        if enable_timing and start_time:
+            end_time = time.time()
+            end_time_iso = datetime.utcnow().isoformat() + "Z"
+            execution_time = end_time - start_time
+
+            result["timing"] = {
+                "execution_time": execution_time,
+                "start_time": start_time_iso,
+                "end_time": end_time_iso,
+                "timing_id": timing_id,
+                "status": "completed"
+            }
+
+        return result
         
     except Exception as e:
         logger.error(f"Error in process_video_chunks_for_face_detection: {e}")
-        return {
+
+        # Build error result
+        error_result = {
             "error": str(e),
             "success": False,
             "total_faces_detected": 0,
@@ -623,6 +648,22 @@ def process_video_chunks_for_face_detection(chunk_paths: list, config=None,
             "flagged_segments": [],
             "total_processing_time_seconds": 0
         }
+
+        # Add timing data for failed case if timing was enabled
+        if enable_timing and start_time:
+            end_time = time.time()
+            end_time_iso = datetime.utcnow().isoformat() + "Z"
+            execution_time = end_time - start_time
+
+            error_result["timing"] = {
+                "execution_time": execution_time,
+                "start_time": start_time_iso,
+                "end_time": end_time_iso,
+                "timing_id": timing_id,
+                "status": "failed"
+            }
+
+        return error_result
 
 if __name__ == "__main__":
     """Test with sample video if provided."""

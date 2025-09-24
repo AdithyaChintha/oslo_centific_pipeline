@@ -10,6 +10,8 @@ import time
 import logging
 import requests
 from pathlib import Path
+from datetime import datetime
+import time
 
 logger = logging.getLogger("nsfw_detector")
 
@@ -333,7 +335,7 @@ def create_flagged_segments(nsfw_detections: list, segment_buffer: float = 5.0) 
 
 @ray.remote
 def process_video_chunks_for_nsfw(chunk_paths: list, model_path: str = None, labels_path: str = None, 
-                                 confidence_threshold: float = 0.5, chunk_duration_sec: int = 60):
+                                 confidence_threshold: float = 0.5, chunk_duration_sec: int = 60, enable_timing=False, timing_id=None):
     """
     Distribute video chunks across multiple GPU workers for NSFW detection.
     
@@ -351,6 +353,9 @@ def process_video_chunks_for_nsfw(chunk_paths: list, model_path: str = None, lab
     """
     logger.info(f"Starting NSFW detection for {len(chunk_paths)} chunks")
     
+
+    start_time = time.time() if enable_timing else None
+    start_time_iso = datetime.utcnow().isoformat() + "Z" if enable_timing else None
     try:
         # Always ensure model files are available before creating workers
         logger.info("Ensuring NSFW model files are available...")
@@ -423,8 +428,9 @@ def process_video_chunks_for_nsfw(chunk_paths: list, model_path: str = None, lab
         flagged_segments = create_flagged_segments(all_nsfw_detections)
         
         logger.info(f"NSFW detection complete: {len(all_nsfw_detections)} detections in {len(flagged_segments)} segments")
-        
-        return {
+
+        # Build the base result dictionary
+        result = {
             "total_nsfw_detections": len(all_nsfw_detections),
             "total_processing_time_seconds": round(total_processing_time, 2),
             "nsfw_timestamps": all_nsfw_detections,
@@ -435,10 +441,28 @@ def process_video_chunks_for_nsfw(chunk_paths: list, model_path: str = None, lab
             "labels_path": labels_path,
             "success": True
         }
+
+        # Add timing data only if timing is enabled
+        if enable_timing and start_time:
+            end_time = time.time()
+            end_time_iso = datetime.utcnow().isoformat() + "Z"
+            execution_time = end_time - start_time
+
+            result["timing"] = {
+                "execution_time": execution_time,
+                "start_time": start_time_iso,
+                "end_time": end_time_iso,
+                "timing_id": timing_id,
+                "status": "completed"
+            }
+
+        return result
         
     except Exception as e:
         logger.error(f"Failed to setup model files or process chunks: {e}")
-        return {
+
+        # Build error result
+        error_result = {
             "success": False,
             "error": str(e),
             "total_nsfw_detections": 0,
@@ -446,6 +470,22 @@ def process_video_chunks_for_nsfw(chunk_paths: list, model_path: str = None, lab
             "chunks_processed": 0,
             "successful_chunks": 0
         }
+
+        # Add timing data for failed case if timing was enabled
+        if enable_timing and start_time:
+            end_time = time.time()
+            end_time_iso = datetime.utcnow().isoformat() + "Z"
+            execution_time = end_time - start_time
+
+            error_result["timing"] = {
+                "execution_time": execution_time,
+                "start_time": start_time_iso,
+                "end_time": end_time_iso,
+                "timing_id": timing_id,
+                "status": "failed"
+            }
+
+        return error_result
     finally:
         # Proactively shut down all workers to release GPU memory
         try:

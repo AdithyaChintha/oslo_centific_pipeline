@@ -24,28 +24,76 @@ def lighting_by_second_task(
     merge_min_sec: float = 1.0,
     sat_low_flag: float = 25.0,
     sat_high_flag: float = 25.0,
+    enable_timing: bool = False,
+    timing_id: Optional[str] = None,
 ) -> Tuple[str, str]:
     """
     Ray task wrapper for Lighting Detection with rich configuration.
     If output_dir is None, defaults to the video's directory.
     """
+    from datetime import datetime
+    import time
     from video_process.lighting import run_lighting_two_jsons
-    return run_lighting_two_jsons(
-        video_path,
-        output_dir=output_dir,
-        fps_sample=fps_sample,
-        resize_short=resize_short,
-        max_frames_per_sec=max_frames_per_sec,
-        low_sat_cut=low_sat_cut,
-        high_sat_cut=high_sat_cut,
-        thresholds=thresholds,
-        dark_mean=dark_mean,
-        low_mean=low_mean,
-        bright_mean=bright_mean,
-        merge_min_sec=merge_min_sec,
-        sat_low_flag=sat_low_flag,
-        sat_high_flag=sat_high_flag,
-    )
+
+    start_time = time.time() if enable_timing else None
+    start_time_iso = datetime.utcnow().isoformat() + "Z" if enable_timing else None
+
+    try:
+        result = run_lighting_two_jsons(
+            video_path,
+            output_dir=output_dir,
+            fps_sample=fps_sample,
+            resize_short=resize_short,
+            max_frames_per_sec=max_frames_per_sec,
+            low_sat_cut=low_sat_cut,
+            high_sat_cut=high_sat_cut,
+            thresholds=thresholds,
+            dark_mean=dark_mean,
+            low_mean=low_mean,
+            bright_mean=bright_mean,
+            merge_min_sec=merge_min_sec,
+            sat_low_flag=sat_low_flag,
+            sat_high_flag=sat_high_flag,
+        )
+
+        # If timing is enabled, return a dict instead of tuple
+        if enable_timing and start_time:
+            end_time = time.time()
+            end_time_iso = datetime.utcnow().isoformat() + "Z"
+            execution_time = end_time - start_time
+
+            return {
+                "result": result,
+                "timing": {
+                    "execution_time": execution_time,
+                    "start_time": start_time_iso,
+                    "end_time": end_time_iso,
+                    "timing_id": timing_id,
+                    "status": "completed"
+                }
+            }
+        else:
+            return result
+
+    except Exception as e:
+        # If timing is enabled, return error with timing
+        if enable_timing and start_time:
+            end_time = time.time()
+            end_time_iso = datetime.utcnow().isoformat() + "Z"
+            execution_time = end_time - start_time
+
+            return {
+                "error": str(e),
+                "timing": {
+                    "execution_time": execution_time,
+                    "start_time": start_time_iso,
+                    "end_time": end_time_iso,
+                    "timing_id": timing_id,
+                    "status": "failed"
+                }
+            }
+        else:
+            raise
 
 # ---------------------------------------------------------------------------
 # Demo driver

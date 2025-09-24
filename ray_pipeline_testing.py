@@ -22,13 +22,15 @@ from utils.blob_utils import (
     detect_stuck_videos, reset_stuck_videos,
     poll_azure_videos_with_checklist, poll_azure_videos, find_corresponding_audio,
     download_video_audio_pair, download_video_audio_pair_simple, cleanup_downloaded_files,
-    upload_output_directory_to_blob, upload_output_directory_with_sas, 
+    upload_output_directory_to_blob, upload_output_directory_with_sas, upload_output_directory_with_sas_optimized,
     update_labelstudio_tasks_with_new_urls, validate_shard_urls, load_pipeline_config,
     save_video_list_progress
 )
 from utils.dynamic_erp_processor import integrate_erp_audio_with_labelstudio_tasks
 from utils.multi_chunk_blob_utils import download_ready_sessions
-
+from utils.pipeline_timer import PipelineTimer
+from utils.pipeline_timer import generate_hierarchical_timing_structure, generate_performance_summary
+from utils.performance_csv_exporter import export_timing_data_to_single_csv
 
 
 from azure.storage.blob import generate_blob_sas, BlobSasPermissions, BlobServiceClient
@@ -1681,17 +1683,20 @@ def process_single_session(session_path: str, session_id: str, output_base_dir: 
     """
     start_time = time.time()
     
+    timer = PipelineTimer()
+
     try:
         # Download session
         logger.info(f"📥 Downloading session: {session_id}")
-        download_result = download_ready_sessions(
-            blob_service_client=create_azure_blob_client(azure_config),
-            container_name=azure_config.get('container'),
-            input_prefix=session_path,
-            local_download_dir=pipeline_config['local_storage']['temp_download_dir'],
-            max_sessions=1,
-            use_parallel_chunks=True
-        )
+        with timer.time_operation(f"session.download"):
+            download_result = download_ready_sessions(
+                blob_service_client=create_azure_blob_client(azure_config),
+                container_name=azure_config.get('container'),
+                input_prefix=session_path,
+                local_download_dir=pipeline_config['local_storage']['temp_download_dir'],
+                max_sessions=1,
+                use_parallel_chunks=True
+            )
         
         if not download_result.get("success") or not download_result.get("download_results"):
             return {"success": False, "error": "Failed to download session"}
@@ -1715,16 +1720,61 @@ def process_single_session(session_path: str, session_id: str, output_base_dir: 
         pipeline_result = pipeline_main_multichunks(
             download_results=download_result,
             output_dir=session_output_dir,
-            azure_output_prefix=f"processed/{session_id}",
+            azure_output_prefix=f"{pipeline_config['azure_storage']['output_blob_prefix']}{session_id}",
             blob_client=create_azure_blob_client(azure_config),
             container_name=azure_config.get('container'),
             account_name=azure_config.get('account-name'),
             account_key=azure_config.get('account-key'),
-            local_download_dir=pipeline_config['local_storage']['temp_download_dir']
+            local_download_dir=pipeline_config['local_storage']['temp_download_dir'],
+            timer=timer,
+            input_blob_prefix=pipeline_config['azure_storage']['input_blob_prefix']
         )
         
         processing_time = time.time() - start_time
         
+        # Generate hierarchical timing data
+
+        raw_timing_data = timer.get_timing_data()
+        hierarchical_timing_data = generate_hierarchical_timing_structure(
+            raw_timing_data, session_id, processing_time, start_time, pipeline_result
+        )
+        hierarchical_timing_data["performance_metrics"] = generate_performance_summary(hierarchical_timing_data)
+
+        # Export to single CSV file - SAVE TO: output_folder/session_id/{session_id}_timing_analysis.csv
+        csv_file_path = export_timing_data_to_single_csv(
+            hierarchical_timing_data, session_output_dir, session_id
+        )
+
+        logger.info(f"📊 Timing analysis exported to: {csv_file_path}")
+
+        # Upload CSV file to blob storage
+        try:
+            if azure_config and csv_file_path and os.path.exists(csv_file_path):
+                blob_service_client = create_azure_blob_client(azure_config)
+                csv_filename = os.path.basename(csv_file_path)
+                csv_blob_path = f"{pipeline_config['azure_storage']['output_blob_prefix']}{session_id}/timing_analysis/{csv_filename}"
+                container_name = azure_config.get('container')
+
+                logger.info(f"📤 Uploading CSV to blob: {csv_blob_path}")
+
+                # Get the specific blob client for this file
+                blob_client = blob_service_client.get_blob_client(
+                    container=container_name,
+                    blob=csv_blob_path
+                )
+
+                with open(csv_file_path, 'rb') as csv_file:
+                    blob_client.upload_blob(
+                        data=csv_file,
+                        overwrite=True
+                    )
+
+                logger.info(f"✅ CSV successfully uploaded to: {csv_blob_path}")
+            else:
+                logger.warning("⚠️ CSV upload skipped - missing Azure config or CSV file")
+        except Exception as upload_error:
+            logger.error(f"❌ Failed to upload CSV to blob: {upload_error}")
+
         return {
             "success": True,
             "processing_time": processing_time,
@@ -1735,7 +1785,15 @@ def process_single_session(session_path: str, session_id: str, output_base_dir: 
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_output_prefix: str=None, blob_client:str = None, container_name:str = None, account_name: str = None, account_key: str = None, local_download_dir: str = None):
+def extract_video_name_from_path(video_path: str) -> str:
+    """Extract clean video name from file path"""
+    import os
+    filename = os.path.basename(video_path)
+    # Remove extension and clean up
+    name = os.path.splitext(filename)[0]
+    return name
+
+def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_output_prefix: str=None, blob_client:str = None, container_name:str = None, account_name: str = None, account_key: str = None, local_download_dir: str = None, timer=None, input_blob_prefix = None):
     
     try:
         if not ray.is_initialized():
@@ -1788,6 +1846,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
             logger.info(f"   Activity: {session_metadata.get('activity', 'Unknown')}")
             logger.info(f"   Domain: {session_metadata.get('domain', 'Unknown')}")
             logger.info(f"   Duration: {session_metadata.get('duration_minutes', 'Unknown')} minutes")
+            logger.info(f"   Moderator ID: {session_metadata.get('moderator_id', 'Not set')}")
         else:
             logger.warning(f"⚠️ No session metadata available for session: {session_id}")
             # Create default metadata structure
@@ -1819,6 +1878,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
             
             for video_id, video_download_result in video_downloads:
                 local_video_path = video_download_result['local_path']
+                video_name = extract_video_name_from_path(local_video_path)
                 #local_video_path = "VID_20250809_094836_00_045.insv" #temp for debug
                 logger.info(f"local_video_path:{local_video_path}")
                 
@@ -1829,35 +1889,65 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                 
                 tracker.initialize_chunk_tracking(chunk_id, chunk_type, local_video_path, sequence_number)
                 update_tracking(chunk_id, "download", "completed")
-                
-                if local_video_path.lower().endswith('.insv'):
-                    # Try the simpler single-output
-                    update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "processing")
-                    try:
-                        mp4_result = ray.get(insv_unwarp_task.remote(local_video_path, out_dir=os.path.join(output_dir, "4views")))
+                if timer:
+                    with timer.time_operation(f"video.{video_name}.unwarping"):
+                        if local_video_path.lower().endswith('.insv'):
+                            # Try the simpler single-output
+                            update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "processing")
+                            try:
+                                mp4_result = ray.get(insv_unwarp_task.remote(local_video_path, out_dir=os.path.join(output_dir, "4views")))
 
-                        # Check if the unwarp task returned an error
-                        if "__error__" in mp4_result:
-                            error_msg = mp4_result["__error__"]
-                            logger.error(f"INSV unwarp task failed: {error_msg}")
-                            update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "error",
-                                           error_message=error_msg)
-                            continue  # Skip to next chunk
+                                # Check if the unwarp task returned an error
+                                if "__error__" in mp4_result:
+                                    error_msg = mp4_result["__error__"]
+                                    logger.error(f"INSV unwarp task failed: {error_msg}")
+                                    update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "error",
+                                                error_message=error_msg)
+                                    continue  # Skip to next chunk
 
-                        flat_result = mp4_result
-                        update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "completed",
-                                       output_path=mp4_result.get('output_path'))
-                        update_tracking(chunk_id, "video_processing.view_unwarping", "completed",
-                                       views_created=flat_result)
-                    except Exception as e:
-                        logger.error(f"Exception raised in video conversion to mp4: {e}")
-                        update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "error",
-                                       error_message=str(e))
-                        continue  # Skip to next chunk
+                                flat_result = mp4_result
+                                update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "completed",
+                                            output_path=mp4_result.get('output_path'))
+                                update_tracking(chunk_id, "video_processing.view_unwarping", "completed",
+                                            views_created=flat_result)
+                            except Exception as e:
+                                logger.error(f"Exception raised in video conversion to mp4: {e}")
+                                update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "error",
+                                            error_message=str(e))
+                                continue  # Skip to next chunk
+                        else:
+                            flat_result = local_video_path
+                            update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "skipped")
+                            update_tracking(chunk_id, "video_processing.view_unwarping", "skipped")
                 else:
-                    flat_result = local_video_path
-                    update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "skipped")
-                    update_tracking(chunk_id, "video_processing.view_unwarping", "skipped")
+                    if local_video_path.lower().endswith('.insv'):
+                        # Try the simpler single-output
+                        update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "processing")
+                        try:
+                            mp4_result = ray.get(insv_unwarp_task.remote(local_video_path, out_dir=os.path.join(output_dir, "4views")))
+
+                            # Check if the unwarp task returned an error
+                            if "__error__" in mp4_result:
+                                error_msg = mp4_result["__error__"]
+                                logger.error(f"INSV unwarp task failed: {error_msg}")
+                                update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "error",
+                                            error_message=error_msg)
+                                continue  # Skip to next chunk
+
+                            flat_result = mp4_result
+                            update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "completed",
+                                        output_path=mp4_result.get('output_path'))
+                            update_tracking(chunk_id, "video_processing.view_unwarping", "completed",
+                                        views_created=flat_result)
+                        except Exception as e:
+                            logger.error(f"Exception raised in video conversion to mp4: {e}")
+                            update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "error",
+                                        error_message=str(e))
+                            continue  # Skip to next chunk
+                    else:
+                        flat_result = local_video_path
+                        update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "skipped")
+                        update_tracking(chunk_id, "video_processing.view_unwarping", "skipped")
                 
                 # Check if flat_result is valid before iterating
                 if not isinstance(flat_result, dict) or "__error__" in flat_result:
@@ -1879,23 +1969,42 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                     out_dir = os.path.join(output_dir, f"{vn}_shards")
                     os.makedirs(out_dir, exist_ok=True)
                     view_shard_urls.setdefault(vn, {})  # keep structure for later upload
-
-                    if is_walkthrough:
-                        logger.info("=" * 120)
-                        logger.info("🔄 Walkthrough video splitting - View: %s, Path: %s, Duration: %ss, Overlap: %ss, Step: %ss",
-                                    vn, vp, duration_sec, overlap_sec, max(0, duration_sec - overlap_sec))
-                        logger.info("=" * 120)
-                        ref = split_video_into_shards_with_overlap.remote(
-                            vp, output_dir=out_dir, duration_sec=duration_sec, overlap_sec=overlap_sec, start_idx=global_part_idx
-                        )
+                    if timer:
+                        with timer.time_operation(f"video.{video_name}.video_sharding"):
+                            if is_walkthrough:
+                                logger.info("=" * 120)
+                                logger.info("🔄 Walkthrough video splitting - View: %s, Path: %s, Duration: %ss, Overlap: %ss, Step: %ss",
+                                            vn, vp, duration_sec, overlap_sec, max(0, duration_sec - overlap_sec))
+                                logger.info("=" * 120)
+                                ref = split_video_into_shards_with_overlap.remote(
+                                    vp, output_dir=out_dir, duration_sec=duration_sec, overlap_sec=overlap_sec, start_idx=global_part_idx
+                                )
+                            else:
+                                logger.info("=" * 120)
+                                logger.info("📹 Normal video splitting - View: %s, Path: %s, Duration: %ss, Overlap: 0s", vn, vp, duration_sec)
+                                logger.info("=" * 120)
+                                ref = split_video_into_shards.remote(
+                                    vp, output_dir=out_dir, duration_sec=duration_sec, start_idx=global_part_idx
+                                )
+                            split_tasks.append((vn, ref, out_dir))
                     else:
-                        logger.info("=" * 120)
-                        logger.info("📹 Normal video splitting - View: %s, Path: %s, Duration: %ss, Overlap: 0s", vn, vp, duration_sec)
-                        logger.info("=" * 120)
-                        ref = split_video_into_shards.remote(
-                            vp, output_dir=out_dir, duration_sec=duration_sec, start_idx=global_part_idx
-                        )
-                    split_tasks.append((vn, ref, out_dir))
+                        if is_walkthrough:
+                            logger.info("=" * 120)
+                            logger.info("🔄 Walkthrough video splitting - View: %s, Path: %s, Duration: %ss, Overlap: %ss, Step: %ss",
+                                        vn, vp, duration_sec, overlap_sec, max(0, duration_sec - overlap_sec))
+                            logger.info("=" * 120)
+                            ref = split_video_into_shards_with_overlap.remote(
+                                vp, output_dir=out_dir, duration_sec=duration_sec, overlap_sec=overlap_sec, start_idx=global_part_idx
+                            )
+                        else:
+                            logger.info("=" * 120)
+                            logger.info("📹 Normal video splitting - View: %s, Path: %s, Duration: %ss, Overlap: 0s", vn, vp, duration_sec)
+                            logger.info("=" * 120)
+                            ref = split_video_into_shards.remote(
+                                vp, output_dir=out_dir, duration_sec=duration_sec, start_idx=global_part_idx
+                            )
+                        split_tasks.append((vn, ref, out_dir))
+
 
                 # Prefer parallel; on failure, error tracking
                 try:
@@ -1956,7 +2065,20 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
             for audio_id, audio_download_result in audio_downloads:
                 local_audio_path = audio_download_result['local_path']
                 logger.info(f"local_audio_path:{local_audio_path}")
-                
+
+                # Copy original audio file to centralized audio_files folder for upload
+                import shutil
+                audio_files_dir = os.path.join(output_dir, "audio_files")
+                os.makedirs(audio_files_dir, exist_ok=True)
+
+                original_audio_filename = os.path.basename(local_audio_path)
+                output_audio_path = os.path.join(audio_files_dir, original_audio_filename)
+                try:
+                    shutil.copy2(local_audio_path, output_audio_path)
+                    logger.info(f"✅ Copied original audio file to audio_files folder: {output_audio_path}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to copy audio file to audio_files folder: {e}")
+
                 # Initialize tracking for this audio chunk
                 audio_chunk_id = extract_chunk_id_from_path(local_audio_path) or f"{audio_id}-audio"
                 audio_sequence_number = extract_sequence_number_from_path(local_audio_path) or audio_id
@@ -1966,40 +2088,41 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                 update_tracking(audio_chunk_id, "download", "completed")
                 
                 try:
-                    if is_walkthrough:
-                        # BIG DEBUG STATEMENT FOR WALKTHROUGH AUDIO SPLITTING
-                        logger.info("=" * 120)
-                        logger.info("🎵 Walkthrough audio splitting - Path: %s, Duration: 180s, Overlap: 60s, Step: 120s", local_audio_path)
-                        logger.info("=" * 120)
+                    with timer.time_operation(f"video.{video_name}.audio_sharding"):
+                        if is_walkthrough:
+                            # BIG DEBUG STATEMENT FOR WALKTHROUGH AUDIO SPLITTING
+                            logger.info("=" * 120)
+                            logger.info("🎵 Walkthrough audio splitting - Path: %s, Duration: 180s, Overlap: 60s, Step: 120s", local_audio_path)
+                            logger.info("=" * 120)
+                            
+                            # Use sliding window overlap for audio as well
+                            chunk_audio_shards = ray.get(split_audio_into_shards_with_overlap.remote(
+                                local_audio_path,
+                                output_dir=os.path.join(output_dir, "audio_shards"),
+                                duration_sec=duration_sec,
+                                overlap_sec=overlap_sec,  # 60 seconds overlap
+                                start_idx=global_part_idx  # Pass the global part index
+                            ))
+                        else:
+                            # BIG DEBUG STATEMENT FOR NORMAL AUDIO SPLITTING
+                            logger.info("=" * 120)
+                            logger.info("🎵 Normal audio splitting - Path: %s, Duration: 180s, Overlap: 0s", local_audio_path)
+                            logger.info("=" * 120)
+                            
+                            # Normal processing without overlap
+                            chunk_audio_shards = ray.get(split_audio_into_shards.remote(
+                                local_audio_path,
+                                output_dir=os.path.join(output_dir, "audio_shards"),
+                                duration_sec=duration_sec,
+                                start_idx=global_part_idx  # Pass the global part index
+                            ))
+                        audio_shards.extend(chunk_audio_shards)
+                        global_part_idx += len(chunk_audio_shards)
+                        logger.info(f"Added {len(chunk_audio_shards)} audio shards for chunk {audio_id}, global_part_idx now: {global_part_idx}")
                         
-                        # Use sliding window overlap for audio as well
-                        chunk_audio_shards = ray.get(split_audio_into_shards_with_overlap.remote(
-                            local_audio_path,
-                            output_dir=os.path.join(output_dir, "audio_shards"),
-                            duration_sec=duration_sec,
-                            overlap_sec=overlap_sec,  # 60 seconds overlap
-                            start_idx=global_part_idx  # Pass the global part index
-                        ))
-                    else:
-                        # BIG DEBUG STATEMENT FOR NORMAL AUDIO SPLITTING
-                        logger.info("=" * 120)
-                        logger.info("🎵 Normal audio splitting - Path: %s, Duration: 180s, Overlap: 0s", local_audio_path)
-                        logger.info("=" * 120)
-                        
-                        # Normal processing without overlap
-                        chunk_audio_shards = ray.get(split_audio_into_shards.remote(
-                            local_audio_path,
-                            output_dir=os.path.join(output_dir, "audio_shards"),
-                            duration_sec=duration_sec,
-                            start_idx=global_part_idx  # Pass the global part index
-                        ))
-                    audio_shards.extend(chunk_audio_shards)
-                    global_part_idx += len(chunk_audio_shards)
-                    logger.info(f"Added {len(chunk_audio_shards)} audio shards for chunk {audio_id}, global_part_idx now: {global_part_idx}")
-                    
-                    # Update tracking for audio sharding (using a generic view name for audio)
-                    update_tracking(audio_chunk_id, "view_sharding.audio", "completed",
-                                   shard_count=len(chunk_audio_shards), shard_paths=chunk_audio_shards)
+                        # Update tracking for audio sharding (using a generic view name for audio)
+                        update_tracking(audio_chunk_id, "view_sharding.audio", "completed",
+                                    shard_count=len(chunk_audio_shards), shard_paths=chunk_audio_shards)
                 except Exception as e:
                     logger.error(f"Error processing audio chunk {audio_id}: {e}")
                     update_tracking(audio_chunk_id, "view_sharding.audio", "error",
@@ -2064,7 +2187,8 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                 total_shard_count=min_shards,
                 video_name=session_id,
                 multi_chunk_process=True,
-                session_metadata=session_metadata
+                session_metadata=session_metadata,
+                timer = timer
             )
             
             label_studio_tasks.append(shard_results['label_studio_task'])
@@ -2078,7 +2202,12 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
         generate_final_combined_model_results_json(output_dir, consolidated_json_paths)
         
         logger.info(f"🎯 Running video-level domain classification for video: {session_id}")
-        domain_result = process_video_level_domain_and_update_tasks(output_dir, session_id)
+        if timer:
+            with timer.time_operation(f"video.{session_id}.domain_classification"):
+                domain_result = process_video_level_domain_and_update_tasks(output_dir, session_id)
+        else:
+            domain_result = process_video_level_domain_and_update_tasks(output_dir, session_id)
+
         if domain_result.get("success", False):
             logger.info(f"✅ Video-level domain processing completed: {domain_result.get('video_domain', 'Unknown')}")
         else:
@@ -2088,11 +2217,24 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
         
         if blob_client and container_name:
             video_name_for_upload = os.path.basename(output_dir)
-            upload_result = upload_output_directory_with_sas(
-                output_dir, blob_client, container_name,
-                azure_output_prefix, video_name_for_upload,
-                account_name, account_key
-            )
+            upload_config = pipeline_config.get('blob_upload', {})
+            if timer:
+                 with timer.time_operation(f"video.{session_id}.upload"):
+                    upload_result = upload_output_directory_with_sas_optimized(
+                        output_dir, blob_client, container_name,
+                        azure_output_prefix, video_name_for_upload,
+                        account_name, account_key,
+                        365,  # sas_expiry_days
+                        upload_config  # config dict with blob_upload settings
+                    )
+            else:
+                upload_result = upload_output_directory_with_sas_optimized(
+                        output_dir, blob_client, container_name,
+                        azure_output_prefix, video_name_for_upload,
+                        account_name, account_key,
+                        365,  # sas_expiry_days
+                        upload_config  # config dict with blob_upload settings
+                    )
             logger.info(f" Multi-view upload result: {' Success' if upload_result['success'] else '❌ Failed'}")
             
             if upload_result['success']:
@@ -2130,7 +2272,8 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
             container_name=container_name,
             blob_base_path=azure_output_prefix,
             account_key=account_key,
-            labelstudio_tasks=label_studio_tasks
+            labelstudio_tasks=label_studio_tasks,
+            input_blob_prefix=input_blob_prefix
         )
         
         logger.info(f"🎬 Dynamic ERP and audio processing completed for session: {session_id}")
@@ -2413,10 +2556,14 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
         
         if azure_blob_client and azure_container:
             video_name_for_upload = os.path.basename(output_dir)
-            upload_result = upload_output_directory_with_sas(
-                output_dir, azure_blob_client, azure_container,
+            upload_config = pipeline_config.get('blob_upload', {})
+
+            upload_result = upload_output_directory_with_sas_optimized(
+                output_dir, blob_client, container_name,
                 azure_output_prefix, video_name_for_upload,
-                azure_account_name, azure_account_key
+                account_name, account_key,
+                365,  # sas_expiry_days
+                upload_config  # config dict with blob_upload settings
             )
             logger.info(f" Multi-view upload result: {' Success' if upload_result['success'] else '❌ Failed'}")
             
@@ -2557,10 +2704,14 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
 
         if azure_blob_client and azure_container:
             video_name = os.path.basename(output_dir)
-            upload_result = upload_output_directory_with_sas(
-                output_dir, azure_blob_client, azure_container,
-                azure_output_prefix, video_name,
-                azure_account_name, azure_account_key
+            upload_config = pipeline_config.get('blob_upload', {})
+
+            upload_result = upload_output_directory_with_sas_optimized(
+                output_dir, blob_client, container_name,
+                azure_output_prefix, video_name_for_upload,
+                account_name, account_key,
+                365,  # sas_expiry_days
+                upload_config  # config dict with blob_upload settings
             )
             logger.info(f"📤 Dual-view upload result: {'✅ Success' if upload_result['success'] else '❌ Failed'}")
             
@@ -4001,7 +4152,8 @@ def process_time_aligned_shard_multiview(
     total_shard_count=None,
     video_name=None,
     multi_chunk_process=False,
-    session_metadata=None
+    session_metadata=None,
+    timer = None
 ):
     """
     Process one time-aligned shard across multiple views (4+).
@@ -4067,7 +4219,7 @@ def process_time_aligned_shard_multiview(
         try:
             # Process each view through the full pipeline
             view_result = process_single_shard_through_pipeline(
-                view_shard_path, audio_shard_path, view_output_dir, shard_offset_sec, shard_index, total_shard_count, view_name, multi_chunk_process
+                view_shard_path, audio_shard_path, view_output_dir, shard_offset_sec, shard_index, total_shard_count, view_name, multi_chunk_process, timer = timer, video_name = video_name
             )
             view_results[view_name] = view_result
             logger.info(f"✅ Successfully processed {view_name} for shard {shard_index+1}")
@@ -4476,7 +4628,7 @@ def process_time_aligned_shard(
     }
 
 def process_single_shard_through_pipeline(video_shard_path, audio_shard_path, 
-                                         output_dir, shard_offset_sec, shard_index=0, total_shard_count=None, view_name="view", multi_chunk_process = False):
+                                         output_dir, shard_offset_sec, shard_index=0, total_shard_count=None, view_name="view", multi_chunk_process = False, timer = None, video_name = None):
     """
     Run single shard through all 7 AI models
     """
@@ -4486,14 +4638,24 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     # Extract chunk ID for tracking
     chunk_id = extract_chunk_id_from_path(video_shard_path) or f"shard-{shard_index}-{view_name}"
 
+    if video_name is None:
+        video_name = extract_video_name_from_path(video_shard_path)
+    base_timing_id = f"video.{video_name}.shard.{shard_index}.{view_name}"
+
     if view_name == "erp":
         #Yolo people counter only for ERP view
         logger.info(f"ERP view: only run yolo people counter")
         yolo_output_dir = os.path.join(output_dir, "yolo_output")
         update_tracking(chunk_id, "model_processing.yolo_detection.erp", "processing")
         try:
-            yolo_ref  = run_yolo_detection.remote(video_shard_path, yolo_output_dir)
-            yolo_res = ray.get(yolo_ref)  
+            if timer:
+                with timer.time_operation(f"{base_timing_id}.yolo_people_detection"):
+                    yolo_ref  = run_yolo_detection.remote(video_shard_path, yolo_output_dir)
+                    yolo_res = ray.get(yolo_ref)
+            else:
+                yolo_ref  = run_yolo_detection.remote(video_shard_path, yolo_output_dir)
+                yolo_res = ray.get(yolo_ref)
+
             results = {'yolo': yolo_res}
             update_tracking(chunk_id, "model_processing.yolo_detection.erp", "completed",
                            results_path=yolo_output_dir)
@@ -4503,6 +4665,8 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
                            error_message=str(e))
             logger.error(f"YOLO detection failed: {e}")
         return results
+
+    enable_timing = timer is not None
 
     # Define output directories for models that need them
     audio_output_dir = os.path.join(output_dir, "audio_output")
@@ -4534,19 +4698,24 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     
     # Start all model processing with tracking
     update_tracking(chunk_id, "model_processing.audio_diarization", "processing")
-    audio_ref = process_audio_diarization.remote([audio_shard_path], audio_output_dir)
+    audio_ref = process_audio_diarization.remote([audio_shard_path], audio_output_dir,enable_timing=enable_timing,
+        timing_id=f"{base_timing_id}.audio_diarization")
     
     update_tracking(chunk_id, "model_processing.scene_detection.front", "processing")
-    scene_ref = detect_scenes.remote(video_shard_path, prompt_path, scene_output_dir)
+    scene_ref = detect_scenes.remote(video_shard_path, prompt_path, scene_output_dir, enable_timing=enable_timing,
+        timing_id=f"{base_timing_id}.scene_detection")
     
     update_tracking(chunk_id, "model_processing.nsfw_detection.front", "processing")
-    nsfw_ref  = process_video_chunks_for_nsfw.remote([video_shard_path], confidence_threshold=0.5, chunk_duration_sec=60)
+    nsfw_ref  = process_video_chunks_for_nsfw.remote([video_shard_path], confidence_threshold=0.5, chunk_duration_sec=60, enable_timing=enable_timing,
+        timing_id=f"{base_timing_id}.nsfw_detection")
     
     update_tracking(chunk_id, "model_processing.motion_detection.front", "processing")
-    motion_ref= compute_motion_energy.remote([video_shard_path], sensitivity_level="medium", save_detailed_data=False)
+    motion_ref= compute_motion_energy.remote([video_shard_path], sensitivity_level="medium", save_detailed_data=False, enable_timing=enable_timing,
+        timing_id=f"{base_timing_id}.motion_energy")
     
     update_tracking(chunk_id, "model_processing.face_detection.front", "processing")
-    face_ref  = process_video_chunks_for_face_detection.remote([video_shard_path], config=None, frame_interval=30, save_frames=False, chunk_duration_sec=60)
+    face_ref  = process_video_chunks_for_face_detection.remote([video_shard_path], config=None, frame_interval=30, save_frames=False, chunk_duration_sec=60, enable_timing=enable_timing,
+        timing_id=f"{base_timing_id}.face_detection")
     
     # Only run clap detection for first and last shards
     clap_ref = None
@@ -4554,17 +4723,17 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
         shard_type = "first" if is_first_shard else "last" 
         logger.info(f"🔍 Running clap detection for {shard_type} shard {shard_index+1}")
         update_tracking(chunk_id, "model_processing.clap_detection", "processing")
-        clap_ref = detect_claps_in_audio_video_pair.remote(audio_shard_path, video_shard_path, clap_output_dir, search_window_sec=30.0)
+        clap_ref = detect_claps_in_audio_video_pair.remote(audio_shard_path, video_shard_path, clap_output_dir, search_window_sec=30.0, enable_timing=enable_timing, timing_id=f"{base_timing_id}.clap_detection")
     else:
         logger.info(f"ℹ️ Skipping clap detection for middle shard {shard_index+1}")
         update_tracking(chunk_id, "model_processing.clap_detection", "skipped")
     
     update_tracking(chunk_id, "model_processing.signal_quality_check", "processing")
-    signal_quality_ref = detect_blur_and_black_segments.remote(video_shard_path)
+    signal_quality_ref = detect_blur_and_black_segments.remote(video_shard_path, enable_timing=enable_timing, timing_id=f"{base_timing_id}.signal_quality")
 
     # Testing lighting
     update_tracking(chunk_id, "model_processing.lighting_analysis", "processing")
-    lighting_ref = lighting_by_second_task.remote(video_shard_path, output_dir = lighting_output_dir)
+    lighting_ref = lighting_by_second_task.remote(video_shard_path, output_dir=lighting_output_dir, enable_timing=enable_timing, timing_id=f"{base_timing_id}.lighting_analysis")
 
     scene_res = ray.get(scene_ref)
 
@@ -4604,6 +4773,30 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     sensitive_ref = process_audio_sensitive_info.remote([audio_shard_path], audio_output_dir, sensitive_output_dir)
     sensitive_res = ray.get(sensitive_ref)
     update_tracking(chunk_id, "model_processing.sensitive_info_detection", "completed", results_path=sensitive_output_dir)
+
+    if timer and enable_timing:
+        timing_results = {
+            "audio_diarization": audio_res.get("timing"),
+            "nsfw_detection": nsfw_res.get("timing"),
+            "motion_energy": motion_res.get("timing"),
+            "face_detection": face_res.get("timing"),
+            "scene_detection": scene_res.get("timing"),
+            "clap_detection": clap_res.get("timing") if clap_res and isinstance(clap_res, dict) else None,
+            "signal_quality": signal_quality_res.get("timing") if isinstance(signal_quality_res, dict) else None,
+            "lighting_analysis": lighting_res.get("timing") if isinstance(lighting_res, dict) and "timing" in lighting_res else None
+            # Note: sensitive_info doesn't have timing parameters yet
+        }
+
+        # Add individual model timings to main timer
+        for model_name, model_timing in timing_results.items():
+            if model_timing:
+                timer.timings[f"{base_timing_id}.{model_name}"] = {
+                    "execution_time": model_timing["execution_time"],
+                    "start_time": model_timing["start_time"],
+                    "end_time": model_timing["end_time"],
+                    "status": model_timing["status"],
+                    "timing_id": model_timing["timing_id"]
+                }
     # Store results from Ray tasks
     results = {
         'audio': audio_res,
@@ -4613,7 +4806,7 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
         'face': face_res,
         'clap': clap_res,
         'sensitive': sensitive_res,
-        'lighting': lighting_res,
+        'lighting': lighting_res.get("result") if isinstance(lighting_res, dict) and "result" in lighting_res else lighting_res,
         'signal_quality': signal_quality_res
     }
     
@@ -5223,10 +5416,14 @@ def _process_single_view(
     
     if azure_blob_client and azure_container:
         video_name = os.path.basename(output_dir)
-        upload_result = upload_output_directory_with_sas(
-            output_dir, azure_blob_client, azure_container,
-            azure_output_prefix, video_name,
-            azure_account_name, azure_account_key
+        upload_config = pipeline_config.get('blob_upload', {})
+
+        upload_result = upload_output_directory_with_sas_optimized(
+            output_dir, blob_client, container_name,
+            azure_output_prefix, video_name_for_upload,
+            account_name, account_key,
+            365,  # sas_expiry_days
+            upload_config  # config dict with blob_upload settings
         )
         logger.info(f" Single-view upload result: {' Success' if upload_result['success'] else '❌ Failed'}")
         
@@ -5613,7 +5810,7 @@ if __name__ == "__main__":
     
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Ray Pipeline with Integrated Blob Polling")
-    parser.add_argument("--mode", choices=["integrated", "standalone", "multi_chunks", "multi_sessions", "blob_polling"], default="multi_chunks",
+    parser.add_argument("--mode", choices=["integrated", "standalone", "multi_chunks", "multi_sessions", "blob_polling"], default="blob_polling",
                        help="Run mode: 'integrated' for blob polling + pipeline, 'standalone' for direct pipeline, 'multi_chunks' for single session, 'multi_sessions' for multiple sessions, 'blob_polling' for continuous blob polling (default: blob_polling)")
     parser.add_argument("--azure-config", default="blobfuse2_config.yaml",
                        help="Azure configuration file path")

@@ -580,7 +580,7 @@ def detect_claps_in_media(media_path: str,
 @ray.remote(max_calls=1)
 def detect_claps_in_audio_video_pair(audio_path: str, video_path: str,
                                      output_dir: str = "/tmp/clap_detection",
-                                     search_window_sec: float = 30.0) -> dict:
+                                     search_window_sec: float = 30.0, enable_timing=False, timing_id=None) -> dict:
     """
     Detects first and last claps in both audio and video files from the same source
     and combines the results in a single JSON file.
@@ -594,14 +594,20 @@ def detect_claps_in_audio_video_pair(audio_path: str, video_path: str,
     Returns:
         dict: Combined detection results from both audio and video processing
     """
+    from datetime import datetime
+    import time
+
+    start_time = time.time() if enable_timing else None
+    start_time_iso = datetime.utcnow().isoformat() + "Z" if enable_timing else None
+
     os.makedirs(output_dir, exist_ok=True)
-    
+
     # Use the audio file name as the base for output
     base_name = Path(audio_path).stem
     output_json = Path(output_dir) / f"{base_name}_combined_clap_detection.json"
-    
+
     try:
-        start_time = time.time()
+        processing_start_time = time.time()
         
         logger.info(f"[START] Processing audio-video pair for clap detection")
         logger.info(f"Audio: {Path(audio_path).name}")
@@ -715,18 +721,32 @@ def detect_claps_in_audio_video_pair(audio_path: str, video_path: str,
             }
         
         # Add processing time
-        end_time = time.time()
-        processing_duration = round(end_time - start_time, 2)
+        processing_end_time = time.time()
+        processing_duration = round(processing_end_time - processing_start_time, 2)
         results["processing_metadata"]["processing_time_seconds"] = processing_duration
         results["processing_metadata"]["output_file"] = str(output_json)
-        
+
+        # Add timing data only if timing is enabled
+        if enable_timing and start_time:
+            end_time = time.time()
+            end_time_iso = datetime.utcnow().isoformat() + "Z"
+            execution_time = end_time - start_time
+
+            results["timing"] = {
+                "execution_time": execution_time,
+                "start_time": start_time_iso,
+                "end_time": end_time_iso,
+                "timing_id": timing_id,
+                "status": "completed"
+            }
+
         # Save combined JSON output
         with open(output_json, 'w') as f:
             json.dump(results, f, indent=2)
-        
+
         # Cleanup
         detector.cleanup()
-        
+
         # Log summary
         if results["combined_analysis"].get("overall_success", False):
             detected = results["combined_analysis"]["detected_clap"]
@@ -734,12 +754,14 @@ def detect_claps_in_audio_video_pair(audio_path: str, video_path: str,
             logger.info(f"[SUCCESS] Audio-video pair processed in {processing_duration}s. {clap_info}")
         else:
             logger.error(f"[FAILED] Audio-video pair processing failed in {processing_duration}s")
-            
+
         return results
         
     except Exception as e:
         logger.exception(f"[EXCEPTION] Error processing audio-video pair: {e}")
-        return {
+
+        # Build error result
+        error_result = {
             "processing_metadata": {
                 "audio_file": str(audio_path),
                 "video_file": str(video_path),
@@ -753,6 +775,22 @@ def detect_claps_in_audio_video_pair(audio_path: str, video_path: str,
                 "error": f"Processing error: {str(e)}"
             }
         }
+
+        # Add timing data for failed case if timing was enabled
+        if enable_timing and start_time:
+            end_time = time.time()
+            end_time_iso = datetime.utcnow().isoformat() + "Z"
+            execution_time = end_time - start_time
+
+            error_result["timing"] = {
+                "execution_time": execution_time,
+                "start_time": start_time_iso,
+                "end_time": end_time_iso,
+                "timing_id": timing_id,
+                "status": "failed"
+            }
+
+        return error_result
 
 
 # Helper functions for processing multiple files
