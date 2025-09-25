@@ -98,8 +98,10 @@ def generate_hierarchical_timing_structure(raw_timing_data: Dict, session_id: st
 
         # Parse operation_id patterns for blob_polling:
         # - "session.download" for session-level download
-        # - "video.{video_name}.{operation}" for video-level operations
-        # - "video.{video_name}.shard.{index}.{view}.{model}" for model operations
+        # - "video.{session_id}.{video_id}.{operation}" for video-level operations (NEW)
+        # - "video.{session_id}.{video_id}.shard.{index}.{view}.{model}" for model operations (NEW)
+        # - "video.{video_name}.{operation}" for video-level operations (LEGACY)
+        # - "video.{video_name}.shard.{index}.{view}.{model}" for model operations (LEGACY)
 
         if operation_id == "session.download":
             # Session-level download
@@ -112,63 +114,130 @@ def generate_hierarchical_timing_structure(raw_timing_data: Dict, session_id: st
             }
 
         elif len(parts) >= 3 and parts[0] == "video":
-            video_name = parts[1]
+            # Determine if this is the new 4-part pattern or legacy 3-part pattern
+            if (len(parts) >= 4 and parts[3] in ["unwarping", "video_sharding", "audio_sharding", "domain_classification", "upload"]) or (len(parts) >= 7 and parts[3] == "shard"):
+                # NEW PATTERN: video.{session_id}.{video_id}.{operation} or video.{session_id}.{video_id}.shard.{index}.{view}.{model}
+                session_id_part = parts[1]
+                video_id = parts[2]
+                video_name = f"{session_id_part}-{video_id}"  # Combine for unique identifier
 
-            # Initialize video data if not exists
-            if video_name not in video_data:
-                video_data[video_name] = {
-                    "video_name": video_name,
-                    "total_video_time": 0,
-                    "video_start_time": None,
-                    "video_end_time": None,
-                    "shard_count": 0,
-                    "video_processing": {},
-                    "shards": {}
-                }
-
-            if len(parts) == 3:
-                # Video-level operation: "video.{video_name}.{operation}"
-                operation = parts[2]
-                video_data[video_name]["video_processing"][operation] = {
-                    "execution_time": round(timing.get("execution_time", 0), 2),
-                    "start_time": timing.get("start_time"),
-                    "end_time": timing.get("end_time"),
-                    "timing_id": operation_id,
-                    "status": timing.get("status", "completed")
-                }
-
-            elif len(parts) >= 6 and parts[2] == "shard":
-                # Model-level timing: "video.{video_name}.shard.{index}.{view}.{model}"
-                shard_index = int(parts[3])
-                view_name = parts[4]
-                model_name = parts[5]
-
-                # Initialize shard data
-                if shard_index not in video_data[video_name]["shards"]:
-                    video_data[video_name]["shards"][shard_index] = {
-                        "shard_index": shard_index,
-                        "shard_duration": 60.0,  # Default, can be extracted from config
-                        "total_shard_time": 0,
-                        "shard_start_time": timing.get("start_time"),
-                        "shard_end_time": timing.get("end_time"),
-                        "views": {}
+                # Initialize video data if not exists
+                if video_name not in video_data:
+                    video_data[video_name] = {
+                        "video_name": video_name,
+                        "video_id": video_id,
+                        "session_id": session_id_part,
+                        "total_video_time": 0,
+                        "video_start_time": None,
+                        "video_end_time": None,
+                        "shard_count": 0,
+                        "video_processing": {},
+                        "shards": {}
                     }
 
-                # Initialize view data
-                if view_name not in video_data[video_name]["shards"][shard_index]["views"]:
-                    video_data[video_name]["shards"][shard_index]["views"][view_name] = {
-                        "total_view_time": 0,
-                        "models": {}
+                if len(parts) == 4:
+                    # Video-level operation: "video.{session_id}.{video_id}.{operation}"
+                    operation = parts[3]
+                    video_data[video_name]["video_processing"][operation] = {
+                        "execution_time": round(timing.get("execution_time", 0), 2),
+                        "start_time": timing.get("start_time"),
+                        "end_time": timing.get("end_time"),
+                        "timing_id": operation_id,
+                        "status": timing.get("status", "completed")
                     }
 
-                # Add model timing data
-                video_data[video_name]["shards"][shard_index]["views"][view_name]["models"][model_name] = {
-                    "execution_time": round(timing.get("execution_time", 0), 2),
-                    "start_time": timing.get("start_time"),
-                    "end_time": timing.get("end_time"),
-                    "timing_id": operation_id,
-                    "status": timing.get("status", "completed")
-                }
+                elif len(parts) >= 7 and parts[3] == "shard":
+                    # Model-level timing: "video.{session_id}.{video_id}.shard.{index}.{view}.{model}"
+                    shard_index = int(parts[4])
+                    view_name = parts[5]
+                    model_name = parts[6]
+
+                    # Initialize shard data
+                    if shard_index not in video_data[video_name]["shards"]:
+                        video_data[video_name]["shards"][shard_index] = {
+                            "shard_index": shard_index,
+                            "shard_duration": 60.0,  # Default, can be extracted from config
+                            "total_shard_time": 0,
+                            "shard_start_time": timing.get("start_time"),
+                            "shard_end_time": timing.get("end_time"),
+                            "views": {}
+                        }
+
+                    # Initialize view data
+                    if view_name not in video_data[video_name]["shards"][shard_index]["views"]:
+                        video_data[video_name]["shards"][shard_index]["views"][view_name] = {
+                            "total_view_time": 0,
+                            "models": {}
+                        }
+
+                    # Add model data
+                    video_data[video_name]["shards"][shard_index]["views"][view_name]["models"][model_name] = {
+                        "execution_time": round(timing.get("execution_time", 0), 2),
+                        "start_time": timing.get("start_time"),
+                        "end_time": timing.get("end_time"),
+                        "timing_id": operation_id,
+                        "status": timing.get("status", "completed")
+                    }
+
+            else:
+                # LEGACY PATTERN: video.{video_name}.{operation} or video.{video_name}.shard.{index}.{view}.{model}
+                video_name = parts[1]
+
+                # Initialize video data if not exists
+                if video_name not in video_data:
+                    video_data[video_name] = {
+                        "video_name": video_name,
+                        "total_video_time": 0,
+                        "video_start_time": None,
+                        "video_end_time": None,
+                        "shard_count": 0,
+                        "video_processing": {},
+                        "shards": {}
+                    }
+
+                if len(parts) == 3:
+                    # Video-level operation: "video.{video_name}.{operation}"
+                    operation = parts[2]
+                    video_data[video_name]["video_processing"][operation] = {
+                        "execution_time": round(timing.get("execution_time", 0), 2),
+                        "start_time": timing.get("start_time"),
+                        "end_time": timing.get("end_time"),
+                        "timing_id": operation_id,
+                        "status": timing.get("status", "completed")
+                    }
+
+                elif len(parts) >= 6 and parts[2] == "shard":
+                    # Model-level timing: "video.{video_name}.shard.{index}.{view}.{model}"
+                    shard_index = int(parts[3])
+                    view_name = parts[4]
+                    model_name = parts[5]
+
+                    # Initialize shard data
+                    if shard_index not in video_data[video_name]["shards"]:
+                        video_data[video_name]["shards"][shard_index] = {
+                            "shard_index": shard_index,
+                            "shard_duration": 60.0,  # Default, can be extracted from config
+                            "total_shard_time": 0,
+                            "shard_start_time": timing.get("start_time"),
+                            "shard_end_time": timing.get("end_time"),
+                            "views": {}
+                        }
+
+                    # Initialize view data
+                    if view_name not in video_data[video_name]["shards"][shard_index]["views"]:
+                        video_data[video_name]["shards"][shard_index]["views"][view_name] = {
+                            "total_view_time": 0,
+                            "models": {}
+                        }
+
+                    # Add model timing data
+                    video_data[video_name]["shards"][shard_index]["views"][view_name]["models"][model_name] = {
+                        "execution_time": round(timing.get("execution_time", 0), 2),
+                        "start_time": timing.get("start_time"),
+                        "end_time": timing.get("end_time"),
+                        "timing_id": operation_id,
+                        "status": timing.get("status", "completed")
+                    }
 
     # Calculate aggregated times for each video
     for video_name, video_info in video_data.items():
