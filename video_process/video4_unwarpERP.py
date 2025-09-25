@@ -1,8 +1,14 @@
 import json
 import shlex
 import subprocess
+import time
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Tuple
+
+# Import logger
+from utils.logger import get_logger
+
+logger = get_logger("video4_unwarpERP")
 
 
 
@@ -10,28 +16,92 @@ class FFmpegError(RuntimeError):
     pass
 
 
-def _run(cmd: Iterable[str], *, fallback_x264: bool = False) -> None:
+def _run(cmd: Iterable[str], *, fallback_x264: bool = False, operation_name: str = "FFmpeg") -> Dict[str, any]:
     """Run a subprocess command. If NVENC fails and fallback_x264=True, retry with libx264."""
+    cmd_list = list(cmd)
+    original_encoder = None
+    final_encoder = None
+
+    # Detect original encoder
+    for i, tok in enumerate(cmd_list):
+        if tok in ["h264_nvenc", "libx264"]:
+            original_encoder = tok
+            break
+
+    start_time = time.time()
+    logger.info(f"🎬 Starting {operation_name} with encoder: {original_encoder}")
+
     try:
-        subprocess.run(list(cmd), check=True, capture_output=True, text=True)
+        result = subprocess.run(cmd_list, check=True, capture_output=True, text=True)
+        end_time = time.time()
+        duration = end_time - start_time
+        final_encoder = original_encoder
+
+        logger.info(f"✅ {operation_name} completed successfully")
+        logger.info(f"   📊 Encoder used: {final_encoder}")
+        logger.info(f"   ⏱️  Duration: {duration:.2f} seconds")
+
+        return {
+            "success": True,
+            "encoder_used": final_encoder,
+            "duration": duration,
+            "fallback_used": False
+        }
+
     except subprocess.CalledProcessError as e:
-        if fallback_x264 and any("h264_nvenc" in tok for tok in cmd):
+        if fallback_x264 and any("h264_nvenc" in tok for tok in cmd_list):
+            logger.warning(f"⚠️ NVENC failed, attempting fallback to libx264...")
+
             # Retry replacing encoder with libx264
             cmd2 = []
-            for tok in cmd:
+            for tok in cmd_list:
                 if tok == "h264_nvenc":
                     cmd2.append("libx264")
                 elif tok == "-cq":
                     cmd2.append("-crf")
                 else:
                     cmd2.append(tok)
+
             try:
-                subprocess.run(cmd2, check=True, capture_output=True, text=True)
-                return
+                result = subprocess.run(cmd2, check=True, capture_output=True, text=True)
+                end_time = time.time()
+                duration = end_time - start_time
+                final_encoder = "libx264"
+
+                logger.info(f"✅ {operation_name} completed with fallback")
+                logger.info(f"   📊 Encoder used: {final_encoder} (fallback from {original_encoder})")
+                logger.info(f"   ⏱️  Duration: {duration:.2f} seconds")
+
+                return {
+                    "success": True,
+                    "encoder_used": final_encoder,
+                    "duration": duration,
+                    "fallback_used": True,
+                    "original_encoder": original_encoder
+                }
+
             except subprocess.CalledProcessError as e2:
+                end_time = time.time()
+                duration = end_time - start_time
                 stderr = getattr(e2, "stderr", None)
+
+                logger.error(f"❌ {operation_name} failed completely")
+                logger.error(f"   📊 Original encoder: {original_encoder}")
+                logger.error(f"   📊 Fallback encoder: libx264")
+                logger.error(f"   ⏱️  Duration before failure: {duration:.2f} seconds")
+                logger.error(f"   🔍 Error: {stderr}")
+
                 raise FFmpegError(f"FFmpeg failed (fallback to libx264 also failed): returncode={e2.returncode}\nstderr={stderr}\ncmd={e2.cmd}") from e2
+
+        end_time = time.time()
+        duration = end_time - start_time
         stderr = getattr(e, "stderr", None)
+
+        logger.error(f"❌ {operation_name} failed")
+        logger.error(f"   📊 Encoder: {original_encoder}")
+        logger.error(f"   ⏱️  Duration before failure: {duration:.2f} seconds")
+        logger.error(f"   🔍 Error: {stderr}")
+
         raise FFmpegError(f"FFmpeg failed: returncode={e.returncode}\nstderr={stderr}\ncmd={e.cmd}") from e
 
 
@@ -231,9 +301,10 @@ def insv_to_4viewsERP_one_shot(
     # Step 1 (build ERP from dual-fisheye)
     erp_size: Tuple[int, int] = None,
     lens_fov_deg: float = 190.0,       # fisheye lens FOV used by v360 dfisheye→equirect
-    encoder: str = "libx264",          # or "h264_nvenc"
-    crf_or_cq: int = 18,               # x264: CRF value; NVENC: CQ value
-    preset: str = "fast",              # x264 presets: ultrafast..veryslow; NVENC accepts "slow/medium/fast" or p1..p7
+    encoder="libx264",                 # Use CPU encoder like sharding (reliable)
+    crf_or_cq=23,                     # Use CRF like sharding for consistency
+    preset="fast",                    # Use x264 preset like sharding
+    use_gpu: bool = True,             # Enable GPU acceleration like sharding
     # Step 2 (extract 4 rectilinear views from ERP)
     out_size: Tuple[int, int] = None,
     h_fov_deg: float = 90.0,
@@ -332,8 +403,8 @@ def insv_to_4viewsERP_one_shot(
     yaw_f, yaw_r, yaw_b, yaw_l = map(_norm, yaw_front_right_back_left)
 
     # ----- Compose the filter graph -----
-    # 1) Align PTS & SAR for each fisheye → hstack → dfisheye→equirect into target ERP size → vflip to fix vertical orientation.
-    # 2) Split ERP into five branches: one branch is saved as ERP output; four branches are rectified into 90° views.
+    # Same filter graph for both GPU and CPU (like sharding approach)
+    # GPU acceleration is decode-only, processing is CPU-based
     vf = (
         # Dual-fisheye → ERP
         f"[0:v:0]setpts=PTS-STARTPTS,setsar=1[v0];"
@@ -353,47 +424,113 @@ def insv_to_4viewsERP_one_shot(
         f"yaw={yaw_l}:pitch={pitch_deg}:roll={roll_deg}:w={W}:h={H}[left]"
     )
 
-    # Rate-control flag depends on encoder family:
-    #   x264 → use -crf; NVENC → use -cq
-    rate_flag = "-cq" if encoder == "h264_nvenc" else "-crf"
+    # Follow sharding methodology: GPU decode + CPU encode for reliability
+    # Rate-control: Always use -crf for x264 (like sharding)
 
-    # Important: FFmpeg applies options to the *next* output that follows.
-    # We therefore repeat mapping/encoding blocks for each of the five outputs.
-    cmd = [
+    # Build base command (CPU-only, like sharding fallback)
+    base_cmd = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "info", "-stats",
         "-i", str(in_path),
         "-filter_complex", vf,
 
-        # Save ERP as an MP4 (with audio if present)
+        # Save ERP as an MP4 (with audio if present) - CPU encoding like sharding
         "-map", "[erp_out]", "-map", "0:a?",
-        "-c:v", encoder, rate_flag, str(crf_or_cq), "-preset", preset,
+        "-c:v", "libx264", "-crf", str(crf_or_cq), "-preset", preset,
         "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(erp_path),
 
         # Front view
         "-map", "[front]", "-map", "0:a?",
-        "-c:v", encoder, rate_flag, str(crf_or_cq), "-preset", preset,
+        "-c:v", "libx264", "-crf", str(crf_or_cq), "-preset", preset,
         "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out_front),
 
         # Right view
         "-map", "[right]", "-map", "0:a?",
-        "-c:v", encoder, rate_flag, str(crf_or_cq), "-preset", preset,
+        "-c:v", "libx264", "-crf", str(crf_or_cq), "-preset", preset,
         "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out_right),
 
         # Back view
         "-map", "[back]", "-map", "0:a?",
-        "-c:v", encoder, rate_flag, str(crf_or_cq), "-preset", preset,
+        "-c:v", "libx264", "-crf", str(crf_or_cq), "-preset", preset,
         "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out_back),
 
         # Left view
         "-map", "[left]", "-map", "0:a?",
-        "-c:v", encoder, rate_flag, str(crf_or_cq), "-preset", preset,
+        "-c:v", "libx264", "-crf", str(crf_or_cq), "-preset", preset,
         "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out_left),
     ]
 
-    # _run should execute subprocess and (optionally) fall back to x264 if NVENC is unavailable.
-    # Example behavior:
-    #   try NVENC → if failed, rebuild identical cmd substituting encoder="libx264" and rate_flag="-crf".
-    _run(cmd, fallback_x264=True)
+    # GPU-accelerated command (EXACTLY like sharding methodology)
+    if use_gpu:
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "info", "-stats",
+            # GPU acceleration EXACTLY like sharding: decode-only acceleration
+            "-hwaccel", "cuda",
+            "-i", str(in_path),
+            "-filter_complex", vf,
+
+            # Save ERP as an MP4 (with audio if present) - CPU encoding like sharding
+            "-map", "[erp_out]", "-map", "0:a?",
+            "-c:v", "libx264", "-crf", str(crf_or_cq), "-preset", preset,
+            "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(erp_path),
+
+            # Front view
+            "-map", "[front]", "-map", "0:a?",
+            "-c:v", "libx264", "-crf", str(crf_or_cq), "-preset", preset,
+            "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out_front),
+
+            # Right view
+            "-map", "[right]", "-map", "0:a?",
+            "-c:v", "libx264", "-crf", str(crf_or_cq), "-preset", preset,
+            "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out_right),
+
+            # Back view
+            "-map", "[back]", "-map", "0:a?",
+            "-c:v", "libx264", "-crf", str(crf_or_cq), "-preset", preset,
+            "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out_back),
+
+            # Left view
+            "-map", "[left]", "-map", "0:a?",
+            "-c:v", "libx264", "-crf", str(crf_or_cq), "-preset", preset,
+            "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(out_left),
+        ]
+    else:
+        cmd = base_cmd
+
+    # Log input details before processing
+    logger.info(f"🚀 Starting one-shot INSV→ERP+4Views processing")
+    logger.info(f"   📁 Input: {in_path.name}")
+    logger.info(f"   📐 ERP size: {W_erp}x{H_erp}")
+    logger.info(f"   📐 View size: {W}x{H}")
+    logger.info(f"   🎛️  Target encoder: {encoder}")
+    logger.info(f"   🎛️  Quality setting: {crf_or_cq}")
+    logger.info(f"   🎛️  Preset: {preset}")
+
+    # Execute with sharding-style fallback logic
+    logger.info(f"🔧 unwarp {in_path.name} | GPU={'on' if use_gpu else 'off'} | encoder=libx264")
+
+    processing_metrics = _run(cmd, fallback_x264=False, operation_name="One-shot INSV→ERP+4Views (GPU-accelerated)")
+
+    # If GPU failed, try CPU fallback (like sharding does)
+    if not processing_metrics["success"] and use_gpu:
+        logger.warning(f"GPU processing failed, falling back to CPU for {in_path.name}")
+        logger.info(f"🔧 unwarp {in_path.name} | GPU=fallback-cpu | encoder=libx264")
+        processing_metrics = _run(base_cmd, fallback_x264=False, operation_name="One-shot INSV→ERP+4Views (CPU-fallback)")
+
+    # Determine actual GPU usage (following sharding pattern)
+    gpu_decode_used = use_gpu and processing_metrics["success"]
+    cpu_fallback_used = use_gpu and not processing_metrics["success"]
+
+    # Log final summary (like sharding style)
+    logger.info(f"🏁 One-shot processing complete!")
+    logger.info(f"   📊 Encoder used: {processing_metrics['encoder_used']} (CPU encoding)")
+    logger.info(f"   ⏱️  Total duration: {processing_metrics['duration']:.2f} seconds")
+    logger.info(f"   🎯 GPU decode: {'✅' if gpu_decode_used else '❌ fallback to CPU'}")
+    logger.info(f"   📂 Outputs: ERP + 4 perspective views")
+
+    if cpu_fallback_used:
+        logger.info(f"   ⚠️  GPU decode failed, used CPU fallback (like sharding)")
+    elif gpu_decode_used:
+        logger.info(f"   ✅ GPU-accelerated decode successful (like sharding)")
 
     return {
         "erp": str(erp_path),
@@ -401,6 +538,20 @@ def insv_to_4viewsERP_one_shot(
         "right": str(out_right),
         "back":  str(out_back),
         "left":  str(out_left),
+        # Add processing metrics (sharding-style)
+        "_metrics": {
+            "total_duration": processing_metrics["duration"],
+            "encoder_used": processing_metrics["encoder_used"],
+            "gpu_decode_enabled": use_gpu,
+            "gpu_decode_successful": gpu_decode_used,
+            "cpu_fallback_used": cpu_fallback_used,
+            "processing_method": "gpu_accelerated" if gpu_decode_used else ("cpu_fallback" if cpu_fallback_used else "cpu_only"),
+            "input_resolution": f"{W_erp}x{H_erp}",
+            "output_resolution": f"{W}x{H}",
+            "quality_setting": crf_or_cq,
+            "preset": preset,
+            "sharding_methodology": True
+        }
     }
 
 if __name__ == "__main__":

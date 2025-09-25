@@ -367,9 +367,10 @@ def process_video_chunks_for_nsfw(chunk_paths: list, model_path: str = None, lab
                 logger.info("Provided model paths don't exist, downloading...")
                 model_path, labels_path = setup_nsfw_model_files()
         
-        # Create GPU workers (one per available GPU)
-        num_gpus = int(ray.available_resources().get("GPU", 1))
-        logger.info(f"Creating {num_gpus} NSFW detector workers with model: {model_path}")
+        # Create GPU workers (ensure at least 1 worker if any GPU is available)
+        available_gpu = ray.available_resources().get("GPU", 0)
+        num_gpus = max(1, int(available_gpu)) if available_gpu > 0 else 0
+        logger.info(f"Creating {num_gpus} NSFW detector workers with model: {model_path} (available GPU: {available_gpu})")
         
         workers = []
         for i in range(num_gpus):
