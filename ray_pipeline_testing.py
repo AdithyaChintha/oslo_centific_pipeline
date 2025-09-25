@@ -1733,18 +1733,25 @@ def process_single_session(session_path: str, session_id: str, output_base_dir: 
         processing_time = time.time() - start_time
         
         # Generate hierarchical timing data
-
-        raw_timing_data = timer.get_timing_data()
-        hierarchical_timing_data = generate_hierarchical_timing_structure(
-            raw_timing_data, session_id, processing_time, start_time, pipeline_result
-        )
-        hierarchical_timing_data["performance_metrics"] = generate_performance_summary(hierarchical_timing_data)
-
+        try:
+            raw_timing_data = timer.get_timing_data()
+            hierarchical_timing_data = generate_hierarchical_timing_structure(
+                raw_timing_data, session_id, processing_time, start_time, pipeline_result
+            )
+            hierarchical_timing_data["performance_metrics"] = generate_performance_summary(hierarchical_timing_data)
+        except Exception as e:
+            import traceback
+            logger.error(f"Error in generating heirarchial data for csv:{e}")
+            logging.error(traceback.format_exc())
         # Export to single CSV file - SAVE TO: output_folder/session_id/{session_id}_timing_analysis.csv
-        csv_file_path = export_timing_data_to_single_csv(
-            hierarchical_timing_data, session_output_dir, session_id
-        )
-
+        try:
+            csv_file_path = export_timing_data_to_single_csv(
+                hierarchical_timing_data, session_output_dir, session_id
+            )
+        except Exception as e:
+            import traceback, logging
+            logger.error(f"Error in generating csv:{e}")
+            logging.error(traceback.format_exc())
         logger.info(f"📊 Timing analysis exported to: {csv_file_path}")
 
         # Upload CSV file to blob storage
@@ -1878,19 +1885,18 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
             
             for video_id, video_download_result in video_downloads:
                 local_video_path = video_download_result['local_path']
-                video_name = extract_video_name_from_path(local_video_path)
-                #local_video_path = "VID_20250809_094836_00_045.insv" #temp for debug
+                logger.info(f"🎬 Processing video: {video_id}")
                 logger.info(f"local_video_path:{local_video_path}")
-                
+
                 # Initialize tracking for this video chunk
                 chunk_id = extract_chunk_id_from_path(local_video_path) or f"{video_id}-video"
                 sequence_number = extract_sequence_number_from_path(local_video_path) or video_id
                 chunk_type = extract_chunk_type_from_path(local_video_path) or "video"
-                
+
                 tracker.initialize_chunk_tracking(chunk_id, chunk_type, local_video_path, sequence_number)
                 update_tracking(chunk_id, "download", "completed")
                 if timer:
-                    with timer.time_operation(f"video.{video_name}.unwarping"):
+                    with timer.time_operation(f"video.{session_id}.{video_id}.unwarping"):
                         if local_video_path.lower().endswith('.insv'):
                             # Try the simpler single-output
                             update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "processing")
@@ -1970,7 +1976,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                     os.makedirs(out_dir, exist_ok=True)
                     view_shard_urls.setdefault(vn, {})  # keep structure for later upload
                     if timer:
-                        with timer.time_operation(f"video.{video_name}.video_sharding"):
+                        with timer.time_operation(f"video.{session_id}.{video_id}.video_sharding"):
                             if is_walkthrough:
                                 logger.info("=" * 120)
                                 logger.info("🔄 Walkthrough video splitting - View: %s, Path: %s, Duration: %ss, Overlap: %ss, Step: %ss",
@@ -2064,6 +2070,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
             
             for audio_id, audio_download_result in audio_downloads:
                 local_audio_path = audio_download_result['local_path']
+                logger.info(f"🎵 Processing audio: {audio_id}")
                 logger.info(f"local_audio_path:{local_audio_path}")
 
                 # Copy original audio file to centralized audio_files folder for upload
@@ -2083,46 +2090,47 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                 audio_chunk_id = extract_chunk_id_from_path(local_audio_path) or f"{audio_id}-audio"
                 audio_sequence_number = extract_sequence_number_from_path(local_audio_path) or audio_id
                 audio_chunk_type = extract_chunk_type_from_path(local_audio_path) or "audio"
-                
+
                 tracker.initialize_chunk_tracking(audio_chunk_id, audio_chunk_type, local_audio_path, audio_sequence_number)
                 update_tracking(audio_chunk_id, "download", "completed")
-                
+
                 try:
-                    with timer.time_operation(f"video.{video_name}.audio_sharding"):
-                        if is_walkthrough:
-                            # BIG DEBUG STATEMENT FOR WALKTHROUGH AUDIO SPLITTING
-                            logger.info("=" * 120)
-                            logger.info("🎵 Walkthrough audio splitting - Path: %s, Duration: 180s, Overlap: 60s, Step: 120s", local_audio_path)
-                            logger.info("=" * 120)
-                            
-                            # Use sliding window overlap for audio as well
-                            chunk_audio_shards = ray.get(split_audio_into_shards_with_overlap.remote(
-                                local_audio_path,
-                                output_dir=os.path.join(output_dir, "audio_shards"),
-                                duration_sec=duration_sec,
-                                overlap_sec=overlap_sec,  # 60 seconds overlap
-                                start_idx=global_part_idx  # Pass the global part index
-                            ))
-                        else:
-                            # BIG DEBUG STATEMENT FOR NORMAL AUDIO SPLITTING
-                            logger.info("=" * 120)
-                            logger.info("🎵 Normal audio splitting - Path: %s, Duration: 180s, Overlap: 0s", local_audio_path)
-                            logger.info("=" * 120)
-                            
-                            # Normal processing without overlap
-                            chunk_audio_shards = ray.get(split_audio_into_shards.remote(
-                                local_audio_path,
-                                output_dir=os.path.join(output_dir, "audio_shards"),
-                                duration_sec=duration_sec,
-                                start_idx=global_part_idx  # Pass the global part index
-                            ))
-                        audio_shards.extend(chunk_audio_shards)
-                        global_part_idx += len(chunk_audio_shards)
-                        logger.info(f"Added {len(chunk_audio_shards)} audio shards for chunk {audio_id}, global_part_idx now: {global_part_idx}")
-                        
-                        # Update tracking for audio sharding (using a generic view name for audio)
-                        update_tracking(audio_chunk_id, "view_sharding.audio", "completed",
-                                    shard_count=len(chunk_audio_shards), shard_paths=chunk_audio_shards)
+                    if timer:
+                        with timer.time_operation(f"video.{session_id}.{audio_id}.audio_sharding"):
+                            if is_walkthrough:
+                                # BIG DEBUG STATEMENT FOR WALKTHROUGH AUDIO SPLITTING
+                                logger.info("=" * 120)
+                                logger.info("🎵 Walkthrough audio splitting - Path: %s, Duration: 180s, Overlap: 60s, Step: 120s", local_audio_path)
+                                logger.info("=" * 120)
+
+                                # Use sliding window overlap for audio as well
+                                chunk_audio_shards = ray.get(split_audio_into_shards_with_overlap.remote(
+                                    local_audio_path,
+                                    output_dir=os.path.join(output_dir, "audio_shards"),
+                                    duration_sec=duration_sec,
+                                    overlap_sec=overlap_sec,  # 60 seconds overlap
+                                    start_idx=global_part_idx  # Pass the global part index
+                                ))
+                            else:
+                                # BIG DEBUG STATEMENT FOR NORMAL AUDIO SPLITTING
+                                logger.info("=" * 120)
+                                logger.info("🎵 Normal audio splitting - Path: %s, Duration: 180s, Overlap: 0s", local_audio_path)
+                                logger.info("=" * 120)
+
+                                # Normal processing without overlap
+                                chunk_audio_shards = ray.get(split_audio_into_shards.remote(
+                                    local_audio_path,
+                                    output_dir=os.path.join(output_dir, "audio_shards"),
+                                    duration_sec=duration_sec,
+                                    start_idx=global_part_idx  # Pass the global part index
+                                ))
+                            audio_shards.extend(chunk_audio_shards)
+                            global_part_idx += len(chunk_audio_shards)
+                            logger.info(f"Added {len(chunk_audio_shards)} audio shards for chunk {audio_id}, global_part_idx now: {global_part_idx}")
+
+                            # Update tracking for audio sharding (using a generic view name for audio)
+                            update_tracking(audio_chunk_id, "view_sharding.audio", "completed",
+                                        shard_count=len(chunk_audio_shards), shard_paths=chunk_audio_shards)
                 except Exception as e:
                     logger.error(f"Error processing audio chunk {audio_id}: {e}")
                     update_tracking(audio_chunk_id, "view_sharding.audio", "error",
@@ -2188,7 +2196,9 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                 video_name=session_id,
                 multi_chunk_process=True,
                 session_metadata=session_metadata,
-                timer = timer
+                timer = timer,
+                session_id = session_id,
+                video_id = video_id
             )
             
             label_studio_tasks.append(shard_results['label_studio_task'])
@@ -4153,7 +4163,9 @@ def process_time_aligned_shard_multiview(
     video_name=None,
     multi_chunk_process=False,
     session_metadata=None,
-    timer = None
+    timer = None,
+    session_id = None,
+    video_id = None
 ):
     """
     Process one time-aligned shard across multiple views (4+).
@@ -4219,7 +4231,7 @@ def process_time_aligned_shard_multiview(
         try:
             # Process each view through the full pipeline
             view_result = process_single_shard_through_pipeline(
-                view_shard_path, audio_shard_path, view_output_dir, shard_offset_sec, shard_index, total_shard_count, view_name, multi_chunk_process, timer = timer, video_name = video_name
+                view_shard_path, audio_shard_path, view_output_dir, shard_offset_sec, shard_index, total_shard_count, view_name, multi_chunk_process, timer = timer, video_name = video_name, session_id = session_id, video_id = video_id
             )
             view_results[view_name] = view_result
             logger.info(f"✅ Successfully processed {view_name} for shard {shard_index+1}")
@@ -4627,8 +4639,8 @@ def process_time_aligned_shard(
         "detection_flags": detection_flags
     }
 
-def process_single_shard_through_pipeline(video_shard_path, audio_shard_path, 
-                                         output_dir, shard_offset_sec, shard_index=0, total_shard_count=None, view_name="view", multi_chunk_process = False, timer = None, video_name = None):
+def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
+                                         output_dir, shard_offset_sec, shard_index=0, total_shard_count=None, view_name="view", multi_chunk_process = False, timer = None, video_name = None, session_id = None, video_id = None):
     """
     Run single shard through all 7 AI models
     """
@@ -4638,9 +4650,14 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     # Extract chunk ID for tracking
     chunk_id = extract_chunk_id_from_path(video_shard_path) or f"shard-{shard_index}-{view_name}"
 
-    if video_name is None:
-        video_name = extract_video_name_from_path(video_shard_path)
-    base_timing_id = f"video.{video_name}.shard.{shard_index}.{view_name}"
+    # Use session_id and video_id for consistent timing if available
+    if session_id and video_id:
+        base_timing_id = f"video.{session_id}.{video_id}.shard.{shard_index}.{view_name}"
+    else:
+        # Fallback to original behavior for backward compatibility
+        if video_name is None:
+            video_name = extract_video_name_from_path(video_shard_path)
+        base_timing_id = f"video.{video_name}.shard.{shard_index}.{view_name}"
 
     if view_name == "erp":
         #Yolo people counter only for ERP view

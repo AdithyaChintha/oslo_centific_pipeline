@@ -46,7 +46,15 @@ class PipelineSingleCSVExporter:
 
     def _extract_session_data(self, data: Dict, session_id: str) -> Dict:
         """Extract session-level data that will be repeated in all rows"""
-        performance_metrics = data.get("performance_metrics", {})
+        performance_metrics = data.get("performance_metrics") or {}
+        if not isinstance(performance_metrics, dict):
+            performance_metrics = {}
+
+        slowest = performance_metrics.get("slowest_model")
+        fastest = performance_metrics.get("fastest_model")
+
+        slowest_name = slowest.get("name", "") if isinstance(slowest, dict) else ""
+        fastest_name = fastest.get("name", "") if isinstance(fastest, dict) else ""
 
         return {
             "session_id": session_id,
@@ -55,9 +63,10 @@ class PipelineSingleCSVExporter:
             "total_session_time": data.get("total_session_time", 0),
             "video_count": data.get("video_count", 0),
             "parallelization_efficiency": performance_metrics.get("parallelization_efficiency", 0),
-            "slowest_model": performance_metrics.get("slowest_model", {}).get("name", ""),
-            "fastest_model": performance_metrics.get("fastest_model", {}).get("name", "")
+            "slowest_model": slowest_name,
+            "fastest_model": fastest_name,
         }
+
 
     def _generate_session_rows(self, data: Dict, session_data: Dict) -> List[Dict]:
         """Generate rows for session-level operations"""
@@ -93,6 +102,8 @@ class PipelineSingleCSVExporter:
 
         for video in data.get("videos", []):
             video_name = video.get("video_name", "")
+            video_id = video.get("video_id", "")  # New field for individual video identification
+            session_id_part = video.get("session_id", "")  # New field for session part
             total_video_time = video.get("total_video_time", 0)
             shard_count = video.get("shard_count", 0)
 
@@ -106,6 +117,7 @@ class PipelineSingleCSVExporter:
                         rows.append({
                             **session_data,
                             "video_name": video_name,
+                            "video_id": video_id,
                             "operation_level": "video",
                             "operation_type": sharding_type,
                             "shard_index": "",
@@ -125,6 +137,7 @@ class PipelineSingleCSVExporter:
                     rows.append({
                         **session_data,
                         "video_name": video_name,
+                        "video_id": video_id,
                         "operation_level": "video",
                         "operation_type": operation_type,
                         "shard_index": "",
@@ -149,6 +162,7 @@ class PipelineSingleCSVExporter:
 
         for video in data.get("videos", []):
             video_name = video.get("video_name", "")
+            video_id = video.get("video_id", "")
             total_video_time = video.get("total_video_time", 0)
             shard_count = video.get("shard_count", 0)
 
@@ -163,6 +177,7 @@ class PipelineSingleCSVExporter:
                         rows.append({
                             **session_data,
                             "video_name": video_name,
+                            "video_id": video_id,
                             "operation_level": "model",
                             "operation_type": "model_execution",
                             "shard_index": shard_index,
@@ -187,7 +202,7 @@ class PipelineSingleCSVExporter:
             return
 
         fieldnames = [
-            "session_id", "video_name", "operation_level", "operation_type",
+            "session_id", "video_name", "video_id", "operation_level", "operation_type",
             "shard_index", "view_name", "model_name", "execution_time",
             "start_time", "end_time", "timing_id", "status",
             "session_start_time", "session_end_time", "total_session_time",
