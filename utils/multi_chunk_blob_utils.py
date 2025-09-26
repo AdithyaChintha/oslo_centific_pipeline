@@ -1493,9 +1493,10 @@ def download_single_chunk_ray(blob_service_client: BlobServiceClient,
 
     blob_name = chunk_info["blob_name"]
     file_name = chunk_info["file_name"]
-    num = chunk_info.get("chunk_number")
-    num_str = f"{num:02d}" if isinstance(num, int) else "NA"
-    chunk_id = f"{num_str}-{chunk_info['chunk_type']}"
+    # num = chunk_info.get("chunk_number")
+    # num_str = f"{num:02d}" if isinstance(num, int) else "NA"
+    # chunk_id = f"{num_str}-{chunk_info['chunk_type']}"
+    chunk_id = f"{file_name}"
 
     # Ensure download dir exists
     os.makedirs(local_download_dir, exist_ok=True)
