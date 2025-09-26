@@ -82,39 +82,6 @@ logger = get_logger("SimplifiedUnifiedPipeline")
 # Global shutdown flag for graceful stopping
 _shutdown_requested = False
 
-def check_existing_unwarped_views(output_dir: str, video_id: str) -> dict:
-    """
-    Check if 4 views already exist for a given video to skip unwarping.
-
-    Args:
-        output_dir: Base output directory for the session
-        video_id: Video identifier (extracted from filename)
-
-    Returns:
-        dict: Either the existing views mapping or None if incomplete
-    """
-    views_dir = os.path.join(output_dir, "4views")
-
-    if not os.path.exists(views_dir):
-        return None
-
-    # Expected view names in the format {view_name}_1920x1920.mp4
-    expected_views = ["front", "right", "back", "left"]
-    existing_views = {}
-
-    # Check if all required views exist
-    for view_name in expected_views:
-        view_file = os.path.join(views_dir, f"{view_name}_1920x1920.mp4")
-        if not os.path.exists(view_file):
-            logger.debug(f"Missing view file: {view_file}")
-            return None
-
-        existing_views[view_name] = view_file
-        logger.debug(f"Found existing view {view_name}: {view_file}")
-
-    logger.info(f"✅ All 4 views already exist for {video_id}, skipping unwarping")
-    return existing_views
-
 # =============================================================================
 # BATCH PROCESSING FUNCTIONS (Added from backup file)
 # =============================================================================
