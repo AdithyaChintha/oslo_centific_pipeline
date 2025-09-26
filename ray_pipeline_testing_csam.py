@@ -1898,7 +1898,6 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                 if timer:
                     with timer.time_operation(f"video.{session_id}.{video_id}.unwarping"):
                         if local_video_path.lower().endswith('.insv'):
-                            # Try the simpler single-output
                             update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "processing")
                             try:
                                 mp4_result = ray.get(insv_unwarp_task.remote(local_video_path, out_dir=os.path.join(output_dir, "4views")))
@@ -1927,7 +1926,6 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                             update_tracking(chunk_id, "video_processing.view_unwarping", "skipped")
                 else:
                     if local_video_path.lower().endswith('.insv'):
-                        # Try the simpler single-output
                         update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "processing")
                         try:
                             mp4_result = ray.get(insv_unwarp_task.remote(local_video_path, out_dir=os.path.join(output_dir, "4views")))
@@ -2021,56 +2019,37 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                 except Exception as e:
                     logger.error(f"Parallel split_video_into_shards failed: {e}")
 
+                # Get the starting index for this video file (same for all views)
+                video_start_idx = global_part_idx
 
-                # Rename shards to ensure global sequential numbering across all views
+                # First, determine how many shards were created (should be same for all views)
+                first_result = results[0] if results else []
+                shards_per_view = len(first_result)
+
                 for (vn, _, out_dir), shards in zip(split_tasks, results):
                     shards = shards or []
-                    renumbered = []
-                    for old_path in shards:
-                        base, ext = os.path.splitext(old_path)
-                        # rename to global_part_idx
-                        new_path = os.path.join(out_dir, f"{vn}_part{global_part_idx:04d}{ext or '.mp4'}")
-                        if new_path != old_path:
-                            try:
-                                os.replace(old_path, new_path)  
-                            except Exception as rn_ex:
-                                logger.warning(f"Rename shard failed ({old_path} -> {new_path}): {rn_ex}; keeping original")
-                                new_path = old_path
-                        renumbered.append(new_path)
-                        global_part_idx += 1
-                    
-                    
+
                     # record in view_shards
-                    view_shards[vn] = view_shards.get(vn, []) + renumbered
+                    view_shards[vn] = view_shards.get(vn, []) + shards
                     try:
                         update_tracking(
                             chunk_id, f"view_sharding.{vn}", "completed",
-                            shard_count=len(renumbered), shard_paths=renumbered
+                            shard_count=len(shards), shard_paths=shards
                         )
-                        global_part_idx = 0  # Reset for next view
                     except Exception:
                         logger.debug(f"Failed to update tracking for {vn}")
 
-                logger.info(f"Sharding done; global_part_idx now: {global_part_idx}")
-                # Store the shards for this chunk
-                
-                # Update global part index based on the number of shards created
-                if flat_result:
-                    # Get the number of shards from the first view (all views should have same count)
-                    first_view = list(flat_result.keys())[0]
-                    if first_view in view_shards:
-                        # Count only the new shards added in this iteration
-                        existing_count = len(view_shards[first_view]) - len(shards) if first_view in view_shards else 0
-                        new_shard_count = len(shards)
-                        global_part_idx += new_shard_count
-                        logger.info(f"Added {new_shard_count} shards for chunk {video_id}, global_part_idx now: {global_part_idx}")
+                # Update global_part_idx once for all views
+                shards_per_view = len(results[0]) if results else 0
+                global_part_idx += shards_per_view
+                logger.info(f"Video {video_id}: All views created {shards_per_view} shards each (indices {global_part_idx - shards_per_view}-{global_part_idx-1})")
             
             logger.info(view_shards)
                 
             # Process audio chunks with sequential part numbering
             audio_shards = []
-            global_part_idx = 0  # Reset for audio processing
-            
+            # global_part_idx = 0  # Reset for audio processing
+            audio_global_part_idx = 0  
             for audio_id, audio_download_result in audio_downloads:
                 local_audio_path = audio_download_result['local_path']
                 logger.info(f"🎵 Processing audio: {audio_id}")
@@ -2112,7 +2091,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                                     output_dir=os.path.join(output_dir, "audio_shards"),
                                     duration_sec=duration_sec,
                                     overlap_sec=overlap_sec,  # 60 seconds overlap
-                                    start_idx=global_part_idx  # Pass the global part index
+                                    start_idx=audio_global_part_idx  # Pass the global part index
                                 ))
                             else:
                                 # BIG DEBUG STATEMENT FOR NORMAL AUDIO SPLITTING
@@ -2125,11 +2104,11 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                                     local_audio_path,
                                     output_dir=os.path.join(output_dir, "audio_shards"),
                                     duration_sec=duration_sec,
-                                    start_idx=global_part_idx  # Pass the global part index
+                                    start_idx=audio_global_part_idx  # Pass the global part index
                                 ))
                             audio_shards.extend(chunk_audio_shards)
-                            global_part_idx += len(chunk_audio_shards)
-                            logger.info(f"Added {len(chunk_audio_shards)} audio shards for chunk {audio_id}, global_part_idx now: {global_part_idx}")
+                            audio_global_part_idx += len(chunk_audio_shards)
+                            logger.info(f"Added {len(chunk_audio_shards)} audio shards for chunk {audio_id}, global_part_idx now: {audio_global_part_idx}")
 
                             # Update tracking for audio sharding (using a generic view name for audio)
                             update_tracking(audio_chunk_id, "view_sharding.audio", "completed",
@@ -2453,6 +2432,9 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
         _split_refs = []
         _split_order = []
         for view_name, view_path in flat_result.items():
+            # Skip metadata entries (like _metrics from GPU-accelerated unwarping)
+            if view_name.startswith('_'):
+                continue
             ref = split_video_into_shards.remote(
                 view_path,
                 output_dir=os.path.join(output_dir, f"{view_name}_shards"),
