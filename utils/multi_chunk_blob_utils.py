@@ -475,19 +475,19 @@ def extract_session_id_from_metadata_filename(filename: str) -> Optional[str]:
         r'(?P<uuid>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})_'
     )
 
-    # Pattern A: with literal "activity"
+    # Pattern A: with literal "activity" - supports both timestamp formats
     pat_a = re.compile(
         head +
         r'activity_'
         r'(?P<label>[A-Za-z0-9_-]+)_'
-        r'(?P<ts>\d{8}T\d{2}:\d{2}:\d{2}\.\d{3}Z\d+)$',
+        r'(?P<ts>\d{8}(?:T\d{2}:\d{2}:\d{2}\.\d{3}Z\d+|\d{6}))$',  # ISO format OR simple YYYYMMDDHHMMSS
         re.IGNORECASE
     )
-    # Pattern B: without literal "activity"
+    # Pattern B: without literal "activity" - supports both timestamp formats
     pat_b = re.compile(
         head +
         r'(?P<label>[A-Za-z0-9_-]+)_'
-        r'(?P<ts>\d{8}T\d{2}:\d{2}:\d{2}\.\d{3}Z\d+)$',
+        r'(?P<ts>\d{8}(?:T\d{2}:\d{2}:\d{2}\.\d{3}Z\d+|\d{6}))$',  # ISO format OR simple YYYYMMDDHHMMSS
         re.IGNORECASE
     )
 
