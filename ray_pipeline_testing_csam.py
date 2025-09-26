@@ -1972,6 +1972,9 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                 overlap_sec = 60 if is_walkthrough else 0
 
                 for vn, vp in flat_result.items():
+                    # Skip metadata entries (like _metrics from GPU-accelerated unwarping)
+                    if vn.startswith('_'):
+                       continue
                     out_dir = os.path.join(output_dir, f"{vn}_shards")
                     os.makedirs(out_dir, exist_ok=True)
                     view_shard_urls.setdefault(vn, {})  # keep structure for later upload
