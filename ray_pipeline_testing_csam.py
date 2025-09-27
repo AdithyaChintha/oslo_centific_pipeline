@@ -68,7 +68,7 @@ from utils.chunk_id_extractor import extract_chunk_id_from_path, extract_sequenc
 # Import new ray jobs
 from ray_jobs.nsfw_det_final import process_video_chunks_for_nsfw
 from ray_jobs.motion_energy import compute_motion_energy
-from ray_jobs.face_age_detector import process_video_chunks_for_face_detection
+from ray_jobs.face_age_detector_optimized import process_video_chunks_for_face_detection_optimized as process_video_chunks_for_face_detection
 from ray_jobs.labelstudio_tasks import (assign_views_to_labelstudio_positions, generate_multiview_4view_labelstudio_task,
     generate_consolidated_shard_labelstudio_task, 
     import_consolidated_tasks_to_labelstudio,
@@ -1898,7 +1898,6 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                 if timer:
                     with timer.time_operation(f"video.{session_id}.{video_id}.unwarping"):
                         if local_video_path.lower().endswith('.insv'):
-                            # Try the simpler single-output
                             update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "processing")
                             try:
                                 mp4_result = ray.get(insv_unwarp_task.remote(local_video_path, out_dir=os.path.join(output_dir, "4views")))
@@ -1927,7 +1926,6 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                             update_tracking(chunk_id, "video_processing.view_unwarping", "skipped")
                 else:
                     if local_video_path.lower().endswith('.insv'):
-                        # Try the simpler single-output
                         update_tracking(chunk_id, "video_processing.insv_to_mp4_conversion", "processing")
                         try:
                             mp4_result = ray.get(insv_unwarp_task.remote(local_video_path, out_dir=os.path.join(output_dir, "4views")))
@@ -1972,6 +1970,9 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                 overlap_sec = 60 if is_walkthrough else 0
 
                 for vn, vp in flat_result.items():
+                    # Skip metadata entries (like _metrics from GPU-accelerated unwarping)
+                    if vn.startswith('_'):
+                       continue
                     out_dir = os.path.join(output_dir, f"{vn}_shards")
                     os.makedirs(out_dir, exist_ok=True)
                     view_shard_urls.setdefault(vn, {})  # keep structure for later upload
@@ -2018,56 +2019,37 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                 except Exception as e:
                     logger.error(f"Parallel split_video_into_shards failed: {e}")
 
+                # Get the starting index for this video file (same for all views)
+                video_start_idx = global_part_idx
 
-                # Rename shards to ensure global sequential numbering across all views
+                # First, determine how many shards were created (should be same for all views)
+                first_result = results[0] if results else []
+                shards_per_view = len(first_result)
+
                 for (vn, _, out_dir), shards in zip(split_tasks, results):
                     shards = shards or []
-                    renumbered = []
-                    for old_path in shards:
-                        base, ext = os.path.splitext(old_path)
-                        # rename to global_part_idx
-                        new_path = os.path.join(out_dir, f"{vn}_part{global_part_idx:04d}{ext or '.mp4'}")
-                        if new_path != old_path:
-                            try:
-                                os.replace(old_path, new_path)  
-                            except Exception as rn_ex:
-                                logger.warning(f"Rename shard failed ({old_path} -> {new_path}): {rn_ex}; keeping original")
-                                new_path = old_path
-                        renumbered.append(new_path)
-                        global_part_idx += 1
-                    
-                    
+
                     # record in view_shards
-                    view_shards[vn] = view_shards.get(vn, []) + renumbered
+                    view_shards[vn] = view_shards.get(vn, []) + shards
                     try:
                         update_tracking(
                             chunk_id, f"view_sharding.{vn}", "completed",
-                            shard_count=len(renumbered), shard_paths=renumbered
+                            shard_count=len(shards), shard_paths=shards
                         )
-                        global_part_idx = 0  # Reset for next view
                     except Exception:
                         logger.debug(f"Failed to update tracking for {vn}")
 
-                logger.info(f"Sharding done; global_part_idx now: {global_part_idx}")
-                # Store the shards for this chunk
-                
-                # Update global part index based on the number of shards created
-                if flat_result:
-                    # Get the number of shards from the first view (all views should have same count)
-                    first_view = list(flat_result.keys())[0]
-                    if first_view in view_shards:
-                        # Count only the new shards added in this iteration
-                        existing_count = len(view_shards[first_view]) - len(shards) if first_view in view_shards else 0
-                        new_shard_count = len(shards)
-                        global_part_idx += new_shard_count
-                        logger.info(f"Added {new_shard_count} shards for chunk {video_id}, global_part_idx now: {global_part_idx}")
+                # Update global_part_idx once for all views
+                shards_per_view = len(results[0]) if results else 0
+                global_part_idx += shards_per_view
+                logger.info(f"Video {video_id}: All views created {shards_per_view} shards each (indices {global_part_idx - shards_per_view}-{global_part_idx-1})")
             
             logger.info(view_shards)
                 
             # Process audio chunks with sequential part numbering
             audio_shards = []
-            global_part_idx = 0  # Reset for audio processing
-            
+            # global_part_idx = 0  # Reset for audio processing
+            audio_global_part_idx = 0  
             for audio_id, audio_download_result in audio_downloads:
                 local_audio_path = audio_download_result['local_path']
                 logger.info(f"🎵 Processing audio: {audio_id}")
@@ -2109,7 +2091,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                                     output_dir=os.path.join(output_dir, "audio_shards"),
                                     duration_sec=duration_sec,
                                     overlap_sec=overlap_sec,  # 60 seconds overlap
-                                    start_idx=global_part_idx  # Pass the global part index
+                                    start_idx=audio_global_part_idx  # Pass the global part index
                                 ))
                             else:
                                 # BIG DEBUG STATEMENT FOR NORMAL AUDIO SPLITTING
@@ -2122,11 +2104,11 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
                                     local_audio_path,
                                     output_dir=os.path.join(output_dir, "audio_shards"),
                                     duration_sec=duration_sec,
-                                    start_idx=global_part_idx  # Pass the global part index
+                                    start_idx=audio_global_part_idx  # Pass the global part index
                                 ))
                             audio_shards.extend(chunk_audio_shards)
-                            global_part_idx += len(chunk_audio_shards)
-                            logger.info(f"Added {len(chunk_audio_shards)} audio shards for chunk {audio_id}, global_part_idx now: {global_part_idx}")
+                            audio_global_part_idx += len(chunk_audio_shards)
+                            logger.info(f"Added {len(chunk_audio_shards)} audio shards for chunk {audio_id}, global_part_idx now: {audio_global_part_idx}")
 
                             # Update tracking for audio sharding (using a generic view name for audio)
                             update_tracking(audio_chunk_id, "view_sharding.audio", "completed",
@@ -2212,16 +2194,16 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
         generate_final_combined_model_results_json(output_dir, consolidated_json_paths)
         
         logger.info(f"🎯 Running video-level domain classification for video: {session_id}")
-        if timer:
-            with timer.time_operation(f"video.{session_id}.domain_classification"):
-                domain_result = process_video_level_domain_and_update_tasks(output_dir, session_id)
-        else:
-            domain_result = process_video_level_domain_and_update_tasks(output_dir, session_id)
+        # if timer:
+        #     with timer.time_operation(f"video.{session_id}.domain_classification"):
+        #         domain_result = process_video_level_domain_and_update_tasks(output_dir, session_id)
+        # else:
+        #     domain_result = process_video_level_domain_and_update_tasks(output_dir, session_id)
 
-        if domain_result.get("success", False):
-            logger.info(f"✅ Video-level domain processing completed: {domain_result.get('video_domain', 'Unknown')}")
-        else:
-            logger.error(f"❌ Video-level domain processing failed: {domain_result.get('error', 'Unknown error')}")
+        # if domain_result.get("success", False):
+        #     logger.info(f"✅ Video-level domain processing completed: {domain_result.get('video_domain', 'Unknown')}")
+        # else:
+        #     logger.error(f"❌ Video-level domain processing failed: {domain_result.get('error', 'Unknown error')}")
         
         azure_output_prefix = azure_output_prefix + f"/video_{session_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
@@ -2450,6 +2432,9 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
         _split_refs = []
         _split_order = []
         for view_name, view_path in flat_result.items():
+            # Skip metadata entries (like _metrics from GPU-accelerated unwarping)
+            if view_name.startswith('_'):
+                continue
             ref = split_video_into_shards.remote(
                 view_path,
                 output_dir=os.path.join(output_dir, f"{view_name}_shards"),
@@ -4194,27 +4179,27 @@ def process_time_aligned_shard_multiview(
 
     # --- ENHANCED FIRST/LAST SHARD CLAP DETECTION (READ FROM CLAP OUTPUT JSON) ---
     # Always determine first/last shard status regardless of multi_chunk_process
-    is_first_shard = (shard_index == 0)
-    is_last_shard = (total_shard_count and shard_index == total_shard_count - 1)
+    # is_first_shard = (shard_index == 0)
+    # is_last_shard = (total_shard_count and shard_index == total_shard_count - 1)
     
-    clap_detected_in_first_shard = False
-    clap_detected_in_last_shard = False
+    # clap_detected_in_first_shard = False
+    # clap_detected_in_last_shard = False
 
-    if is_first_shard or is_last_shard:
-        shard_type = "first" if is_first_shard else "last"
-        logger.info(f"🔍 CLAP DETECTION for {shard_type} shard {shard_index+1}")
+    # if is_first_shard or is_last_shard:
+    #     shard_type = "first" if is_first_shard else "last"
+    #     logger.info(f"🔍 CLAP DETECTION for {shard_type} shard {shard_index+1}")
         
-        # Read clap detection results from clap_output JSON files
-        clap_detected = read_clap_detection_from_json(shard_output_dir, shard_type)
+    #     # Read clap detection results from clap_output JSON files
+    #     clap_detected = read_clap_detection_from_json(shard_output_dir, shard_type)
         
-        if is_first_shard:
-            clap_detected_in_first_shard = clap_detected
-            logger.info(f"🎬 FIRST SHARD clap detection: {'✅ DETECTED' if clap_detected else '❌ NOT DETECTED'}")
-        else:
-            clap_detected_in_last_shard = clap_detected
-            logger.info(f"🎬 LAST SHARD clap detection: {'✅ DETECTED' if clap_detected else '❌ NOT DETECTED'}")
-    else:
-        logger.info(f"ℹ️ Shard {shard_index+1} is middle shard - no special clap processing")
+    #     if is_first_shard:
+    #         clap_detected_in_first_shard = clap_detected
+    #         logger.info(f"🎬 FIRST SHARD clap detection: {'✅ DETECTED' if clap_detected else '❌ NOT DETECTED'}")
+    #     else:
+    #         clap_detected_in_last_shard = clap_detected
+    #         logger.info(f"🎬 LAST SHARD clap detection: {'✅ DETECTED' if clap_detected else '❌ NOT DETECTED'}")
+    # else:
+    #     logger.info(f"ℹ️ Shard {shard_index+1} is middle shard - no special clap processing")
 
     # --- PROCESS ALL VIEWS EQUALLY ---
     view_results = {}
@@ -4248,7 +4233,7 @@ def process_time_aligned_shard_multiview(
     # =============================================================================
     # SCENE DETECTION OUTPUTS READY FOR VIDEO-LEVEL DOMAIN DETECTION
     # =============================================================================
-    logger.info(f"🎯 Scene detection outputs ready for shard {shard_index+1}, proceeding to clap detection...")
+    # logger.info(f"🎯 Scene detection outputs ready for shard {shard_index+1}, proceeding to clap detection...")
 
     # # --- RELOAD SCENE DATA WITH DOMAIN CLASSIFICATION ---
     # logger.info(f"🔄 Reloading scene data with domain classification for shard {shard_index+1}...")
@@ -4272,110 +4257,111 @@ def process_time_aligned_shard_multiview(
     #                     logger.warning(f"⚠️ Failed to reload scene data for {view_name}: {e}")
 
     # --- ENHANCED CLAP DETECTION ANALYSIS ACROSS ALL VIEWS ---
-    is_intro_statement_there = False
-    intro_transcript = ""
+    # is_intro_statement_there = False
+    # intro_transcript = ""
     
-    if is_first_shard or is_last_shard:
-        # Analyze clap detection results from all views
-        clap_detections = []
-        all_transcripts = []
+    # if is_first_shard or is_last_shard:
+    #     # Analyze clap detection results from all views
+    #     clap_detections = []
+    #     all_transcripts = []
         
-        for view_name, view_result in view_results.items():
-            if view_result.get('success', True):  # Only process successful views
-                clap_results = view_result.get('clap', {})
-                if clap_results.get('overall_success'):
-                    clap_count = clap_results.get('detected_clap', {}).get('timestamp')
-                    clap_detections.append({
-                        'view': view_name,
-                        'clap_count': clap_count,
-                        'clap_detected': clap_timestamp is not None
-                    })
+    #     for view_name, view_result in view_results.items():
+    #         if view_result.get('success', True):  # Only process successful views
+    #             clap_results = view_result.get('clap', {})
+    #             if clap_results.get('overall_success'):
+    #                 clap_count = clap_results.get('detected_clap', {}).get('timestamp')
+    #                 clap_detections.append({
+    #                     'view': view_name,
+    #                     'clap_count': clap_count,
+    #                     'clap_detected': clap_timestamp is not None
+    #                 })
                 
-                # Collect transcripts from all views
-                audio_results = view_result.get('audio', [])
-                if isinstance(audio_results, list) and audio_results:
-                    audio_result = audio_results[0]
-                    transcript = audio_result.get('transcript', '').strip()
-                    if transcript:
-                        all_transcripts.append({
-                            'view': view_name,
-                            'transcript': transcript
-                        })
+    #             # Collect transcripts from all views
+    #             audio_results = view_result.get('audio', [])
+    #             if isinstance(audio_results, list) and audio_results:
+    #                 audio_result = audio_results[0]
+    #                 transcript = audio_result.get('transcript', '').strip()
+    #                 if transcript:
+    #                     all_transcripts.append({
+    #                         'view': view_name,
+    #                         'transcript': transcript
+    #                     })
         
         # Aggregate clap detection across views
-        total_claps = sum(detection['clap_count'] for detection in clap_detections)
-        views_with_claps = [d['view'] for d in clap_detections if d['clap_detected']]
-        clap_detected = total_claps > 0
+        # total_claps = sum(detection['clap_count'] for detection in clap_detections)
+        # views_with_claps = [d['view'] for d in clap_detections if d['clap_detected']]
+        # clap_detected = total_claps > 0
         
-        if is_first_shard:
-            clap_detected_in_first_shard = clap_detected
-            logger.info(f"🎬 FIRST SHARD multi-view clap detection:")
-            logger.info(f"   Total claps across all views: {total_claps}")
-            logger.info(f"   Views with claps: {views_with_claps}")
-            logger.info(f"   Overall detection: {'✅ DETECTED' if clap_detected else '❌ NOT DETECTED'}")
+        # if is_first_shard:
+        #     clap_detected_in_first_shard = clap_detected
+        #     logger.info(f"🎬 FIRST SHARD multi-view clap detection:")
+        #     logger.info(f"   Total claps across all views: {total_claps}")
+        #     logger.info(f"   Views with claps: {views_with_claps}")
+        #     logger.info(f"   Overall detection: {'✅ DETECTED' if clap_detected else '❌ NOT DETECTED'}")
             
-            # --- MULTI-VIEW INTRO STATEMENT DETECTION ---
-            logger.info(f"🎤 ANALYZING FIRST SHARD for intro statement across {len(all_transcripts)} views...")
+        #     # --- MULTI-VIEW INTRO STATEMENT DETECTION ---
+        #     logger.info(f"🎤 ANALYZING FIRST SHARD for intro statement across {len(all_transcripts)} views...")
             
-            if all_transcripts:
-                # Find the longest transcript (likely the best quality)
-                best_transcript = max(all_transcripts, key=lambda x: len(x['transcript']))
-                intro_transcript = best_transcript['transcript']
+        #     if all_transcripts:
+        #         # Find the longest transcript (likely the best quality)
+        #         best_transcript = max(all_transcripts, key=lambda x: len(x['transcript']))
+        #         intro_transcript = best_transcript['transcript']
                 
-                # Intro detection logic
-                intro_keywords = [
-                    "i'm going to", "i will", "today we", "welcome", "hello", "hi there",
-                    "let's", "we're going to", "this is", "in this", "i am going to",
-                    "we will", "starting with", "first we", "beginning", "introduction"
-                ]
+        #         # Intro detection logic
+        #         intro_keywords = [
+        #             "i'm going to", "i will", "today we", "welcome", "hello", "hi there",
+        #             "let's", "we're going to", "this is", "in this", "i am going to",
+        #             "we will", "starting with", "first we", "beginning", "introduction"
+        #         ]
                 
-                transcript_lower = intro_transcript.lower()
-                has_intro_keywords = any(keyword in transcript_lower for keyword in intro_keywords)
-                has_meaningful_content = len(intro_transcript.strip()) > 10
+        #         transcript_lower = intro_transcript.lower()
+        #         has_intro_keywords = any(keyword in transcript_lower for keyword in intro_keywords)
+        #         has_meaningful_content = len(intro_transcript.strip()) > 10
                 
-                is_intro_statement_there = has_intro_keywords or has_meaningful_content
+        #         is_intro_statement_there = has_intro_keywords or has_meaningful_content
                 
-                logger.info(f"🗣️ INTRO STATEMENT: {'✅ DETECTED' if is_intro_statement_there else '❌ NOT DETECTED'}")
-                logger.info(f"📝 Best transcript from {best_transcript['view']}: '{intro_transcript}'")
+        #         logger.info(f"🗣️ INTRO STATEMENT: {'✅ DETECTED' if is_intro_statement_there else '❌ NOT DETECTED'}")
+        #         logger.info(f"📝 Best transcript from {best_transcript['view']}: '{intro_transcript}'")
                 
-                if has_intro_keywords:
-                    matched_keywords = [kw for kw in intro_keywords if kw in transcript_lower]
-                    logger.info(f"🔤 Intro keywords found: {matched_keywords}")
+        #         if has_intro_keywords:
+        #             matched_keywords = [kw for kw in intro_keywords if kw in transcript_lower]
+        #             logger.info(f"🔤 Intro keywords found: {matched_keywords}")
                     
-                # Log all transcripts for analysis
-                for transcript_data in all_transcripts:
-                    logger.info(f"📝 {transcript_data['view']}: '{transcript_data['transcript']}'")
-            else:
-                logger.info(f"📝 No transcripts found across any views in first shard")
+        #         # Log all transcripts for analysis
+        #         for transcript_data in all_transcripts:
+        #             logger.info(f"📝 {transcript_data['view']}: '{transcript_data['transcript']}'")
+        #     else:
+        #         logger.info(f"📝 No transcripts found across any views in first shard")
                 
-        else:  # is_last_shard
-            clap_detected_in_last_shard = clap_detected
-            logger.info(f"🎬 LAST SHARD multi-view clap detection:")
-            logger.info(f"   Total claps across all views: {total_claps}")
-            logger.info(f"   Views with claps: {views_with_claps}")
-            logger.info(f"   Overall detection: {'✅ DETECTED' if clap_detected else '❌ NOT DETECTED'}")
+        # else:  # is_last_shard
+        #     clap_detected_in_last_shard = clap_detected
+        #     logger.info(f"🎬 LAST SHARD multi-view clap detection:")
+        #     logger.info(f"   Total claps across all views: {total_claps}")
+        #     logger.info(f"   Views with claps: {views_with_claps}")
+        #     logger.info(f"   Overall detection: {'✅ DETECTED' if clap_detected else '❌ NOT DETECTED'}")
 
     # --- CREATE ENHANCED DETECTION FLAGS ---
-    detection_flags = {
-        "is_first_shard": is_first_shard,
-        "is_last_shard": is_last_shard,
-        "is_intro_statement_there": is_intro_statement_there,
-        "intro_transcript": intro_transcript,
-        "shard_index": shard_index,
-        "shard_type": "first" if is_first_shard else ("last" if is_last_shard else "middle"),
-        "is_first_shard_processed": is_first_shard,
-        "is_last_shard_processed": is_last_shard,
-        "total_views_processed": len(view_results),
-        "successful_views": len([v for v in view_results.values() if v.get('success', True)]),
-        "processing_type": "multi_view_equal_processing",
-        "clap_detected_in_first_shard": clap_detected_in_first_shard,
-        "clap_detected_in_last_shard": clap_detected_in_last_shard,
-    }
+    detection_flags = {}
+    # detection_flags = {
+    #     "is_first_shard": is_first_shard,
+    #     "is_last_shard": is_last_shard,
+    #     "is_intro_statement_there": is_intro_statement_there,
+    #     "intro_transcript": intro_transcript,
+    #     "shard_index": shard_index,
+    #     "shard_type": "first" if is_first_shard else ("last" if is_last_shard else "middle"),
+    #     "is_first_shard_processed": is_first_shard,
+    #     "is_last_shard_processed": is_last_shard,
+    #     "total_views_processed": len(view_results),
+    #     "successful_views": len([v for v in view_results.values() if v.get('success', True)]),
+    #     "processing_type": "multi_view_equal_processing",
+    #     "clap_detected_in_first_shard": clap_detected_in_first_shard,
+    #     "clap_detected_in_last_shard": clap_detected_in_last_shard,
+    # }
     
     # Add detection flags to all view results
-    for view_name, view_result in view_results.items():
-        if view_result.get('success', True):
-            view_result['detection_flags'] = detection_flags
+    # for view_name, view_result in view_results.items():
+    #     if view_result.get('success', True):
+    #         view_result['detection_flags'] = detection_flags
 
     # --- GENERATE MULTI-VIEW CONSOLIDATED MODEL RESULTS JSON ---
     logger.info(f"Generating multi-view consolidated model results JSON for shard {shard_index+1}")
@@ -4662,25 +4648,25 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     if view_name == "erp":
         #Yolo people counter only for ERP view
         logger.info(f"ERP view: only run yolo people counter")
-        yolo_output_dir = os.path.join(output_dir, "yolo_output")
-        update_tracking(chunk_id, "model_processing.yolo_detection.erp", "processing")
-        try:
-            if timer:
-                with timer.time_operation(f"{base_timing_id}.yolo_people_detection"):
-                    yolo_ref  = run_yolo_detection.remote(video_shard_path, yolo_output_dir)
-                    yolo_res = ray.get(yolo_ref)
-            else:
-                yolo_ref  = run_yolo_detection.remote(video_shard_path, yolo_output_dir)
-                yolo_res = ray.get(yolo_ref)
+        # yolo_output_dir = os.path.join(output_dir, "yolo_output")
+        # update_tracking(chunk_id, "model_processing.yolo_detection.erp", "processing")
+        # try:
+        #     if timer:
+        #         with timer.time_operation(f"{base_timing_id}.yolo_people_detection"):
+        #             yolo_ref  = run_yolo_detection.remote(video_shard_path, yolo_output_dir)
+        #             yolo_res = ray.get(yolo_ref)
+        #     else:
+        #         yolo_ref  = run_yolo_detection.remote(video_shard_path, yolo_output_dir)
+        #         yolo_res = ray.get(yolo_ref)
 
-            results = {'yolo': yolo_res}
-            update_tracking(chunk_id, "model_processing.yolo_detection.erp", "completed",
-                           results_path=yolo_output_dir)
-            logger.info(f"Yolo people counter results saved to yolo_output_dir: {yolo_output_dir}")
-        except Exception as e:
-            update_tracking(chunk_id, "model_processing.yolo_detection.erp", "error",
-                           error_message=str(e))
-            logger.error(f"YOLO detection failed: {e}")
+        #     results = {'yolo': yolo_res}
+        #     update_tracking(chunk_id, "model_processing.yolo_detection.erp", "completed",
+        #                    results_path=yolo_output_dir)
+        #     logger.info(f"Yolo people counter results saved to yolo_output_dir: {yolo_output_dir}")
+        # except Exception as e:
+        #     update_tracking(chunk_id, "model_processing.yolo_detection.erp", "error",
+        #                    error_message=str(e))
+        #     logger.error(f"YOLO detection failed: {e}")
         return results
 
     enable_timing = timer is not None
@@ -4714,93 +4700,94 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     is_last_shard = (total_shard_count and shard_index == total_shard_count - 1)
     
     # Start all model processing with tracking
-    update_tracking(chunk_id, "model_processing.audio_diarization", "processing")
-    audio_ref = process_audio_diarization.remote([audio_shard_path], audio_output_dir,enable_timing=enable_timing,
-        timing_id=f"{base_timing_id}.audio_diarization")
+    # update_tracking(chunk_id, "model_processing.audio_diarization", "processing")
+    # audio_ref = process_audio_diarization.remote([audio_shard_path], audio_output_dir,enable_timing=enable_timing,
+    #     timing_id=f"{base_timing_id}.audio_diarization")
     
-    update_tracking(chunk_id, "model_processing.scene_detection.front", "processing")
-    scene_ref = detect_scenes.remote(video_shard_path, prompt_path, scene_output_dir, enable_timing=enable_timing,
-        timing_id=f"{base_timing_id}.scene_detection")
+    # update_tracking(chunk_id, "model_processing.scene_detection.front", "processing")
+    # scene_ref = detect_scenes.remote(video_shard_path, prompt_path, scene_output_dir, enable_timing=enable_timing,
+    #     timing_id=f"{base_timing_id}.scene_detection")
     
     update_tracking(chunk_id, "model_processing.nsfw_detection.front", "processing")
     nsfw_ref  = process_video_chunks_for_nsfw.remote([video_shard_path], confidence_threshold=0.5, chunk_duration_sec=60, enable_timing=enable_timing,
         timing_id=f"{base_timing_id}.nsfw_detection")
     
-    update_tracking(chunk_id, "model_processing.motion_detection.front", "processing")
-    motion_ref= compute_motion_energy.remote([video_shard_path], sensitivity_level="medium", save_detailed_data=False, enable_timing=enable_timing,
-        timing_id=f"{base_timing_id}.motion_energy")
+    # update_tracking(chunk_id, "model_processing.motion_detection.front", "processing")
+    # motion_ref= compute_motion_energy.remote([video_shard_path], sensitivity_level="medium", save_detailed_data=False, enable_timing=enable_timing,
+    #     timing_id=f"{base_timing_id}.motion_energy")
     
     update_tracking(chunk_id, "model_processing.face_detection.front", "processing")
     face_ref  = process_video_chunks_for_face_detection.remote([video_shard_path], config=None, frame_interval=30, save_frames=False, chunk_duration_sec=60, enable_timing=enable_timing,
         timing_id=f"{base_timing_id}.face_detection")
     
     # Only run clap detection for first and last shards
-    clap_ref = None
-    if is_first_shard or is_last_shard:
-        shard_type = "first" if is_first_shard else "last" 
-        logger.info(f"🔍 Running clap detection for {shard_type} shard {shard_index+1}")
-        update_tracking(chunk_id, "model_processing.clap_detection", "processing")
-        clap_ref = detect_claps_in_audio_video_pair.remote(audio_shard_path, video_shard_path, clap_output_dir, search_window_sec=30.0, enable_timing=enable_timing, timing_id=f"{base_timing_id}.clap_detection")
-    else:
-        logger.info(f"ℹ️ Skipping clap detection for middle shard {shard_index+1}")
-        update_tracking(chunk_id, "model_processing.clap_detection", "skipped")
+    # clap_ref = None
+    # if is_first_shard or is_last_shard:
+    #     shard_type = "first" if is_first_shard else "last" 
+    #     logger.info(f"🔍 Running clap detection for {shard_type} shard {shard_index+1}")
+    #     update_tracking(chunk_id, "model_processing.clap_detection", "processing")
+    #     clap_ref = detect_claps_in_audio_video_pair.remote(audio_shard_path, video_shard_path, clap_output_dir, search_window_sec=30.0, enable_timing=enable_timing, timing_id=f"{base_timing_id}.clap_detection")
+    # else:
+    #     logger.info(f"ℹ️ Skipping clap detection for middle shard {shard_index+1}")
+    #     update_tracking(chunk_id, "model_processing.clap_detection", "skipped")
     
-    update_tracking(chunk_id, "model_processing.signal_quality_check", "processing")
-    signal_quality_ref = detect_blur_and_black_segments.remote(video_shard_path, enable_timing=enable_timing, timing_id=f"{base_timing_id}.signal_quality")
+    # update_tracking(chunk_id, "model_processing.signal_quality_check", "processing")
+    # signal_quality_ref = detect_blur_and_black_segments.remote(video_shard_path, enable_timing=enable_timing, timing_id=f"{base_timing_id}.signal_quality")
 
     # Testing lighting
-    update_tracking(chunk_id, "model_processing.lighting_analysis", "processing")
-    lighting_ref = lighting_by_second_task.remote(video_shard_path, output_dir=lighting_output_dir, enable_timing=enable_timing, timing_id=f"{base_timing_id}.lighting_analysis")
+    # update_tracking(chunk_id, "model_processing.lighting_analysis", "processing")
+    # lighting_ref = lighting_by_second_task.remote(video_shard_path, output_dir=lighting_output_dir, enable_timing=enable_timing, timing_id=f"{base_timing_id}.lighting_analysis")
 
-    scene_res = ray.get(scene_ref)
+    # scene_res = ray.get(scene_ref)
 
     # Get results, handling conditional clap detection
-    if clap_ref is not None:
-        (audio_res, nsfw_res, motion_res, face_res, clap_res, lighting_res, signal_quality_res) = ray.get(
-            [audio_ref, nsfw_ref, motion_ref, face_ref, clap_ref, lighting_ref, signal_quality_ref]
-        )
+    # if clap_ref is not None:
+        # (audio_res, nsfw_res, motion_res, face_res, clap_res, lighting_res, signal_quality_res) = ray.get(
+        #     [audio_ref, nsfw_ref, motion_ref, face_ref, clap_ref, lighting_ref, signal_quality_ref]
+        # )
+    nsfw_res, face_res = ray.get([nsfw_ref, face_ref])
         # Update tracking for completed models
-        update_tracking(chunk_id, "model_processing.audio_diarization", "completed", results_path=audio_output_dir)
-        update_tracking(chunk_id, "model_processing.scene_detection.front", "completed", results_path=scene_output_dir)
-        update_tracking(chunk_id, "model_processing.nsfw_detection.front", "completed", results_path=nsfw_output_dir)
-        update_tracking(chunk_id, "model_processing.motion_detection.front", "completed", results_path=motion_output_dir)
-        update_tracking(chunk_id, "model_processing.face_detection.front", "completed", results_path=face_output_dir)
-        update_tracking(chunk_id, "model_processing.clap_detection", "completed", results_path=clap_output_dir)
-        update_tracking(chunk_id, "model_processing.signal_quality_check", "completed", results_path=signal_quality_output_dir)
-        update_tracking(chunk_id, "model_processing.lighting_analysis", "completed", results_path=lighting_output_dir)
-    else:
-        # Set empty clap result for middle shards
-        (audio_res, nsfw_res, motion_res, face_res, lighting_res, signal_quality_res) = ray.get(
-            [audio_ref, nsfw_ref, motion_ref, face_ref, lighting_ref, signal_quality_ref]
-        )
-        clap_res = {"success": True, "clap_count": 0, "clap_timestamps": [], "message": "Clap detection skipped for middle shard"}
-        # Update tracking for completed models (except clap)
-        update_tracking(chunk_id, "model_processing.audio_diarization", "completed", results_path=audio_output_dir)
-        update_tracking(chunk_id, "model_processing.scene_detection.front", "completed", results_path=scene_output_dir)
-        update_tracking(chunk_id, "model_processing.nsfw_detection.front", "completed", results_path=nsfw_output_dir)
-        update_tracking(chunk_id, "model_processing.motion_detection.front", "completed", results_path=motion_output_dir)
-        update_tracking(chunk_id, "model_processing.face_detection.front", "completed", results_path=face_output_dir)
-        update_tracking(chunk_id, "model_processing.signal_quality_check", "completed", results_path=signal_quality_output_dir)
-        update_tracking(chunk_id, "model_processing.lighting_analysis", "completed", results_path=lighting_output_dir)
+        # update_tracking(chunk_id, "model_processing.audio_diarization", "completed", results_path=audio_output_dir)
+        # update_tracking(chunk_id, "model_processing.scene_detection.front", "completed", results_path=scene_output_dir)
+    update_tracking(chunk_id, "model_processing.nsfw_detection.front", "completed", results_path=nsfw_output_dir)
+        # update_tracking(chunk_id, "model_processing.motion_detection.front", "completed", results_path=motion_output_dir)
+    update_tracking(chunk_id, "model_processing.face_detection.front", "completed", results_path=face_output_dir)
+        # update_tracking(chunk_id, "model_processing.clap_detection", "completed", results_path=clap_output_dir)
+        # update_tracking(chunk_id, "model_processing.signal_quality_check", "completed", results_path=signal_quality_output_dir)
+        # update_tracking(chunk_id, "model_processing.lighting_analysis", "completed", results_path=lighting_output_dir)
+    # else:
+    #     # Set empty clap result for middle shards
+    #     (audio_res, nsfw_res, motion_res, face_res, lighting_res, signal_quality_res) = ray.get(
+    #         [audio_ref, nsfw_ref, motion_ref, face_ref, lighting_ref, signal_quality_ref]
+    #     )
+    #     clap_res = {"success": True, "clap_count": 0, "clap_timestamps": [], "message": "Clap detection skipped for middle shard"}
+    #     # Update tracking for completed models (except clap)
+    #     update_tracking(chunk_id, "model_processing.audio_diarization", "completed", results_path=audio_output_dir)
+    #     update_tracking(chunk_id, "model_processing.scene_detection.front", "completed", results_path=scene_output_dir)
+    #     update_tracking(chunk_id, "model_processing.nsfw_detection.front", "completed", results_path=nsfw_output_dir)
+    #     update_tracking(chunk_id, "model_processing.motion_detection.front", "completed", results_path=motion_output_dir)
+    #     update_tracking(chunk_id, "model_processing.face_detection.front", "completed", results_path=face_output_dir)
+    #     update_tracking(chunk_id, "model_processing.signal_quality_check", "completed", results_path=signal_quality_output_dir)
+    #     update_tracking(chunk_id, "model_processing.lighting_analysis", "completed", results_path=lighting_output_dir)
     
     # Run sensitive information analysis after audio_diarization_pii completes
-    sensitive_output_dir = os.path.join(output_dir, "sensitive_output")
-    os.makedirs(sensitive_output_dir, exist_ok=True)
-    update_tracking(chunk_id, "model_processing.sensitive_info_detection", "processing")
-    sensitive_ref = process_audio_sensitive_info.remote([audio_shard_path], audio_output_dir, sensitive_output_dir)
-    sensitive_res = ray.get(sensitive_ref)
-    update_tracking(chunk_id, "model_processing.sensitive_info_detection", "completed", results_path=sensitive_output_dir)
+    # sensitive_output_dir = os.path.join(output_dir, "sensitive_output")
+    # os.makedirs(sensitive_output_dir, exist_ok=True)
+    # update_tracking(chunk_id, "model_processing.sensitive_info_detection", "processing")
+    # sensitive_ref = process_audio_sensitive_info.remote([audio_shard_path], audio_output_dir, sensitive_output_dir)
+    # sensitive_res = ray.get(sensitive_ref)
+    # update_tracking(chunk_id, "model_processing.sensitive_info_detection", "completed", results_path=sensitive_output_dir)
 
     if timer and enable_timing:
         timing_results = {
-            "audio_diarization": audio_res.get("timing"),
+            # "audio_diarization": audio_res.get("timing"),
             "nsfw_detection": nsfw_res.get("timing"),
-            "motion_energy": motion_res.get("timing"),
+            # "motion_energy": motion_res.get("timing"),
             "face_detection": face_res.get("timing"),
-            "scene_detection": scene_res.get("timing"),
-            "clap_detection": clap_res.get("timing") if clap_res and isinstance(clap_res, dict) else None,
-            "signal_quality": signal_quality_res.get("timing") if isinstance(signal_quality_res, dict) else None,
-            "lighting_analysis": lighting_res.get("timing") if isinstance(lighting_res, dict) and "timing" in lighting_res else None
+            # "scene_detection": scene_res.get("timing"),
+            # "clap_detection": clap_res.get("timing") if clap_res and isinstance(clap_res, dict) else None,
+            # "signal_quality": signal_quality_res.get("timing") if isinstance(signal_quality_res, dict) else None,
+            # "lighting_analysis": lighting_res.get("timing") if isinstance(lighting_res, dict) and "timing" in lighting_res else None
             # Note: sensitive_info doesn't have timing parameters yet
         }
 
@@ -4816,15 +4803,15 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
                 }
     # Store results from Ray tasks
     results = {
-        'audio': audio_res,
-        'scene': scene_res,
+        # 'audio': audio_res,
+        # 'scene': scene_res,
         'nsfw': nsfw_res,
-        'motion': motion_res,
+        # 'motion': motion_res,
         'face': face_res,
-        'clap': clap_res,
-        'sensitive': sensitive_res,
-        'lighting': lighting_res.get("result") if isinstance(lighting_res, dict) and "result" in lighting_res else lighting_res,
-        'signal_quality': signal_quality_res
+        # 'clap': clap_res,
+        # 'sensitive': sensitive_res,
+        # 'lighting': lighting_res.get("result") if isinstance(lighting_res, dict) and "result" in lighting_res else lighting_res,
+        # 'signal_quality': signal_quality_res
     }
     
     # Save individual model results to JSON files (following ray_pipeline_testing_old.py pattern)
@@ -4838,25 +4825,25 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
         logger.info(f"NSFW results saved to: {nsfw_file}")
     
     # Save Motion Energy results
-    if motion_res and motion_res.get("success"):
-        motion_file = os.path.join(motion_output_dir, f"{video_name}_motion_results.json")
-        with open(motion_file, 'w') as f:
-            json.dump(motion_res, f, indent=2)
-        logger.info(f"Motion energy results saved to: {motion_file}")
+    # if motion_res and motion_res.get("success"):
+    #     motion_file = os.path.join(motion_output_dir, f"{video_name}_motion_results.json")
+    #     with open(motion_file, 'w') as f:
+    #         json.dump(motion_res, f, indent=2)
+    #     logger.info(f"Motion energy results saved to: {motion_file}")
     
-    # Save Face Age Detection results
-    if face_res and face_res.get("success"):
-        face_file = os.path.join(face_output_dir, f"{video_name}_face_results.json")
-        with open(face_file, 'w') as f:
-            json.dump(face_res, f, indent=2)
-        logger.info(f"Face detection results saved to: {face_file}")
+    # # Save Face Age Detection results
+    # if face_res and face_res.get("success"):
+    #     face_file = os.path.join(face_output_dir, f"{video_name}_face_results.json")
+    #     with open(face_file, 'w') as f:
+    #         json.dump(face_res, f, indent=2)
+    #     logger.info(f"Face detection results saved to: {face_file}")
     
     # Save Sensitive Information Analysis results
-    if sensitive_res and isinstance(sensitive_res, list) and len(sensitive_res) > 0:
-        sensitive_file = os.path.join(sensitive_output_dir, f"{video_name}_sensitive_results.json")
-        with open(sensitive_file, 'w') as f:
-            json.dump(sensitive_res, f, indent=2)
-        logger.info(f"Sensitive information analysis results saved to: {sensitive_file}")
+    # if sensitive_res and isinstance(sensitive_res, list) and len(sensitive_res) > 0:
+    #     sensitive_file = os.path.join(sensitive_output_dir, f"{video_name}_sensitive_results.json")
+    #     with open(sensitive_file, 'w') as f:
+    #         json.dump(sensitive_res, f, indent=2)
+    #     logger.info(f"Sensitive information analysis results saved to: {sensitive_file}")
     
     # Extract flagged segments from all models
     all_segments = []
