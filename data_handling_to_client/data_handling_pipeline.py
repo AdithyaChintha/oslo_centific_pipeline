@@ -26,12 +26,14 @@ from urllib.parse import quote, urlparse, parse_qs, urlunparse
 import requests
 import yaml
 from dateutil import parser as dtparser
+import re
 
 from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
 from azure.storage.blob import generate_blob_sas, generate_container_sas, BlobSasPermissions, ContainerSasPermissions
 from azure.storage.filedatalake import DataLakeFileClient
 from azure.core.exceptions import ResourceNotFoundError, AzureError
 from dotenv import load_dotenv
+from urllib.parse import urlparse, urlunparse, quote
 
 dotenv_path = os.path.join(os.path.dirname(__file__), "..", ".env")
 load_dotenv(dotenv_path)
@@ -132,6 +134,44 @@ def mask_sas(url: str) -> str:
     if len(q) <= 8:
         return base + "?***"
     return base + "?***" + q[-8:]
+
+
+
+def load_renaming_map_from_ods(mapping_file: str, sheet_name, old_col: str, new_col: str) -> dict:
+    """
+    Load {old_blob_name -> new_blob_name} from an ODF (.ods) spreadsheet.
+    Columns must be old_col and new_col.
+    """
+    from pathlib import Path
+    import pandas as pd
+
+    p = Path(mapping_file)
+    if not p.exists():
+        raise FileNotFoundError(f"Mapping file not found: {mapping_file}")
+    if p.stat().st_size == 0:
+        raise ValueError(f"Mapping file is empty: {mapping_file}")
+
+    df = pd.read_excel(mapping_file, sheet_name=sheet_name, engine="odf")
+    if isinstance(df, dict):
+        if sheet_name:
+            if sheet_name not in df:
+                raise ValueError(f"Worksheet '{sheet_name}' not found; available: {list(df.keys())}")
+            df = df[sheet_name]
+        else:
+            df = df[next(iter(df))]
+
+    cols = [str(c).strip() for c in df.columns]
+    if old_col not in cols or new_col not in cols:
+        raise ValueError(f"Mapping must have columns '{old_col}' and '{new_col}'. Found: {cols}")
+
+    mp = {}
+    for _, row in df.iterrows():
+        k = str(row[old_col]).strip()
+        v = str(row[new_col]).strip()
+        if k:
+            mp[k] = v
+    return mp
+
 
 # -------------------------
 # Config loader
@@ -520,6 +560,45 @@ class DataPushOrchestrator:
         self._generated_container_sas: Optional[str] = None
         self._account_name, self._account_key = self._parse_account_from_connstr(self.source_conn)
 
+
+
+        # ---- renaming config (from scratch) ----
+        rnm = self.cfg.get("renaming", default={}) or {}
+        self.renaming_enabled = bool(rnm.get("enabled", False))
+        self.renaming_map: dict = {}
+        self.renaming_patterns: list[tuple[re.Pattern, str]] = []  # (compiled_regex, replacement_template)
+        self.rename_match_mode = (rnm.get("match_mode") or "auto").lower()
+
+        if self.renaming_enabled:
+            mapping_path = rnm.get("mapping_file")
+            if not mapping_path:
+                raise SystemExit("renaming.enabled is true but renaming.mapping_file is missing")
+
+            # resolve relative to YAML file directory (if you have ConfigLoader.base_dir)
+            try:
+                base_dir = self.cfg.base_dir  # if you added earlier; otherwise use os.getcwd()
+                mapping_path = str(Path(base_dir) / mapping_path) if not Path(mapping_path).is_absolute() else mapping_path
+            except Exception:
+                pass
+
+            sheet_name = rnm.get("sheet_name")
+            old_col = rnm.get("old_column", "old_blob_name")
+            new_col = rnm.get("new_column", "new_blob_name")
+
+            # ODF loader
+            self.renaming_map = load_renaming_map_from_ods(mapping_path, sheet_name, old_col, new_col)
+            logger.info("Loaded %d rename rules from %s", len(self.renaming_map), mapping_path)
+
+            # Build regex patterns for placeholder keys (AUDIO_ID / VIDEO_ID), case-insensitive
+            for k, v in self.renaming_map.items():
+                if ("AUDIO_ID" in k) or ("VIDEO_ID" in k):
+                    pat = re.escape(k)
+                    # match audio<number> / video<number>, keep case-insensitive
+                    pat = pat.replace("AUDIO_ID", r"(audio\d+)")
+                    pat = pat.replace("VIDEO_ID", r"(video\d+)")
+                    self.renaming_patterns.append((re.compile(r"^" + pat + r"$", re.IGNORECASE), v))
+
+
     # -------------------------
     # Account parsing + SAS generation
     # -------------------------
@@ -682,14 +761,66 @@ class DataPushOrchestrator:
     # -------------------------
     # azcopy wrapper
     # -------------------------
-    def copy_blob_via_azcopy(self, source_url: str, partner_container_sas: str, blob_name: str) -> None:
-        src = source_url
-        if "?" in source_url and (f"/{self.source_container}/" in source_url or source_url.rstrip().endswith(self.source_container) or source_url.rstrip().endswith(self.source_container + "?") or source_url.rstrip().endswith(self.source_container + "/")):
-            src = source_url.rstrip("/") + "/" + quote(blob_name, safe="")
-        dst = partner_container_sas.rstrip("/") + "/" + quote(blob_name, safe="")
+    def _is_dfs_dir_sas_url(self, url: str) -> bool:
+        parsed = urlparse(url)
+        q = parse_qs(parsed.query)
+        return parsed.netloc.endswith(".dfs.core.windows.net") and q.get("sr", [""])[0] == "d"
+
+    # def copy_blob_via_azcopy(self, source_url: str, partner_container_sas: str, blob_name: str) -> None:
+    #     # src = source_url
+    #     # if "?" in source_url and (f"/{self.source_container}/" in source_url or source_url.rstrip().endswith(self.source_container) or source_url.rstrip().endswith(self.source_container + "?") or source_url.rstrip().endswith(self.source_container + "/")):
+    #     #     src = source_url.rstrip("/") + "/" + quote(blob_name, safe="")
+    #     # dst = partner_container_sas.rstrip("/") + "/" + quote(blob_name, safe="")
+
+    #     src = source_url.rstrip("/") + "/" + quote(blob_name, safe="/")
+    #     dst = partner_container_sas
+    #     if self._is_dfs_dir_sas_url(partner_container_sas):
+    #         # ADLS Gen2 directory SAS -> append path with real slashes
+    #         dst = partner_container_sas.rstrip("/") + "/" + quote(blob_name, safe="/")
+    #     else:
+    #         # Blob container SAS -> also append with slashes
+    #         dst = partner_container_sas.rstrip("/") + "/" + quote(blob_name, safe="/")
+
+    #     # cmd = [self.azcopy_path, "copy", src, dst, "--overwrite=false"]
+    #     # logger.info("Running azcopy: %s", " ".join(cmd))
+    #     # subprocess.check_call(cmd)
+
+    #     cmd = [self.azcopy_path, "copy", src, dst, "--overwrite=false"]
+    #     logger.info("Running azcopy:\nsrc: %s\ndst: %s", mask_sas(src), mask_sas(dst))
+    #     subprocess.check_call(cmd)
+
+
+
+    
+
+    def _append_path_before_query(self,url: str, extra_path: str, keep_slashes: bool = True) -> str:
+        """
+        Append extra_path into the URL's *path* (before ?query).
+        keep_slashes=True keeps '/' as real slashes (quote(..., safe='/')).
+        """
+        parsed = urlparse(url)
+        safe_extra = quote(extra_path, safe="/" if keep_slashes else "")
+        new_path = parsed.path.rstrip("/") + "/" + safe_extra.lstrip("/")
+        return urlunparse((parsed.scheme, parsed.netloc, new_path, parsed.params, parsed.query, parsed.fragment))
+
+    def _is_dfs_dir_sas_url(self,url: str) -> bool:
+        p = urlparse(url)
+        from urllib.parse import parse_qs
+        q = parse_qs(p.query)
+        return p.netloc.endswith(".dfs.core.windows.net") and q.get("sr", [""])[0] == "d"
+
+    def copy_blob_via_azcopy(self, source_url: str, partner_container_sas: str,
+                            src_blob_name: str, dest_blob_name: str) -> None:
+        # Build source: add *source* blob path into container SAS URL (before ?)
+        src = self._append_path_before_query(source_url, src_blob_name, keep_slashes=True)
+
+        # Build destination: add *dest* blob path into ADLS dir SAS or blob container SAS
+        dst = self._append_path_before_query(partner_container_sas, dest_blob_name, keep_slashes=True)
+
         cmd = [self.azcopy_path, "copy", src, dst, "--overwrite=false"]
-        logger.info("Running azcopy: %s", " ".join(cmd))
+        logger.info("Running azcopy:\nsrc: %s\ndst: %s", mask_sas(src), mask_sas(dst))
         subprocess.check_call(cmd)
+
 
     # -------------------------
     # choose best source URL for azcopy
@@ -702,6 +833,45 @@ class DataPushOrchestrator:
             return container_sas
         blob_sas = self.generate_blob_sas_url(blob_name, expiry_minutes=60)
         return blob_sas
+
+    def resolve_upload_name(self, source_blob_name: str) -> str:
+        """
+        Decide the upload (destination) name:
+        1) exact match on full path
+        2) exact match on basename
+        3) regex placeholders (AUDIO_ID/VIDEO_ID -> audio\d+/video\d+)
+        If the target template contains the placeholder, we substitute it with the captured text.
+        """
+        if not self.renaming_enabled or not self.renaming_map:
+            return source_blob_name
+
+        full_key = source_blob_name
+        base_key = Path(source_blob_name).name
+
+        # Exact full-path match
+        if full_key in self.renaming_map:
+            return self.renaming_map[full_key]
+
+        # Exact basename match
+        if base_key in self.renaming_map:
+            return self.renaming_map[base_key]
+
+        # Regex placeholder match
+        for pattern, template in self.renaming_patterns:
+            m = pattern.match(full_key) or pattern.match(base_key)
+            if m:
+                replacement = template
+                # If template includes placeholders, replace with captured token(s)
+                # (We used a single capture group in the pattern)
+                if "AUDIO_ID" in replacement and m.lastindex:
+                    replacement = replacement.replace("AUDIO_ID", m.group(1))
+                if "VIDEO_ID" in replacement and m.lastindex:
+                    replacement = replacement.replace("VIDEO_ID", m.group(1))
+                return replacement
+
+        # No rule -> keep original
+        return source_blob_name
+
 
     # -------------------------
     # run loop
@@ -811,7 +981,9 @@ class DataPushOrchestrator:
             #        upload_status = f"failed: {str(dl_ex)}"
 
 
-            metadata_blob_name = blob_name + ".metadata.json"
+            # metadata_blob_name = blob_name + ".metadata.json"
+            upload_blob_name = self.resolve_upload_name(blob_name)   # NEW
+            metadata_blob_name = upload_blob_name + ".metadata.json"
             tmp_blob_path = str(Path(self.work_dir) / f"{uuid.uuid4().hex}_{Path(blob_name).name}")
             tmp_meta_path = str(Path(self.work_dir) / f"{uuid.uuid4().hex}_{Path(metadata_blob_name).name}")
             upload_status = "failed: unknown"
@@ -823,7 +995,12 @@ class DataPushOrchestrator:
                         try:
                             logger.info("Using azcopy for blob: %s (source_sas masked: %s)", blob_name, mask_sas(source_for_azcopy))
                             # 1) Copy the actual media blob via azcopy
-                            self.copy_blob_via_azcopy(source_for_azcopy, partner_container_sas, blob_name)
+                            # self.copy_blob_via_azcopy(source_for_azcopy, partner_container_sas, blob_name)
+
+                            self.copy_blob_via_azcopy(source_for_azcopy, partner_container_sas,
+                                                    src_blob_name=blob_name,
+                                                    dest_blob_name=upload_blob_name)
+
 
                             # 2) ALWAYS generate fresh metadata locally and upload via partner SAS
                             with open(tmp_meta_path, "w", encoding="utf-8") as fm:
@@ -844,22 +1021,22 @@ class DataPushOrchestrator:
 
             except Exception as az_err:
                 logger.info("Falling back to SDK download/upload for %s due to: %s", blob_name, az_err)
-                try:
-                    # 1) Download the media blob via SDK
-                    self.source_client.download_blob_to_path(blob_name, tmp_blob_path)
+                # try:
+                #     # 1) Download the media blob via SDK
+                #     self.source_client.download_blob_to_path(blob_name, tmp_blob_path)
 
-                    # 2) ALWAYS generate fresh metadata locally
-                    with open(tmp_meta_path, "w", encoding="utf-8") as fm:
-                        json.dump(self.generate_metadata_obj(blob_name), fm)
+                #     # 2) ALWAYS generate fresh metadata locally
+                #     with open(tmp_meta_path, "w", encoding="utf-8") as fm:
+                #         json.dump(self.generate_metadata_obj(blob_name), fm)
 
-                    # 3) Upload both via partner SAS
-                    self.uploader.upload_file_to_partner_using_sas(partner_container_sas, blob_name, tmp_blob_path)
-                    self.uploader.upload_file_to_partner_using_sas(partner_container_sas, metadata_blob_name, tmp_meta_path)
+                #     # 3) Upload both via partner SAS
+                #     self.uploader.upload_file_to_partner_using_sas(partner_container_sas, blob_name, tmp_blob_path)
+                #     self.uploader.upload_file_to_partner_using_sas(partner_container_sas, metadata_blob_name, tmp_meta_path)
 
-                    upload_status = "success"
-                except Exception as upl_ex:
-                    logger.error("SDK path failed for %s: %s", blob_name, upl_ex)
-                    upload_status = f"failed: {str(upl_ex)}"
+                #     upload_status = "success"
+                # except Exception as upl_ex:
+                #     logger.error("SDK path failed for %s: %s", blob_name, upl_ex)
+                #     upload_status = f"failed: {str(upl_ex)}"
 
 
 
@@ -874,6 +1051,7 @@ class DataPushOrchestrator:
 
             submission_manifest["files"].append({
                 "blob_name": blob_name,
+                "upload_blob_name": upload_blob_name,
                 "fingerprint": fp,
                 "metadata_blob": metadata_blob_name,
                 "upload_status": upload_status,
