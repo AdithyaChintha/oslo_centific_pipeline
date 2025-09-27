@@ -12,4 +12,4 @@ def setup_cosmos():
 
     # Clone the model repository if it doesn't exist
     if not os.path.exists("models/Cosmos"):
-        subprocess.run(["git", "clone", "https://huggingface.co/microsoft/Cosmos"], cwd="models", check=True)
+        subprocess.run(["git", "clone", "https://github.com/nvidia-cosmos/cosmos-reason1"], cwd="models", check=True)

@@ -9,7 +9,7 @@ from azure.core.exceptions import ResourceNotFoundError
 import time
 from datetime import datetime
 import ray
-logger = get_logger("ChunkFilenameParser")
+logger = get_logger("MultiChunkBlobUtils")
 
 def parse_chunk_filename_complete_legacy(filename: str) -> Optional[Dict]:
     """
@@ -19,15 +19,21 @@ def parse_chunk_filename_complete_legacy(filename: str) -> Optional[Dict]:
       - (NOT parsed here) ..._metadata.json  (handled separately)
     Returns a dict or None if unrecognized.
     """
+    logger.debug(f"🔍 Attempting legacy parsing for filename: {filename}")
+    
     if not filename:
+        logger.debug("❌ Empty filename provided")
         return None
 
     base = os.path.basename(filename)
     name, ext = os.path.splitext(base)
     ext_lower = ext.lower()
+    
+    logger.debug(f"📄 Filename breakdown: base='{base}', name='{name}', ext='{ext_lower}'")
 
     # Only parse audio/video files here; metadata is discovered elsewhere
     if ext_lower not in {'.wav', '.insv', '.mp4'}:
+        logger.debug(f"⏭️ Skipping non-media file with extension: {ext_lower}")
         return None
 
     # Tail-first: optional "_<chunk>_" then "<type>" at end of basename (before extension)
@@ -39,11 +45,14 @@ def parse_chunk_filename_complete_legacy(filename: str) -> Optional[Dict]:
     )
     m_tail = tail_re.match(name)
     if not m_tail:
+        logger.debug(f"❌ Tail regex failed to match filename: {name}")
         return None
 
     head = m_tail.group('head')
     chunk_str = m_tail.group('chunk')
     chunk_type = m_tail.group('chunk_type').lower()
+    
+    logger.debug(f"✅ Tail parsing successful: head='{head}', chunk='{chunk_str}', type='{chunk_type}'")
 
     # Head parse:
     # <session_index>_<uuid> [ _<stream> ] [ _<label> ] [ _<timestamp> ]
@@ -59,6 +68,7 @@ def parse_chunk_filename_complete_legacy(filename: str) -> Optional[Dict]:
     )
     m_head = head_re.match(head)
     if not m_head:
+        logger.debug(f"❌ Head regex failed to match: {head}")
         return None
 
     session_index = m_head.group('session_index')
@@ -66,17 +76,23 @@ def parse_chunk_filename_complete_legacy(filename: str) -> Optional[Dict]:
     stream = m_head.group('stream')
     label = m_head.group('label') or "unknown"
     timestamp = m_head.group('timestamp')
+    
+    logger.debug(f"✅ Head parsing successful: session_index='{session_index}', uuid='{uuid}', stream='{stream}', label='{label}', timestamp='{timestamp}'")
 
     # Validate extension vs type
     if chunk_type == 'audio' and ext_lower not in {'.wav'}:
+        logger.debug(f"❌ Extension mismatch for audio: expected .wav, got {ext_lower}")
         return None
     if chunk_type == 'video' and ext_lower not in {'.insv', '.mp4'}:
+        logger.debug(f"❌ Extension mismatch for video: expected .insv/.mp4, got {ext_lower}")
         return None
 
     chunk_number = int(chunk_str) if chunk_str is not None else None
 
     # Session ID used everywhere (must match what metadata extractor returns)
     session_id = f"{session_index}-{uuid}-{label.lower()}"
+    
+    logger.info(f"✅ Legacy parsing successful: {filename} → session_id='{session_id}', chunk_number={chunk_number}, type='{chunk_type}'")
 
     return {
         "file_name": filename,
@@ -234,10 +250,15 @@ def discover_sessions_by_folder(blob_service_client: BlobServiceClient,
     4. Group chunks by folder, not by filename-derived session ID
     """
     logger.info(f"🔍 Discovering sessions by folder structure under: {base_prefix}")
+    logger.debug(f"📊 Parameters: container='{container_name}', prefix='{base_prefix}'")
 
     try:
+        logger.debug("🔗 Creating container client...")
         container_client = blob_service_client.get_container_client(container_name)
+        
+        logger.debug(f"📂 Listing blobs with prefix: {base_prefix}")
         blobs = list(container_client.list_blobs(name_starts_with=base_prefix))
+        logger.info(f"📄 Found {len(blobs)} total blobs under prefix")
 
         # Group files by session folder
         session_folders = defaultdict(lambda: {
@@ -249,12 +270,15 @@ def discover_sessions_by_folder(blob_service_client: BlobServiceClient,
         for blob in blobs:
             # Extract session folder: one-data-platform/session-name/filename
             relative_path = blob.name[len(base_prefix):] if blob.name.startswith(base_prefix) else blob.name
+            logger.debug(f"🔍 Processing blob: {blob.name} → relative: {relative_path}")
 
             if '/' in relative_path:
                 session_folder = relative_path.split('/')[0]
                 filename = relative_path.split('/')[-1]
+                logger.debug(f"📁 Session folder: '{session_folder}', filename: '{filename}'")
 
                 if filename.endswith('_metadata.json'):
+                    logger.debug(f"📄 Found metadata file: {filename}")
                     session_folders[session_folder]['metadata_files'].append({
                         'blob_name': blob.name,
                         'file_name': filename,
@@ -270,10 +294,19 @@ def discover_sessions_by_folder(blob_service_client: BlobServiceClient,
                             'session_folder': session_folder
                         })
                         session_folders[session_folder]['chunks'].append(chunk_info)
+                        logger.debug(f"✅ Parsed chunk: {filename} → {chunk_info['chunk_type']} #{chunk_info.get('chunk_number', 'N/A')}")
+                    else:
+                        logger.debug(f"⏭️ Skipped non-chunk file: {filename}")
 
                 session_folders[session_folder]['folder_path'] = f"{base_prefix}{session_folder}"
 
         logger.info(f"📊 Found {len(session_folders)} session folders")
+        
+        # Log folder summary
+        for folder_name, folder_data in session_folders.items():
+            chunk_count = len(folder_data['chunks'])
+            metadata_count = len(folder_data['metadata_files'])
+            logger.debug(f"📁 Folder '{folder_name}': {chunk_count} chunks, {metadata_count} metadata files")
 
         # Process each session folder
         sessions = {}
@@ -404,8 +437,11 @@ def parse_completion_metadata_json(completion_content: str) -> Optional[Dict]:
     
     Expected format: 11_515fb09c-f12f-48ee-91e7-b21c9f4ac5ab_activity_working-on-laptop_20250907T00:00:00.000Z122100_metadata.json
     """
+    logger.debug(f"📄 Parsing completion metadata JSON (length: {len(completion_content)} chars)")
+    
     try:
         metadata = json.loads(completion_content)
+        logger.debug(f"✅ JSON parsing successful, found {len(metadata)} top-level keys: {list(metadata.keys())}")
         
         # Validate required fields
         required_fields = ["id", "home_id", "participant_id", "activity", "start_datetime", "end_datetime"]
@@ -413,7 +449,10 @@ def parse_completion_metadata_json(completion_content: str) -> Optional[Dict]:
         
         if missing_fields:
             logger.error(f"❌ Missing required fields in metadata JSON: {missing_fields}")
+            logger.debug(f"📄 Available fields: {list(metadata.keys())}")
             return None
+        
+        logger.debug(f"✅ All required fields present: {required_fields}")
         
         # Extract session information from the metadata
         session_info = {
@@ -796,11 +835,13 @@ class BasicDownloadManager:
         num = chunk_info.get("chunk_number")
         num_str = f"{num:02d}" if isinstance(num, int) else "NA"
         chunk_id = f"{num_str}-{chunk_info['chunk_type']}"
+        remote_size = chunk_info.get("size", 0)
         
         # Create local file path
         local_file_path = os.path.join(self.local_download_dir, file_name)
         
         logger.info(f"📥 Downloading {file_name} (chunk {chunk_id})")
+        logger.debug(f"📊 Download details: blob='{blob_name}', size={remote_size} bytes, local='{local_file_path}'")
         
         # Check if file already exists and is complete
         if os.path.exists(local_file_path):
@@ -809,6 +850,7 @@ class BasicDownloadManager:
             
             if local_size == remote_size and local_size > 0:
                 logger.info(f"⏭️ File already exists and complete: {file_name}")
+                logger.debug(f"✅ Size verification: local={local_size}, remote={remote_size}")
                 return {
                     "success": True,
                     "chunk_id": chunk_id,
@@ -821,6 +863,8 @@ class BasicDownloadManager:
                     "chunk_type": chunk_info["chunk_type"],
                     "chunk_number": chunk_info.get("chunk_number"),
                 }
+            else:
+                logger.debug(f"🔄 File exists but size mismatch: local={local_size}, remote={remote_size}, will re-download")
         
         # Download with retries
         last_error = None
