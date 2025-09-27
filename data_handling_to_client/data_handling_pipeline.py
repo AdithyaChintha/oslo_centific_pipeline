@@ -39,8 +39,47 @@ load_dotenv(dotenv_path)
 # -------------------------
 # Logging
 # -------------------------
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger("data_pusher")
+# logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+# logger = logging.getLogger("data_pusher")
+
+
+from logging.handlers import RotatingFileHandler
+
+def setup_logging_from_cfg(cfg: "ConfigLoader") -> None:
+    # Read config
+    level_name = (cfg.get("logging", "level", default="INFO") or "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    log_file = cfg.get("logging", "file", default="./logs/data_pusher.log")
+    max_mb = int(cfg.get("logging", "max_mb", default=10))
+    backup_count = int(cfg.get("logging", "backup_count", default=5))
+
+    # Ensure folder exists
+    ensure_dir(str(Path(log_file).parent))
+
+    # Common formatter
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+    # Reset root logger to avoid duplicate handlers when rerun
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.setLevel(level)
+
+    # Console handler
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setFormatter(fmt)
+    root.addHandler(ch)
+
+    # Rotating file handler
+    fh = RotatingFileHandler(
+        log_file, maxBytes=max_mb * 1024 * 1024, backupCount=backup_count, encoding="utf-8"
+    )
+    fh.setFormatter(fmt)
+    root.addHandler(fh)
+
+    # Use a named logger in the rest of the code
+    global logger
+    logger = logging.getLogger("data_pusher")
+
 
 # -------------------------
 # Helpers
@@ -434,6 +473,8 @@ class DataPushOrchestrator:
         # source SAS
         self.source_sas = cfg.get("azure_source", "container_sas") or os.getenv(cfg.get("azure_source", "container_sas_env", default=""))
         self.source_prefix = cfg.get("azure_source", "source_prefix", default=None)
+        self.home_id = cfg.get("azure_source", "home_id")
+
 
         # partner endpoints
         self.containers_api = cfg.get("openai", "containers_api", default="https://api.openai.com/v1/training_data/containers")
@@ -572,6 +613,18 @@ class DataPushOrchestrator:
         all_blobs = self.source_client.list_blobs_with_props()
         if self.source_prefix:
             all_blobs = [b for b in all_blobs if b["name"].startswith(self.source_prefix)]
+        
+        def is_target(blob_path: str) -> bool:
+            parts = blob_path.split("/")
+            if len(parts) < 2:
+                return False
+            filename = parts[-1]
+            parent_folders = parts[:-1]
+            has_home = any(p.startswith(self.home_id) for p in parent_folders)
+            is_media = filename.lower().endswith((".insv", ".wav"))
+            return has_home and is_media
+        
+        all_blobs = [b for b in all_blobs if is_target(b["name"])]
 
         wm_dt, wm_last_blob = self._watermark_tuple()
         candidates: List[Tuple[str, dict, str]] = []
@@ -606,6 +659,8 @@ class DataPushOrchestrator:
                 logger.info("SKIP (watermark) %s last_modified=%s", name, last_mod_iso)
 
         candidates.sort(key=lambda t: (parse_iso_to_utc(t[2]), t[0]))
+        print(candidates)
+        logger.info("Selected %d candidate blobs:\n%s", len(candidates), candidates)
         return candidates
 
     # -------------------------
@@ -615,6 +670,8 @@ class DataPushOrchestrator:
         ln = blob_name.lower()
         if ln.endswith(".json"):
             return "application/json"
+        if ln.endswith(".wav"):
+            return "audio/wav"
         if ln.endswith(".insv"):
             return "application/octet-stream"
         return "application/octet-stream"
@@ -653,6 +710,7 @@ class DataPushOrchestrator:
         logger.info("Starting data push run (with remote watermark).")
         to_send = self.blobs_to_send()
         if not to_send:
+            print("No blobs eligible for sending. Exiting.")
             logger.info("No blobs eligible for sending. Exiting.")
             return
 
@@ -694,6 +752,65 @@ class DataPushOrchestrator:
 
         for blob_name, fp, last_mod_iso in to_send:
             logger.info("Processing: %s", blob_name)
+            # metadata_blob_name = blob_name + ".metadata.json"
+            # tmp_blob_path = str(Path(self.work_dir) / f"{uuid.uuid4().hex}_{Path(blob_name).name}")
+            # tmp_meta_path = str(Path(self.work_dir) / f"{uuid.uuid4().hex}_{Path(metadata_blob_name).name}")
+            # upload_status = "failed: unknown"
+
+            # try:
+            #     if self.use_azcopy:
+            #         source_for_azcopy = self.get_best_source_url_for_blob(blob_name)
+            #         if source_for_azcopy:
+            #             try:
+            #                 logger.info("Using azcopy for blob: %s (source_sas masked: %s)", blob_name, mask_sas(source_for_azcopy))
+            #                 self.copy_blob_via_azcopy(source_for_azcopy, partner_container_sas, blob_name)
+            #                 try:
+            #                     if self.source_client.metadata_blob_exists(metadata_blob_name):
+            #                         self.copy_blob_via_azcopy(source_for_azcopy, partner_container_sas, metadata_blob_name)
+            #                     else:
+            #                         with open(tmp_meta_path, "w", encoding="utf-8") as fm:
+            #                             json.dump(self.generate_metadata_obj(blob_name), fm)
+            #                         self.uploader.upload_file_to_partner_using_sas(partner_container_sas, metadata_blob_name, tmp_meta_path)
+            #                 except Exception as e_meta:
+            #                     logger.warning("Metadata copy/upload warning for %s: %s", metadata_blob_name, e_meta)
+            #                 upload_status = "success"
+            #             except subprocess.CalledProcessError as e:
+            #                 logger.error("azcopy command failed for %s: %s", blob_name, e)
+            #                 raise
+            #         else:
+            #             logger.info("No usable source SAS for azcopy; falling back to SDK for %s", blob_name)
+            #             raise RuntimeError("No source SAS for azcopy")
+            #     else:
+            #         raise RuntimeError("Azcopy disabled by config")
+
+            # except Exception as az_err:
+            #     logger.info("Falling back to SDK download/upload for %s due to: %s", blob_name, az_err)
+            #     try:
+            #         self.source_client.download_blob_to_path(blob_name, tmp_blob_path)
+
+            #         if self.source_client.metadata_blob_exists(metadata_blob_name):
+            #             try:
+            #                 self.source_client.download_metadata_to_path(metadata_blob_name, tmp_meta_path)
+            #             except Exception as e:
+            #                 logger.warning("Failed to download metadata %s: %s - generating instead", metadata_blob_name, e)
+            #                 with open(tmp_meta_path, "w", encoding="utf-8") as fm:
+            #                     json.dump(self.generate_metadata_obj(blob_name), fm)
+            #         else:
+            #             with open(tmp_meta_path, "w", encoding="utf-8") as fm:
+            #                 json.dump(self.generate_metadata_obj(blob_name), fm)
+
+            #         try:
+            #             self.uploader.upload_file_to_partner_using_sas(partner_container_sas, blob_name, tmp_blob_path)
+            #             self.uploader.upload_file_to_partner_using_sas(partner_container_sas, metadata_blob_name, tmp_meta_path)
+            #             upload_status = "success"
+            #         except Exception as upl_ex:
+            #             logger.error("Upload via partner SAS failed for %s: %s", blob_name, upl_ex)
+            #             upload_status = f"failed: {str(upl_ex)}"
+            #    except Exception as dl_ex:
+            #        logger.error("Download failed for %s: %s", blob_name, dl_ex, exc_info=True)
+            #        upload_status = f"failed: {str(dl_ex)}"
+
+
             metadata_blob_name = blob_name + ".metadata.json"
             tmp_blob_path = str(Path(self.work_dir) / f"{uuid.uuid4().hex}_{Path(blob_name).name}")
             tmp_meta_path = str(Path(self.work_dir) / f"{uuid.uuid4().hex}_{Path(metadata_blob_name).name}")
@@ -705,16 +822,16 @@ class DataPushOrchestrator:
                     if source_for_azcopy:
                         try:
                             logger.info("Using azcopy for blob: %s (source_sas masked: %s)", blob_name, mask_sas(source_for_azcopy))
+                            # 1) Copy the actual media blob via azcopy
                             self.copy_blob_via_azcopy(source_for_azcopy, partner_container_sas, blob_name)
-                            try:
-                                if self.source_client.metadata_blob_exists(metadata_blob_name):
-                                    self.copy_blob_via_azcopy(source_for_azcopy, partner_container_sas, metadata_blob_name)
-                                else:
-                                    with open(tmp_meta_path, "w", encoding="utf-8") as fm:
-                                        json.dump(self.generate_metadata_obj(blob_name), fm)
-                                    self.uploader.upload_file_to_partner_using_sas(partner_container_sas, metadata_blob_name, tmp_meta_path)
-                            except Exception as e_meta:
-                                logger.warning("Metadata copy/upload warning for %s: %s", metadata_blob_name, e_meta)
+
+                            # 2) ALWAYS generate fresh metadata locally and upload via partner SAS
+                            with open(tmp_meta_path, "w", encoding="utf-8") as fm:
+                                json.dump(self.generate_metadata_obj(blob_name), fm)
+                            self.uploader.upload_file_to_partner_using_sas(
+                                partner_container_sas, metadata_blob_name, tmp_meta_path
+                            )
+
                             upload_status = "success"
                         except subprocess.CalledProcessError as e:
                             logger.error("azcopy command failed for %s: %s", blob_name, e)
@@ -728,30 +845,24 @@ class DataPushOrchestrator:
             except Exception as az_err:
                 logger.info("Falling back to SDK download/upload for %s due to: %s", blob_name, az_err)
                 try:
+                    # 1) Download the media blob via SDK
                     self.source_client.download_blob_to_path(blob_name, tmp_blob_path)
 
-                    if self.source_client.metadata_blob_exists(metadata_blob_name):
-                        try:
-                            self.source_client.download_metadata_to_path(metadata_blob_name, tmp_meta_path)
-                        except Exception as e:
-                            logger.warning("Failed to download metadata %s: %s - generating instead", metadata_blob_name, e)
-                            with open(tmp_meta_path, "w", encoding="utf-8") as fm:
-                                json.dump(self.generate_metadata_obj(blob_name), fm)
-                    else:
-                        with open(tmp_meta_path, "w", encoding="utf-8") as fm:
-                            json.dump(self.generate_metadata_obj(blob_name), fm)
+                    # 2) ALWAYS generate fresh metadata locally
+                    with open(tmp_meta_path, "w", encoding="utf-8") as fm:
+                        json.dump(self.generate_metadata_obj(blob_name), fm)
 
-                    try:
-                        self.uploader.upload_file_to_partner_using_sas(partner_container_sas, blob_name, tmp_blob_path)
-                        self.uploader.upload_file_to_partner_using_sas(partner_container_sas, metadata_blob_name, tmp_meta_path)
-                        upload_status = "success"
-                    except Exception as upl_ex:
-                        logger.error("Upload via partner SAS failed for %s: %s", blob_name, upl_ex)
-                        upload_status = f"failed: {str(upl_ex)}"
+                    # 3) Upload both via partner SAS
+                    self.uploader.upload_file_to_partner_using_sas(partner_container_sas, blob_name, tmp_blob_path)
+                    self.uploader.upload_file_to_partner_using_sas(partner_container_sas, metadata_blob_name, tmp_meta_path)
 
-                except Exception as dl_ex:
-                    logger.error("Download failed for %s: %s", blob_name, dl_ex, exc_info=True)
-                    upload_status = f"failed: {str(dl_ex)}"
+                    upload_status = "success"
+                except Exception as upl_ex:
+                    logger.error("SDK path failed for %s: %s", blob_name, upl_ex)
+                    upload_status = f"failed: {str(upl_ex)}"
+
+
+
 
             finally:
                 for p in (tmp_blob_path, tmp_meta_path):
@@ -867,6 +978,7 @@ def main():
     args = parser.parse_args()
 
     cfg = ConfigLoader(args.config)
+    setup_logging_from_cfg(cfg)
     orchestrator = DataPushOrchestrator(cfg)
     orchestrator.run_once()
 
