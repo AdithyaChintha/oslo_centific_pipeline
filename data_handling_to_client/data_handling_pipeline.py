@@ -834,43 +834,76 @@ class DataPushOrchestrator:
         blob_sas = self.generate_blob_sas_url(blob_name, expiry_minutes=60)
         return blob_sas
 
+    # def resolve_upload_name(self, source_blob_name: str) -> str:
+    #     """
+    #     Decide the upload (destination) name:
+    #     1) exact match on full path
+    #     2) exact match on basename
+    #     3) regex placeholders (AUDIO_ID/VIDEO_ID -> audio\d+/video\d+)
+    #     If the target template contains the placeholder, we substitute it with the captured text.
+    #     """
+    #     if not self.renaming_enabled or not self.renaming_map:
+    #         return source_blob_name
+
+    #     full_key = source_blob_name
+    #     base_key = Path(source_blob_name).name
+
+    #     # Exact full-path match
+    #     if full_key in self.renaming_map:
+    #         return self.renaming_map[full_key]
+
+    #     # Exact basename match
+    #     if base_key in self.renaming_map:
+    #         return self.renaming_map[base_key]
+
+    #     # Regex placeholder match
+    #     for pattern, template in self.renaming_patterns:
+    #         m = pattern.match(full_key) or pattern.match(base_key)
+    #         if m:
+    #             replacement = template
+    #             # If template includes placeholders, replace with captured token(s)
+    #             # (We used a single capture group in the pattern)
+    #             if "AUDIO_ID" in replacement and m.lastindex:
+    #                 replacement = replacement.replace("AUDIO_ID", m.group(1))
+    #             if "VIDEO_ID" in replacement and m.lastindex:
+    #                 replacement = replacement.replace("VIDEO_ID", m.group(1))
+    #             return replacement
+
+    #     # No rule -> keep original
+    #     return source_blob_name
+
+
     def resolve_upload_name(self, source_blob_name: str) -> str:
-        """
-        Decide the upload (destination) name:
-        1) exact match on full path
-        2) exact match on basename
-        3) regex placeholders (AUDIO_ID/VIDEO_ID -> audio\d+/video\d+)
-        If the target template contains the placeholder, we substitute it with the captured text.
-        """
         if not self.renaming_enabled or not self.renaming_map:
             return source_blob_name
 
         full_key = source_blob_name
         base_key = Path(source_blob_name).name
+        parent_dir = str(Path(source_blob_name).parent)  # e.g. "multi_chunk/raw_insv"
 
-        # Exact full-path match
+        # 1. Full-path exact match
         if full_key in self.renaming_map:
             return self.renaming_map[full_key]
 
-        # Exact basename match
+        # 2. Basename exact match
         if base_key in self.renaming_map:
-            return self.renaming_map[base_key]
+            return f"{parent_dir}/{self.renaming_map[base_key]}"
 
-        # Regex placeholder match
+        # 3. Regex placeholder match
         for pattern, template in self.renaming_patterns:
             m = pattern.match(full_key) or pattern.match(base_key)
             if m:
                 replacement = template
-                # If template includes placeholders, replace with captured token(s)
-                # (We used a single capture group in the pattern)
                 if "AUDIO_ID" in replacement and m.lastindex:
                     replacement = replacement.replace("AUDIO_ID", m.group(1))
                 if "VIDEO_ID" in replacement and m.lastindex:
                     replacement = replacement.replace("VIDEO_ID", m.group(1))
-                return replacement
+                # preserve the original folder structure
+                return f"{parent_dir}/{replacement}"
 
-        # No rule -> keep original
+        # no match → keep original
         return source_blob_name
+
 
 
     # -------------------------
