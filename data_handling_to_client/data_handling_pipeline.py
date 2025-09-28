@@ -517,8 +517,10 @@ class DataPushOrchestrator:
         self.manifests_dir = cfg.get("local_paths", "manifests_dir", default="./local_manifests")
         self.watermark_file = cfg.get("local_paths", "watermark_file", default=str(Path(self.manifests_dir) / "watermark.json"))
         self.work_dir = cfg.get("local_paths", "work_dir", default="./work")
+        self.state_dir = cfg.get("state_tracking", "local_dir", default="./upload_state")
         ensure_dir(self.manifests_dir)
         ensure_dir(self.work_dir)
+        ensure_dir(self.state_dir)
 
         # azcopy config
         self.use_azcopy = bool(cfg.get("azure_partner", "use_azcopy", default=False))
@@ -550,7 +552,7 @@ class DataPushOrchestrator:
             self.state_storage = None
         # helpers (watermark store uses remote_manifests)
         # self.watermark_store = WatermarkStore(self.watermark_file, remote_manifests=self.remote_manifests)
-        self.state_store = EnhancedStateStore(self.home_id, self.manifests_dir, state_storage=self.state_storage)
+        self.state_store = EnhancedStateStore(self.home_id, self.state_dir, state_storage=self.state_storage)
         self._validate_state_configuration()
         # Testing configuration
         test_config = cfg.get("testing", default={})
@@ -653,15 +655,16 @@ class DataPushOrchestrator:
         # Pattern for your media files - handles both timestamp formats and case-insensitive extensions
         # Format 1: {id}_{type}_{activity}_{simple_timestamp}_{seq}_{type}.{ext} (e.g., 20250925094000)
         # Format 2: {id}_{type}_{activity}_{z_timestamp}_{seq}_{type}.{ext} (e.g., 20250908T00:00:00.000Z130700)
-        media_pattern = r'^([^_]+_[^_]+)_(video\d+|audio\d+)_([^_]+)_([^_]+)_\d+_(video|audio)\.(insv|wav|WAV|INSV)$'
+        # Format 3: {id}_{device_id}_{activity}_{timestamp}_{seq}_{type}.{ext} (e.g., 65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_...)
+        media_pattern = r'^([^_]+_[^_]+)_([^_]+)_([^_]+)_([^_]+)_\d+_(video|audio)\.(insv|wav|WAV|INSV)$'
 
         match = re.match(media_pattern, filename)
         if not match:
             return None
 
-        id_part = match.group(1)  # "67_3638d12d-e041-4514-adaa-3a3055068f3c"
-        media_type = match.group(2)  # "video1" or "audio1"
-        activity = match.group(3)  # "locking-doors-and-windows"
+        id_part = match.group(1)  # "67_3638d12d-e041-4514-adaa-3a3055068f3c" or "65_59251661-71d9-445a-b6d9-e61cc9bc18be"
+        device_id = match.group(2)  # "video1", "audio1", "C30024373", or "IAHYA2507S98C9"
+        activity = match.group(3)  # "locking-doors-and-windows" or "walkthrough-day"
         timestamp = match.group(4)  # "20250925094000"
 
         return {
@@ -669,7 +672,7 @@ class DataPushOrchestrator:
             'id_part': id_part,
             'activity': activity,
             'timestamp': timestamp,
-            'media_type': media_type
+            'device_id': device_id
         }
 
     def get_metadata_path_for_media(self, media_blob_name: str) -> Optional[str]:
@@ -1143,7 +1146,10 @@ class DataPushOrchestrator:
                 container_id=container_id,
                 metadata_uploaded=False,
                 retry_count=0,
-                error_details=None
+                error_details=None,
+                upload_start_time=now_iso(),
+                upload_end_time=None,
+                upload_duration_seconds=None
             )
 
             try:
@@ -1167,6 +1173,16 @@ class DataPushOrchestrator:
                                 partner_container_sas, metadata_blob_name, tmp_meta_path
                             )
 
+                            # Record upload completion timing
+                            video_result.upload_end_time = now_iso()
+                            try:
+                                from dateutil import parser as dtparser
+                                start_dt = dtparser.parse(video_result.upload_start_time)
+                                end_dt = dtparser.parse(video_result.upload_end_time)
+                                video_result.upload_duration_seconds = (end_dt - start_dt).total_seconds()
+                            except Exception as e:
+                                logger.warning("Could not calculate upload duration for %s: %s", blob_name, e)
+                            
                             video_result.upload_status = "success"
                             video_result.metadata_uploaded = True   
                         except subprocess.CalledProcessError as e:
@@ -1202,6 +1218,17 @@ class DataPushOrchestrator:
 
 
             finally:
+                # Record upload end time for failed uploads
+                if video_result.upload_status != "success" and video_result.upload_end_time is None:
+                    video_result.upload_end_time = now_iso()
+                    try:
+                        from dateutil import parser as dtparser
+                        start_dt = dtparser.parse(video_result.upload_start_time)
+                        end_dt = dtparser.parse(video_result.upload_end_time)
+                        video_result.upload_duration_seconds = (end_dt - start_dt).total_seconds()
+                    except Exception as e:
+                        logger.warning("Could not calculate upload duration for failed upload %s: %s", blob_name, e)
+                
                 for p in (tmp_blob_path, tmp_meta_path):
                     try:
                         if os.path.exists(p):

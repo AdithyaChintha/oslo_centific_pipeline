@@ -42,6 +42,10 @@ class VideoProcessingResult:
     metadata_uploaded: bool
     retry_count: int
     error_details: Optional[str]
+    # Timing information
+    upload_start_time: Optional[str] = None
+    upload_end_time: Optional[str] = None
+    upload_duration_seconds: Optional[float] = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization"""
@@ -123,17 +127,23 @@ class EnhancedStateStore:
                 "last_updated": now_iso(),
                 "version": "2.0",
                 "total_videos_processed": 0,
-                "schema_version": 1
+                "schema_version": 1,
+                "first_processing_start": None,
+                "last_processing_end": None,
+                "total_processing_time_seconds": 0
             },
             "daily_processing": {},
             "processing_statistics": {
                 "total_sessions": 0,
                 "total_containers_created": 0,
                 "average_videos_per_session": 0,
+                "total_upload_time_seconds": 0,
+                "average_upload_time_per_file_seconds": 0,
                 "last_30_days": {
                     "videos_processed": 0,
                     "success_rate": 0,
-                    "average_session_duration_minutes": 0
+                    "average_session_duration_minutes": 0,
+                    "total_upload_time_seconds": 0
                 }
             },
             "error_summary": {
@@ -233,6 +243,7 @@ class EnhancedStateStore:
                 "videos_processed": 0,
                 "videos_successful": 0,
                 "videos_failed": 0,
+                "total_upload_time_seconds": 0,
                 "processing_sessions": []
             }
 
@@ -243,18 +254,51 @@ class EnhancedStateStore:
         videos_in_session = len(session_info.get("videos", []))
         successful_videos = len([v for v in session_info.get("videos", []) if v.get("upload_status") == "success"])
         failed_videos = videos_in_session - successful_videos
+        session_upload_time = session_info.get("total_upload_time_seconds", 0)
 
         daily_data["videos_processed"] += videos_in_session
         daily_data["videos_successful"] += successful_videos
         daily_data["videos_failed"] += failed_videos
+        daily_data["total_upload_time_seconds"] += session_upload_time
 
         # Update metadata
         self.current_state["metadata"]["total_videos_processed"] += videos_in_session
+        
+        # Update home_id level timing
+        if not self.current_state["metadata"]["first_processing_start"]:
+            self.current_state["metadata"]["first_processing_start"] = session_info.get("started_at")
+        
+        self.current_state["metadata"]["last_processing_end"] = session_info.get("completed_at")
+        
+        # Calculate total processing time for this home_id
+        if (self.current_state["metadata"]["first_processing_start"] and 
+            self.current_state["metadata"]["last_processing_end"]):
+            try:
+                from dateutil import parser as dtparser
+                start_dt = dtparser.parse(self.current_state["metadata"]["first_processing_start"])
+                end_dt = dtparser.parse(self.current_state["metadata"]["last_processing_end"])
+                self.current_state["metadata"]["total_processing_time_seconds"] = (end_dt - start_dt).total_seconds()
+            except Exception as e:
+                logger.warning("Could not calculate total processing time: %s", e)
 
         # Update statistics
         stats = self.current_state["processing_statistics"]
         stats["total_sessions"] += 1
         stats["total_containers_created"] += 1
+        stats["total_upload_time_seconds"] += session_upload_time
+        
+        # Calculate average upload time per file
+        total_successful_videos = sum(
+            len([v for v in session.get("videos", []) if v.get("upload_status") == "success"])
+            for date_data in self.current_state["daily_processing"].values()
+            for session in date_data.get("processing_sessions", [])
+        )
+        
+        if total_successful_videos > 0:
+            stats["average_upload_time_per_file_seconds"] = stats["total_upload_time_seconds"] / total_successful_videos
+        
+        # Update last 30 days statistics
+        stats["last_30_days"]["total_upload_time_seconds"] += session_upload_time
 
         # Save updated state
         self.save_state(self.current_state)
@@ -295,11 +339,33 @@ class ProcessingSession:
 
     def get_session_info(self) -> dict:
         """Get complete session information"""
+        # Calculate session duration
+        session_duration_seconds = None
+        if self.completed_at and self.started_at:
+            try:
+                from dateutil import parser as dtparser
+                start_dt = dtparser.parse(self.started_at)
+                end_dt = dtparser.parse(self.completed_at)
+                session_duration_seconds = (end_dt - start_dt).total_seconds()
+            except Exception as e:
+                logger.warning("Could not calculate session duration: %s", e)
+        
+        # Calculate total upload time for all videos
+        total_upload_time_seconds = 0
+        successful_uploads = 0
+        for video in self.videos:
+            if video.get("upload_duration_seconds") and video.get("upload_status") == "success":
+                total_upload_time_seconds += video["upload_duration_seconds"]
+                successful_uploads += 1
+        
         return {
             "session_id": self.session_id,
             "started_at": self.started_at,
             "completed_at": self.completed_at,
             "container_id": self.container_id,
+            "session_duration_seconds": session_duration_seconds,
+            "total_upload_time_seconds": total_upload_time_seconds,
+            "successful_uploads": successful_uploads,
             "videos": self.videos
         }
 
