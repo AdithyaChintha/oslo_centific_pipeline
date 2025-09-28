@@ -126,7 +126,11 @@ class EnhancedStateStore:
                 "created_at": now_iso(),
                 "last_updated": now_iso(),
                 "version": "2.0",
-                "total_videos_processed": 0,
+                "total_files_processed": 0,
+                "total_video_files_processed": 0,
+                "total_audio_files_processed": 0,
+                "total_data_processed_bytes": 0,
+                "total_data_processed_gb": 0.0,
                 "schema_version": 1,
                 "first_processing_start": None,
                 "last_processing_end": None,
@@ -136,14 +140,22 @@ class EnhancedStateStore:
             "processing_statistics": {
                 "total_sessions": 0,
                 "total_containers_created": 0,
-                "average_videos_per_session": 0,
+                "average_files_per_session": 0,
                 "total_upload_time_seconds": 0,
                 "average_upload_time_per_file_seconds": 0,
+                "total_data_processed_bytes": 0,
+                "total_data_processed_gb": 0.0,
+                "average_file_size_bytes": 0,
+                "average_file_size_gb": 0.0,
                 "last_30_days": {
-                    "videos_processed": 0,
+                    "files_processed": 0,
+                    "video_files_processed": 0,
+                    "audio_files_processed": 0,
                     "success_rate": 0,
                     "average_session_duration_minutes": 0,
-                    "total_upload_time_seconds": 0
+                    "total_upload_time_seconds": 0,
+                    "total_data_processed_bytes": 0,
+                    "total_data_processed_gb": 0.0
                 }
             },
             "error_summary": {
@@ -240,10 +252,16 @@ class EnhancedStateStore:
         if today not in self.current_state["daily_processing"]:
             self.current_state["daily_processing"][today] = {
                 "date": today,
-                "videos_processed": 0,
-                "videos_successful": 0,
-                "videos_failed": 0,
+                "files_processed": 0,
+                "video_files_processed": 0,
+                "audio_files_processed": 0,
+                "files_successful": 0,
+                "video_files_successful": 0,
+                "audio_files_successful": 0,
+                "files_failed": 0,
                 "total_upload_time_seconds": 0,
+                "total_data_processed_bytes": 0,
+                "total_data_processed_gb": 0.0,
                 "processing_sessions": []
             }
 
@@ -251,18 +269,36 @@ class EnhancedStateStore:
         daily_data["processing_sessions"].append(session_info)
 
         # Update daily statistics
-        videos_in_session = len(session_info.get("videos", []))
-        successful_videos = len([v for v in session_info.get("videos", []) if v.get("upload_status") == "success"])
-        failed_videos = videos_in_session - successful_videos
+        files_in_session = session_info.get("total_files_processed", 0)
+        video_files_in_session = session_info.get("video_files_processed", 0)
+        audio_files_in_session = session_info.get("audio_files_processed", 0)
+        successful_files = session_info.get("successful_uploads", 0)
+        successful_video_files = session_info.get("successful_video_files", 0)
+        successful_audio_files = session_info.get("successful_audio_files", 0)
+        failed_files = files_in_session - successful_files
         session_upload_time = session_info.get("total_upload_time_seconds", 0)
+        session_data_bytes = session_info.get("total_data_processed_bytes", 0)
+        session_data_gb = session_info.get("total_data_processed_gb", 0.0)
 
-        daily_data["videos_processed"] += videos_in_session
-        daily_data["videos_successful"] += successful_videos
-        daily_data["videos_failed"] += failed_videos
+        daily_data["files_processed"] += files_in_session
+        daily_data["video_files_processed"] += video_files_in_session
+        daily_data["audio_files_processed"] += audio_files_in_session
+        daily_data["files_successful"] += successful_files
+        daily_data["video_files_successful"] += successful_video_files
+        daily_data["audio_files_successful"] += successful_audio_files
+        daily_data["files_failed"] += failed_files
         daily_data["total_upload_time_seconds"] += session_upload_time
+        daily_data["total_data_processed_bytes"] += session_data_bytes
+        daily_data["total_data_processed_gb"] = round(daily_data["total_data_processed_gb"] + session_data_gb, 3)
 
         # Update metadata
-        self.current_state["metadata"]["total_videos_processed"] += videos_in_session
+        self.current_state["metadata"]["total_files_processed"] += files_in_session
+        self.current_state["metadata"]["total_video_files_processed"] += video_files_in_session
+        self.current_state["metadata"]["total_audio_files_processed"] += audio_files_in_session
+        self.current_state["metadata"]["total_data_processed_bytes"] += session_data_bytes
+        self.current_state["metadata"]["total_data_processed_gb"] = round(
+            self.current_state["metadata"]["total_data_processed_gb"] + session_data_gb, 3
+        )
         
         # Update home_id level timing
         if not self.current_state["metadata"]["first_processing_start"]:
@@ -286,19 +322,34 @@ class EnhancedStateStore:
         stats["total_sessions"] += 1
         stats["total_containers_created"] += 1
         stats["total_upload_time_seconds"] += session_upload_time
+        stats["total_data_processed_bytes"] += session_data_bytes
+        stats["total_data_processed_gb"] = round(stats["total_data_processed_gb"] + session_data_gb, 3)
         
         # Calculate average upload time per file
-        total_successful_videos = sum(
-            len([v for v in session.get("videos", []) if v.get("upload_status") == "success"])
+        total_successful_files = sum(
+            session.get("successful_uploads", 0)
             for date_data in self.current_state["daily_processing"].values()
             for session in date_data.get("processing_sessions", [])
         )
         
-        if total_successful_videos > 0:
-            stats["average_upload_time_per_file_seconds"] = stats["total_upload_time_seconds"] / total_successful_videos
+        if total_successful_files > 0:
+            stats["average_upload_time_per_file_seconds"] = stats["total_upload_time_seconds"] / total_successful_files
+        
+        # Calculate average file size
+        total_files_processed = self.current_state["metadata"]["total_files_processed"]
+        if total_files_processed > 0:
+            stats["average_file_size_bytes"] = stats["total_data_processed_bytes"] // total_files_processed
+            stats["average_file_size_gb"] = round(stats["total_data_processed_gb"] / total_files_processed, 3)
         
         # Update last 30 days statistics
+        stats["last_30_days"]["files_processed"] += files_in_session
+        stats["last_30_days"]["video_files_processed"] += video_files_in_session
+        stats["last_30_days"]["audio_files_processed"] += audio_files_in_session
         stats["last_30_days"]["total_upload_time_seconds"] += session_upload_time
+        stats["last_30_days"]["total_data_processed_bytes"] += session_data_bytes
+        stats["last_30_days"]["total_data_processed_gb"] = round(
+            stats["last_30_days"]["total_data_processed_gb"] + session_data_gb, 3
+        )
 
         # Save updated state
         self.save_state(self.current_state)
@@ -350,13 +401,43 @@ class ProcessingSession:
             except Exception as e:
                 logger.warning("Could not calculate session duration: %s", e)
         
-        # Calculate total upload time for all videos
+        # Calculate total upload time and file sizes for all files
         total_upload_time_seconds = 0
         successful_uploads = 0
+        total_data_processed_bytes = 0
+        successful_data_bytes = 0
+        video_files_count = 0
+        audio_files_count = 0
+        successful_video_files = 0
+        successful_audio_files = 0
+        
         for video in self.videos:
+            file_size = video.get("file_size", 0) or 0
+            total_data_processed_bytes += file_size
+            
+            # Determine file type from blob name
+            blob_name = video.get("blob_name", "").lower()
+            is_video = blob_name.endswith(('.insv', '.mp4', '.avi', '.mov', '.mkv'))
+            is_audio = blob_name.endswith(('.wav', '.mp3', '.aac', '.flac', '.m4a'))
+            
+            if is_video:
+                video_files_count += 1
+            elif is_audio:
+                audio_files_count += 1
+            
             if video.get("upload_duration_seconds") and video.get("upload_status") == "success":
                 total_upload_time_seconds += video["upload_duration_seconds"]
                 successful_uploads += 1
+                successful_data_bytes += file_size
+                
+                if is_video:
+                    successful_video_files += 1
+                elif is_audio:
+                    successful_audio_files += 1
+        
+        # Convert bytes to GB
+        total_data_processed_gb = total_data_processed_bytes / (1024**3)
+        successful_data_gb = successful_data_bytes / (1024**3)
         
         return {
             "session_id": self.session_id,
@@ -366,6 +447,15 @@ class ProcessingSession:
             "session_duration_seconds": session_duration_seconds,
             "total_upload_time_seconds": total_upload_time_seconds,
             "successful_uploads": successful_uploads,
+            "total_files_processed": len(self.videos),
+            "video_files_processed": video_files_count,
+            "audio_files_processed": audio_files_count,
+            "successful_video_files": successful_video_files,
+            "successful_audio_files": successful_audio_files,
+            "total_data_processed_bytes": total_data_processed_bytes,
+            "total_data_processed_gb": round(total_data_processed_gb, 3),
+            "successful_data_bytes": successful_data_bytes,
+            "successful_data_gb": round(successful_data_gb, 3),
             "videos": self.videos
         }
 
