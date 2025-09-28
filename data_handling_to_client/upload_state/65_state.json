@@ -1,0 +1,1146 @@
+{
+  "metadata": {
+    "home_id": "65",
+    "created_at": "2025-09-28T10:43:19.848830+00:00",
+    "last_updated": "2025-09-28T10:49:37.604744+00:00",
+    "version": "2.0",
+    "total_videos_processed": 52,
+    "schema_version": 1,
+    "first_processing_start": "2025-09-28T10:43:59.758273+00:00",
+    "last_processing_end": "2025-09-28T10:49:37.604492+00:00",
+    "total_processing_time_seconds": 337.846219
+  },
+  "daily_processing": {
+    "2025-09-28": {
+      "date": "2025-09-28",
+      "videos_processed": 52,
+      "videos_successful": 52,
+      "videos_failed": 0,
+      "total_upload_time_seconds": 335.921776,
+      "processing_sessions": [
+        {
+          "session_id": "sess_20250928_104359_c54eeb7e",
+          "started_at": "2025-09-28T10:43:59.758273+00:00",
+          "completed_at": "2025-09-28T10:49:37.604492+00:00",
+          "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+          "session_duration_seconds": 337.846219,
+          "total_upload_time_seconds": 335.921776,
+          "successful_uploads": 52,
+          "videos": [
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-applying-make-up/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_applying-make-up_20250924094800_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-applying-make-up/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_applying-make-up_20250924094800_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 103060736,
+                "etag": "0x8DDFC72DBBDF744",
+                "last_modified": "2025-09-25T20:33:59+00:00"
+              },
+              "file_size": 103060736,
+              "last_modified": "2025-09-25T20:33:59+00:00",
+              "processed_at": "2025-09-28T10:44:00.642172+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:44:00.642178+00:00",
+              "upload_end_time": "2025-09-28T10:44:04.666525+00:00",
+              "upload_duration_seconds": 4.024347
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-applying-make-up/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_applying-make-up_20250924094800_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-applying-make-up/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_applying-make-up_20250924094800_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 4122661253,
+                "etag": "0x8DDFC93E54775DE",
+                "last_modified": "2025-09-26T00:30:29+00:00"
+              },
+              "file_size": 4122661253,
+              "last_modified": "2025-09-26T00:30:29+00:00",
+              "processed_at": "2025-09-28T10:44:04.668092+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:44:04.668097+00:00",
+              "upload_end_time": "2025-09-28T10:44:08.323993+00:00",
+              "upload_duration_seconds": 3.655896
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-brewing-tea/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_brewing-tea_20250923214000_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-brewing-tea/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_brewing-tea_20250923214000_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 230113280,
+                "etag": "0x8DDFC75F9794CC6",
+                "last_modified": "2025-09-25T20:56:18+00:00"
+              },
+              "file_size": 230113280,
+              "last_modified": "2025-09-25T20:56:18+00:00",
+              "processed_at": "2025-09-28T10:44:08.324655+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:44:08.324659+00:00",
+              "upload_end_time": "2025-09-28T10:44:12.176208+00:00",
+              "upload_duration_seconds": 3.851549
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-brewing-tea/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_brewing-tea_20250923214000_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-brewing-tea/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_brewing-tea_20250923214000_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 9322549634,
+                "etag": "0x8DDFD2E5EB0DBA7",
+                "last_modified": "2025-09-26T18:56:15+00:00"
+              },
+              "file_size": 9322549634,
+              "last_modified": "2025-09-26T18:56:15+00:00",
+              "processed_at": "2025-09-28T10:44:12.177126+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:44:12.177131+00:00",
+              "upload_end_time": "2025-09-28T10:44:17.807451+00:00",
+              "upload_duration_seconds": 5.63032
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-brushing-hair-and-hair-do/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_brushing-hair-and-hair-do_20250924095400_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-brushing-hair-and-hair-do/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_brushing-hair-and-hair-do_20250924095400_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 144227072,
+                "etag": "0x8DDFC72EB77682D",
+                "last_modified": "2025-09-25T20:34:26+00:00"
+              },
+              "file_size": 144227072,
+              "last_modified": "2025-09-25T20:34:26+00:00",
+              "processed_at": "2025-09-28T10:44:17.810111+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:44:17.810117+00:00",
+              "upload_end_time": "2025-09-28T10:44:21.678035+00:00",
+              "upload_duration_seconds": 3.867918
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-brushing-hair-and-hair-do/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_brushing-hair-and-hair-do_20250924095400_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-brushing-hair-and-hair-do/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_brushing-hair-and-hair-do_20250924095400_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 5973922181,
+                "etag": "0x8DDFD1BC33E7854",
+                "last_modified": "2025-09-26T16:43:03+00:00"
+              },
+              "file_size": 5973922181,
+              "last_modified": "2025-09-26T16:43:03+00:00",
+              "processed_at": "2025-09-28T10:44:21.678704+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:44:21.678708+00:00",
+              "upload_end_time": "2025-09-28T10:44:27.589327+00:00",
+              "upload_duration_seconds": 5.910619
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-calling-my-mom/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_calling-my-mom_20250924141800_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-calling-my-mom/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_calling-my-mom_20250924141800_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 508729088,
+                "etag": "0x8DDFC74ED191A1F",
+                "last_modified": "2025-09-25T20:48:48+00:00"
+              },
+              "file_size": 508729088,
+              "last_modified": "2025-09-25T20:48:48+00:00",
+              "processed_at": "2025-09-28T10:44:27.590007+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:44:27.590012+00:00",
+              "upload_end_time": "2025-09-28T10:44:31.411339+00:00",
+              "upload_duration_seconds": 3.821327
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-calling-my-mom/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_calling-my-mom_20250924141800_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-calling-my-mom/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_calling-my-mom_20250924141800_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 20892537220,
+                "etag": "0x8DDFDAC8DFE513D",
+                "last_modified": "2025-09-27T09:59:31+00:00"
+              },
+              "file_size": 20892537220,
+              "last_modified": "2025-09-27T09:59:31+00:00",
+              "processed_at": "2025-09-28T10:44:31.412013+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:44:31.412018+00:00",
+              "upload_end_time": "2025-09-28T10:44:43.248950+00:00",
+              "upload_duration_seconds": 11.836932
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-cleaning-mirror/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_cleaning-mirror_20250924211900_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-cleaning-mirror/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_cleaning-mirror_20250924211900_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 60727808,
+                "etag": "0x8DDFC756AE31ADB",
+                "last_modified": "2025-09-25T20:52:19+00:00"
+              },
+              "file_size": 60727808,
+              "last_modified": "2025-09-25T20:52:19+00:00",
+              "processed_at": "2025-09-28T10:44:43.249715+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:44:43.249719+00:00",
+              "upload_end_time": "2025-09-28T10:44:47.343236+00:00",
+              "upload_duration_seconds": 4.093517
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-cleaning-mirror/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_cleaning-mirror_20250924211900_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-cleaning-mirror/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_cleaning-mirror_20250924211900_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 2553467265,
+                "etag": "0x8DDFC94DFAEAA82",
+                "last_modified": "2025-09-26T00:37:29+00:00"
+              },
+              "file_size": 2553467265,
+              "last_modified": "2025-09-26T00:37:29+00:00",
+              "processed_at": "2025-09-28T10:44:47.343900+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:44:47.343904+00:00",
+              "upload_end_time": "2025-09-28T10:44:53.135486+00:00",
+              "upload_duration_seconds": 5.791582
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-closing-and-open-cabinets/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_closing-and-open-cabinets_20250924223600_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-closing-and-open-cabinets/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_closing-and-open-cabinets_20250924223600_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 9348608,
+                "etag": "0x8DDFC75608BBD55",
+                "last_modified": "2025-09-25T20:52:01+00:00"
+              },
+              "file_size": 9348608,
+              "last_modified": "2025-09-25T20:52:01+00:00",
+              "processed_at": "2025-09-28T10:44:53.136158+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:44:53.136162+00:00",
+              "upload_end_time": "2025-09-28T10:44:57.294476+00:00",
+              "upload_duration_seconds": 4.158314
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-closing-and-open-cabinets/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_closing-and-open-cabinets_20250924223600_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-closing-and-open-cabinets/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_closing-and-open-cabinets_20250924223600_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 3108688257,
+                "etag": "0x8DDFC9895929C53",
+                "last_modified": "2025-09-26T01:04:03+00:00"
+              },
+              "file_size": 3108688257,
+              "last_modified": "2025-09-26T01:04:03+00:00",
+              "processed_at": "2025-09-28T10:44:57.295145+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:44:57.295149+00:00",
+              "upload_end_time": "2025-09-28T10:45:03.139650+00:00",
+              "upload_duration_seconds": 5.844501
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-eating-breakfast/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_eating-breakfast_20250924112300_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-eating-breakfast/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_eating-breakfast_20250924112300_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 286909184,
+                "etag": "0x8DDFC73A6F7DF96",
+                "last_modified": "2025-09-25T20:39:40+00:00"
+              },
+              "file_size": 286909184,
+              "last_modified": "2025-09-25T20:39:40+00:00",
+              "processed_at": "2025-09-28T10:45:03.142543+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:45:03.142549+00:00",
+              "upload_end_time": "2025-09-28T10:45:06.916833+00:00",
+              "upload_duration_seconds": 3.774284
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-eating-breakfast/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_eating-breakfast_20250924112300_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-eating-breakfast/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_eating-breakfast_20250924112300_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 11810296197,
+                "etag": "0x8DDFD37E42BDD70",
+                "last_modified": "2025-09-26T20:04:24+00:00"
+              },
+              "file_size": 11810296197,
+              "last_modified": "2025-09-26T20:04:24+00:00",
+              "processed_at": "2025-09-28T10:45:06.917983+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:45:06.917988+00:00",
+              "upload_end_time": "2025-09-28T10:45:14.813746+00:00",
+              "upload_duration_seconds": 7.895758
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-face-routine/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_face-routine_20250924093800_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-face-routine/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_face-routine_20250924093800_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 205402880,
+                "etag": "0x8DDFC72DCEE6A3D",
+                "last_modified": "2025-09-25T20:34:01+00:00"
+              },
+              "file_size": 205402880,
+              "last_modified": "2025-09-25T20:34:01+00:00",
+              "processed_at": "2025-09-28T10:45:14.814628+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:45:14.814632+00:00",
+              "upload_end_time": "2025-09-28T10:45:18.675167+00:00",
+              "upload_duration_seconds": 3.860535
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-face-routine/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_face-routine_20250924093800_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-face-routine/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_face-routine_20250924093800_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 8537166210,
+                "etag": "0x8DDFD2646E34F57",
+                "last_modified": "2025-09-26T17:58:19+00:00"
+              },
+              "file_size": 8537166210,
+              "last_modified": "2025-09-26T17:58:19+00:00",
+              "processed_at": "2025-09-28T10:45:18.675800+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:45:18.675804+00:00",
+              "upload_end_time": "2025-09-28T10:45:28.482194+00:00",
+              "upload_duration_seconds": 9.80639
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-installing-planter/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_installing-planter_20250924225300_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-installing-planter/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_installing-planter_20250924225300_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 59598080,
+                "etag": "0x8DDFC7585DFAF21",
+                "last_modified": "2025-09-25T20:53:04+00:00"
+              },
+              "file_size": 59598080,
+              "last_modified": "2025-09-25T20:53:04+00:00",
+              "processed_at": "2025-09-28T10:45:28.482867+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:45:28.482871+00:00",
+              "upload_end_time": "2025-09-28T10:45:32.553920+00:00",
+              "upload_duration_seconds": 4.071049
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-installing-planter/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_installing-planter_20250924225300_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-installing-planter/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_installing-planter_20250924225300_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 2440745344,
+                "etag": "0x8DDFC9393DBE87D",
+                "last_modified": "2025-09-26T00:28:12+00:00"
+              },
+              "file_size": 2440745344,
+              "last_modified": "2025-09-26T00:28:12+00:00",
+              "processed_at": "2025-09-28T10:45:32.554600+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:45:32.554604+00:00",
+              "upload_end_time": "2025-09-28T10:45:38.269306+00:00",
+              "upload_duration_seconds": 5.714702
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-loading-washer/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_loading-washer_20250923231200_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-loading-washer/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_loading-washer_20250923231200_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 52926464,
+                "etag": "0x8DDFC7588B0D99B",
+                "last_modified": "2025-09-25T20:53:09+00:00"
+              },
+              "file_size": 52926464,
+              "last_modified": "2025-09-25T20:53:09+00:00",
+              "processed_at": "2025-09-28T10:45:38.269982+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:45:38.269987+00:00",
+              "upload_end_time": "2025-09-28T10:45:42.250919+00:00",
+              "upload_duration_seconds": 3.980932
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-loading-washer/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_loading-washer_20250923231200_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-loading-washer/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_loading-washer_20250923231200_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 2222117249,
+                "etag": "0x8DDFC91802C35EC",
+                "last_modified": "2025-09-26T00:13:20+00:00"
+              },
+              "file_size": 2222117249,
+              "last_modified": "2025-09-26T00:13:20+00:00",
+              "processed_at": "2025-09-28T10:45:42.251589+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:45:42.251593+00:00",
+              "upload_end_time": "2025-09-28T10:45:48.179254+00:00",
+              "upload_duration_seconds": 5.927661
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-locking-doors/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_locking-doors_20250924223000_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-locking-doors/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_locking-doors_20250924223000_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 42050816,
+                "etag": "0x8DDFC758328A603",
+                "last_modified": "2025-09-25T20:52:59+00:00"
+              },
+              "file_size": 42050816,
+              "last_modified": "2025-09-25T20:52:59+00:00",
+              "processed_at": "2025-09-28T10:45:48.179920+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:45:48.179925+00:00",
+              "upload_end_time": "2025-09-28T10:45:52.364609+00:00",
+              "upload_duration_seconds": 4.184684
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-locking-doors/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_locking-doors_20250924223000_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-locking-doors/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_locking-doors_20250924223000_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 1773326720,
+                "etag": "0x8DDFC8D1DBC27B7",
+                "last_modified": "2025-09-25T23:41:57+00:00"
+              },
+              "file_size": 1773326720,
+              "last_modified": "2025-09-25T23:41:57+00:00",
+              "processed_at": "2025-09-28T10:45:52.365303+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:45:52.365307+00:00",
+              "upload_end_time": "2025-09-28T10:45:56.498966+00:00",
+              "upload_duration_seconds": 4.133659
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-making-bed/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_making-bed_20250924101000_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-making-bed/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_making-bed_20250924101000_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 105444608,
+                "etag": "0x8DDFC72E1904EB1",
+                "last_modified": "2025-09-25T20:34:09+00:00"
+              },
+              "file_size": 105444608,
+              "last_modified": "2025-09-25T20:34:09+00:00",
+              "processed_at": "2025-09-28T10:45:56.499641+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:45:56.499645+00:00",
+              "upload_end_time": "2025-09-28T10:46:00.471890+00:00",
+              "upload_duration_seconds": 3.972245
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-making-bed/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_making-bed_20250924101000_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-making-bed/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_making-bed_20250924101000_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 4341813634,
+                "etag": "0x8DDFC95E4564DF4",
+                "last_modified": "2025-09-26T00:44:46+00:00"
+              },
+              "file_size": 4341813634,
+              "last_modified": "2025-09-26T00:44:46+00:00",
+              "processed_at": "2025-09-28T10:46:00.472608+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:46:00.472613+00:00",
+              "upload_end_time": "2025-09-28T10:46:06.465573+00:00",
+              "upload_duration_seconds": 5.99296
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-power-outage-prep/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_power-outage-prep_20250924230700_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-power-outage-prep/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_power-outage-prep_20250924230700_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 56872448,
+                "etag": "0x8DDFC7588A526EF",
+                "last_modified": "2025-09-25T20:53:09+00:00"
+              },
+              "file_size": 56872448,
+              "last_modified": "2025-09-25T20:53:09+00:00",
+              "processed_at": "2025-09-28T10:46:06.466203+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:46:06.466207+00:00",
+              "upload_end_time": "2025-09-28T10:46:10.358864+00:00",
+              "upload_duration_seconds": 3.892657
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-power-outage-prep/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_power-outage-prep_20250924230700_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-power-outage-prep/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_power-outage-prep_20250924230700_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 2317013376,
+                "etag": "0x8DDFC929A7F50CB",
+                "last_modified": "2025-09-26T00:21:14+00:00"
+              },
+              "file_size": 2317013376,
+              "last_modified": "2025-09-26T00:21:14+00:00",
+              "processed_at": "2025-09-28T10:46:10.359617+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:46:10.359621+00:00",
+              "upload_end_time": "2025-09-28T10:46:18.459394+00:00",
+              "upload_duration_seconds": 8.099773
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-reading-a-book/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_reading-a-book_20250923235600_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-reading-a-book/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_reading-a-book_20250923235600_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 971767808,
+                "etag": "0x8DDFE078D2D3ADA",
+                "last_modified": "2025-09-27T20:50:54+00:00"
+              },
+              "file_size": 971767808,
+              "last_modified": "2025-09-27T20:50:54+00:00",
+              "processed_at": "2025-09-28T10:46:18.460052+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:46:18.460056+00:00",
+              "upload_end_time": "2025-09-28T10:46:27.668756+00:00",
+              "upload_duration_seconds": 9.2087
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-reading-a-book/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_reading-a-book_20250923235600_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-reading-a-book/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_reading-a-book_20250923235600_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 39911608709,
+                "etag": "0x8DDFE26AC8F0DB2",
+                "last_modified": "2025-09-28T00:33:41+00:00"
+              },
+              "file_size": 39911608709,
+              "last_modified": "2025-09-28T00:33:41+00:00",
+              "processed_at": "2025-09-28T10:46:28.670005+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:46:28.670010+00:00",
+              "upload_end_time": "2025-09-28T10:46:42.856532+00:00",
+              "upload_duration_seconds": 14.186522
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-taking-medication-or-supplements/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_taking-medication-or-supplements_20250924130600_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-taking-medication-or-supplements/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_taking-medication-or-supplements_20250924130600_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 129110528,
+                "etag": "0x8DDFE0C01906D28",
+                "last_modified": "2025-09-27T21:22:47+00:00"
+              },
+              "file_size": 129110528,
+              "last_modified": "2025-09-27T21:22:47+00:00",
+              "processed_at": "2025-09-28T10:46:42.857153+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:46:42.857156+00:00",
+              "upload_end_time": "2025-09-28T10:46:46.701656+00:00",
+              "upload_duration_seconds": 3.8445
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-taking-medication-or-supplements/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_taking-medication-or-supplements_20250924130600_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-taking-medication-or-supplements/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_taking-medication-or-supplements_20250924130600_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 5359456642,
+                "etag": "0x8DDFE10A8468F4A",
+                "last_modified": "2025-09-27T21:56:05+00:00"
+              },
+              "file_size": 5359456642,
+              "last_modified": "2025-09-27T21:56:05+00:00",
+              "processed_at": "2025-09-28T10:46:46.702291+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:46:46.702295+00:00",
+              "upload_end_time": "2025-09-28T10:46:52.505689+00:00",
+              "upload_duration_seconds": 5.803394
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-unboxing-package/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_unboxing-package_20250923215800_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-unboxing-package/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_unboxing-package_20250923215800_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 75103232,
+                "etag": "0x8DDFC758FE8338A",
+                "last_modified": "2025-09-25T20:53:21+00:00"
+              },
+              "file_size": 75103232,
+              "last_modified": "2025-09-25T20:53:21+00:00",
+              "processed_at": "2025-09-28T10:46:52.506335+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:46:52.506339+00:00",
+              "upload_end_time": "2025-09-28T10:46:56.484043+00:00",
+              "upload_duration_seconds": 3.977704
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-unboxing-package/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_unboxing-package_20250923215800_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-unboxing-package/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_unboxing-package_20250923215800_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 3071463810,
+                "etag": "0x8DDFC987463F61E",
+                "last_modified": "2025-09-26T01:03:07+00:00"
+              },
+              "file_size": 3071463810,
+              "last_modified": "2025-09-26T01:03:07+00:00",
+              "processed_at": "2025-09-28T10:46:56.484643+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:46:56.484647+00:00",
+              "upload_end_time": "2025-09-28T10:47:08.537354+00:00",
+              "upload_duration_seconds": 12.052707
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-vacuuming/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_vacuuming_20250924203300_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-vacuuming/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_vacuuming_20250924203300_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 130531328,
+                "etag": "0x8DDFC744F15A537",
+                "last_modified": "2025-09-25T20:44:22+00:00"
+              },
+              "file_size": 130531328,
+              "last_modified": "2025-09-25T20:44:22+00:00",
+              "processed_at": "2025-09-28T10:47:08.537994+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:47:08.538004+00:00",
+              "upload_end_time": "2025-09-28T10:47:14.316144+00:00",
+              "upload_duration_seconds": 5.77814
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-vacuuming/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_vacuuming_20250924203300_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-vacuuming/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_vacuuming_20250924203300_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 5291823493,
+                "etag": "0x8DDFD1DE46C7D8A",
+                "last_modified": "2025-09-26T16:58:18+00:00"
+              },
+              "file_size": 5291823493,
+              "last_modified": "2025-09-26T16:58:18+00:00",
+              "processed_at": "2025-09-28T10:47:14.316756+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:47:14.316760+00:00",
+              "upload_end_time": "2025-09-28T10:47:22.424913+00:00",
+              "upload_duration_seconds": 8.108153
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-video-call-friend/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_video-call-friend_20250924134500_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-video-call-friend/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_video-call-friend_20250924134500_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 451267328,
+                "etag": "0x8DDFC741FF3CCAF",
+                "last_modified": "2025-09-25T20:43:03+00:00"
+              },
+              "file_size": 451267328,
+              "last_modified": "2025-09-25T20:43:03+00:00",
+              "processed_at": "2025-09-28T10:47:22.425543+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:47:22.425546+00:00",
+              "upload_end_time": "2025-09-28T10:47:26.181448+00:00",
+              "upload_duration_seconds": 3.755902
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-video-call-friend/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_video-call-friend_20250924134500_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-video-call-friend/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_video-call-friend_20250924134500_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 18519609732,
+                "etag": "0x8DDFD9BC5CA18B1",
+                "last_modified": "2025-09-27T07:59:23+00:00"
+              },
+              "file_size": 18519609732,
+              "last_modified": "2025-09-27T07:59:23+00:00",
+              "processed_at": "2025-09-28T10:47:26.182108+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:47:26.182113+00:00",
+              "upload_end_time": "2025-09-28T10:47:38.091125+00:00",
+              "upload_duration_seconds": 11.909012
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-walking-between-rooms/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_walking-between-rooms_20250924222000_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-walking-between-rooms/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_walking-between-rooms_20250924222000_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 57572864,
+                "etag": "0x8DDFC75831CA594",
+                "last_modified": "2025-09-25T20:52:59+00:00"
+              },
+              "file_size": 57572864,
+              "last_modified": "2025-09-25T20:52:59+00:00",
+              "processed_at": "2025-09-28T10:47:38.091746+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:47:38.091750+00:00",
+              "upload_end_time": "2025-09-28T10:47:42.075627+00:00",
+              "upload_duration_seconds": 3.983877
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-walking-between-rooms/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_walking-between-rooms_20250924222000_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-walking-between-rooms/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_walking-between-rooms_20250924222000_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 2365247872,
+                "etag": "0x8DDFC930115D106",
+                "last_modified": "2025-09-26T00:24:06+00:00"
+              },
+              "file_size": 2365247872,
+              "last_modified": "2025-09-26T00:24:06+00:00",
+              "processed_at": "2025-09-28T10:47:42.076299+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:47:42.076303+00:00",
+              "upload_end_time": "2025-09-28T10:47:48.040743+00:00",
+              "upload_duration_seconds": 5.96444
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-walkthrough-day/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_walkthrough-day_20250924104600_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-walkthrough-day/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_walkthrough-day_20250924104600_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 90424064,
+                "etag": "0x8DDFC72DC124826",
+                "last_modified": "2025-09-25T20:34:00+00:00"
+              },
+              "file_size": 90424064,
+              "last_modified": "2025-09-25T20:34:00+00:00",
+              "processed_at": "2025-09-28T10:47:48.041383+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:47:48.041387+00:00",
+              "upload_end_time": "2025-09-28T10:47:51.841996+00:00",
+              "upload_duration_seconds": 3.800609
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-walkthrough-day/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_walkthrough-day_20250924104600_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-walkthrough-day/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_walkthrough-day_20250924104600_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 3766669698,
+                "etag": "0x8DDFC9C16FD831D",
+                "last_modified": "2025-09-26T01:29:08+00:00"
+              },
+              "file_size": 3766669698,
+              "last_modified": "2025-09-26T01:29:08+00:00",
+              "processed_at": "2025-09-28T10:47:51.842605+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:47:51.842609+00:00",
+              "upload_end_time": "2025-09-28T10:47:57.465989+00:00",
+              "upload_duration_seconds": 5.62338
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-walkthrough-night/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_walkthrough-night_20250924203000_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-walkthrough-night/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_walkthrough-night_20250924203000_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 78073856,
+                "etag": "0x8DDFC743E7E3F8C",
+                "last_modified": "2025-09-25T20:43:55+00:00"
+              },
+              "file_size": 78073856,
+              "last_modified": "2025-09-25T20:43:55+00:00",
+              "processed_at": "2025-09-28T10:47:57.466624+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:47:57.466627+00:00",
+              "upload_end_time": "2025-09-28T10:48:01.383794+00:00",
+              "upload_duration_seconds": 3.917167
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-walkthrough-night/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_walkthrough-night_20250924203000_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-walkthrough-night/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_walkthrough-night_20250924203000_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 3219837314,
+                "etag": "0x8DDFC9956B07833",
+                "last_modified": "2025-09-26T01:09:27+00:00"
+              },
+              "file_size": 3219837314,
+              "last_modified": "2025-09-26T01:09:27+00:00",
+              "processed_at": "2025-09-28T10:48:01.384407+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:48:01.384410+00:00",
+              "upload_end_time": "2025-09-28T10:48:07.421342+00:00",
+              "upload_duration_seconds": 6.036932
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-washing-dishes-breakfast/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_washing-dishes-breakfast_20250924123500_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-washing-dishes-breakfast/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_washing-dishes-breakfast_20250924123500_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 314994944,
+                "etag": "0x8DDFC73C00CCA98",
+                "last_modified": "2025-09-25T20:40:22+00:00"
+              },
+              "file_size": 314994944,
+              "last_modified": "2025-09-25T20:40:22+00:00",
+              "processed_at": "2025-09-28T10:48:07.421970+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:48:07.421974+00:00",
+              "upload_end_time": "2025-09-28T10:48:11.199483+00:00",
+              "upload_duration_seconds": 3.777509
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-washing-dishes-breakfast/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_washing-dishes-breakfast_20250924123500_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-washing-dishes-breakfast/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_washing-dishes-breakfast_20250924123500_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 12939088258,
+                "etag": "0x8DDFD5F3ECF4E19",
+                "last_modified": "2025-09-27T00:46:07+00:00"
+              },
+              "file_size": 12939088258,
+              "last_modified": "2025-09-27T00:46:07+00:00",
+              "processed_at": "2025-09-28T10:48:11.200118+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:48:11.200122+00:00",
+              "upload_end_time": "2025-09-28T10:48:19.221919+00:00",
+              "upload_duration_seconds": 8.021797
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-washing-face/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_washing-face_20250924003100_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-washing-face/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_washing-face_20250924003100_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 197206016,
+                "etag": "0x8DDFC716F87A4AB",
+                "last_modified": "2025-09-25T20:23:48+00:00"
+              },
+              "file_size": 197206016,
+              "last_modified": "2025-09-25T20:23:48+00:00",
+              "processed_at": "2025-09-28T10:48:19.222531+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:48:19.222535+00:00",
+              "upload_end_time": "2025-09-28T10:48:22.965390+00:00",
+              "upload_duration_seconds": 3.742855
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-washing-face/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_washing-face_20250924003100_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-washing-face/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_washing-face_20250924003100_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 8000819589,
+                "etag": "0x8DDFC929DDCDAEC",
+                "last_modified": "2025-09-26T00:21:20+00:00"
+              },
+              "file_size": 8000819589,
+              "last_modified": "2025-09-26T00:21:20+00:00",
+              "processed_at": "2025-09-28T10:48:22.966037+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:48:22.966042+00:00",
+              "upload_end_time": "2025-09-28T10:48:32.691650+00:00",
+              "upload_duration_seconds": 9.725608
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-watering-plants/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_watering-plants_20250924150100_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-watering-plants/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_watering-plants_20250924150100_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 820196864,
+                "etag": "0x8DDFE0C0185560F",
+                "last_modified": "2025-09-27T21:22:47+00:00"
+              },
+              "file_size": 820196864,
+              "last_modified": "2025-09-27T21:22:47+00:00",
+              "processed_at": "2025-09-28T10:48:32.692297+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:48:32.692301+00:00",
+              "upload_end_time": "2025-09-28T10:48:36.412183+00:00",
+              "upload_duration_seconds": 3.719882
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-watering-plants/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_watering-plants_20250924150100_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-watering-plants/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_watering-plants_20250924150100_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 33701941636,
+                "etag": "0x8DDFE2600224DDA",
+                "last_modified": "2025-09-28T00:28:52+00:00"
+              },
+              "file_size": 33701941636,
+              "last_modified": "2025-09-28T00:28:52+00:00",
+              "processed_at": "2025-09-28T10:48:36.412810+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:48:36.412814+00:00",
+              "upload_end_time": "2025-09-28T10:48:48.210757+00:00",
+              "upload_duration_seconds": 11.797943
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-work-at-desk-1/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_work-at-desk-1_20250924154500_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-work-at-desk-1/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_work-at-desk-1_20250924154500_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 953122304,
+                "etag": "0x8DDFE0C01D03B85",
+                "last_modified": "2025-09-27T21:22:47+00:00"
+              },
+              "file_size": 953122304,
+              "last_modified": "2025-09-27T21:22:47+00:00",
+              "processed_at": "2025-09-28T10:48:48.211376+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:48:48.211379+00:00",
+              "upload_end_time": "2025-09-28T10:48:54.081451+00:00",
+              "upload_duration_seconds": 5.870072
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-work-at-desk-1/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_work-at-desk-1_20250924154500_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-work-at-desk-1/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_work-at-desk-1_20250924154500_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 39134613893,
+                "etag": "0x8DDFE26A27FC646",
+                "last_modified": "2025-09-28T00:33:24+00:00"
+              },
+              "file_size": 39134613893,
+              "last_modified": "2025-09-28T00:33:24+00:00",
+              "processed_at": "2025-09-28T10:48:54.082085+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:48:54.082090+00:00",
+              "upload_end_time": "2025-09-28T10:49:09.914996+00:00",
+              "upload_duration_seconds": 15.832906
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-workout/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_workout_20250924212800_1_audio.wav",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-workout/65_59251661-71d9-445a-b6d9-e61cc9bc18be_C30024373_workout_20250924212800_1_audio.wav",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 908442368,
+                "etag": "0x8DDFC78038FDD95",
+                "last_modified": "2025-09-25T21:10:54+00:00"
+              },
+              "file_size": 908442368,
+              "last_modified": "2025-09-25T21:10:54+00:00",
+              "processed_at": "2025-09-28T10:49:09.915604+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:49:09.915608+00:00",
+              "upload_end_time": "2025-09-28T10:49:15.659002+00:00",
+              "upload_duration_seconds": 5.743394
+            },
+            {
+              "blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-workout/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_workout_20250924212800_1_video.insv",
+              "upload_blob_name": "one-data-platform/65-59251661-71d9-445a-b6d9-e61cc9bc18be-workout/65_59251661-71d9-445a-b6d9-e61cc9bc18be_IAHYA2507S98C9_workout_20250924212800_1_video.insv",
+              "fingerprint": {
+                "type": "size_etag_timestamp",
+                "size": 37253468548,
+                "etag": "0x8DDFE22A9C6854C",
+                "last_modified": "2025-09-28T00:04:58+00:00"
+              },
+              "file_size": 37253468548,
+              "last_modified": "2025-09-28T00:04:58+00:00",
+              "processed_at": "2025-09-28T10:49:15.659624+00:00",
+              "upload_status": "success",
+              "container_id": "cont-0b3JnLXhZTWxVbHJtYVlURjNlQUxLQzN4SjAzejppbmdlc3Rpb246ZDQwNzJlNmQtZTZhMy00NTZlLTk4MWItYWZhNzEzY2Q3NDlk",
+              "metadata_uploaded": true,
+              "retry_count": 0,
+              "error_details": null,
+              "upload_start_time": "2025-09-28T10:49:15.659627+00:00",
+              "upload_end_time": "2025-09-28T10:49:37.604187+00:00",
+              "upload_duration_seconds": 21.94456
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "processing_statistics": {
+    "total_sessions": 1,
+    "total_containers_created": 1,
+    "average_videos_per_session": 0,
+    "total_upload_time_seconds": 335.921776,
+    "average_upload_time_per_file_seconds": 6.460034153846154,
+    "last_30_days": {
+      "videos_processed": 0,
+      "success_rate": 0,
+      "average_session_duration_minutes": 0,
+      "total_upload_time_seconds": 335.921776
+    }
+  },
+  "error_summary": {
+    "authentication_failures": 0,
+    "network_timeouts": 0,
+    "file_corruption": 0,
+    "last_error_date": null
+  }
+}

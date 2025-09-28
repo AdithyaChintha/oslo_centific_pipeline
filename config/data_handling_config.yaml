@@ -10,7 +10,7 @@ azure_source:
   connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"   # env var name containing source connection string
   container_name: "instavideo"                  # source container name
   source_prefix: "one-data-platform/"
-  home_id: "64"                 # optional prefix to limit processed blobs
+  home_id: "63"                 # optional prefix to limit processed blobs
   # Optional source container SAS (for azcopy mode). Provide env var name or literal (not recommended)
   container_sas_env: ""        # optional: env var name that holds source container SAS URL
   # container_sas: "https://...<sas>"          # optional: avoid storing SAS in file for security
@@ -20,7 +20,7 @@ azure_partner:
   azcopy_path: "/usr/bin/azcopy"  # adjust for your OS/Install
 
 deduplication:
-  safety_window_minutes: 2   # ignore blobs newer than now - N minutes
+  safety_window_minutes: 0   # ignore blobs newer than now - N minutes (0 = no safety window)
 
 local_paths:
   manifests_dir: "./local_manifests"            # local fallback for manifests (must exist or created)
@@ -28,12 +28,12 @@ local_paths:
   work_dir: "./work"
 
 submission:
-  auto_submit: true
+  auto_submit: false  # Disable for testing mode
   retry_attempts: 3
   retry_delay_seconds: 60
 
 testing:
-    enabled: false                        # Set to false for production
+    enabled: true                       # Set to true for testing
     test_container_id: "oslo_test_container"
     test_container_url: "https://oslotestvideo.blob.core.windows.net/test-container?sv=2023-01-03&st=2025-09-27T23%3A14%3A07Z&se=2026-09-27T23%3A14%3A00Z&sr=c&sp=rcwl&sig=nm1sG6VRoou7u3moJTKXNGI8y0DbIMAjP0qDl6MFLdc%3D"
 
