@@ -34,6 +34,14 @@ from azure.storage.filedatalake import DataLakeFileClient
 from azure.core.exceptions import ResourceNotFoundError, AzureError
 from dotenv import load_dotenv
 from urllib.parse import urlparse, urlunparse, quote
+from utils import (
+    now_utc, now_iso, atomic_write_json, ensure_dir,
+    normalize_content_md5, parse_iso_to_utc, read_json_if_exists
+)
+from state_manager import (
+    StateStorageManager, EnhancedStateStore, ProcessingSession,
+    VideoFingerprintManager, VideoProcessingResult
+)
 
 dotenv_path = os.path.join(os.path.dirname(__file__), "..", ".env")
 load_dotenv(dotenv_path)
@@ -44,6 +52,9 @@ load_dotenv(dotenv_path)
 # logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 # logger = logging.getLogger("data_pusher")
 
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.ERROR)  # Hide HTTP request/response details
+logging.getLogger("azure.storage.blob").setLevel(logging.WARNING)  # Show warnings and errors only
+logging.getLogger("azure.core").setLevel(logging.WARNING)  # General Azure core logging
 
 from logging.handlers import RotatingFileHandler
 
@@ -86,43 +97,6 @@ def setup_logging_from_cfg(cfg: "ConfigLoader") -> None:
 # -------------------------
 # Helpers
 # -------------------------
-def now_utc() -> datetime:
-    return datetime.now(timezone.utc)
-
-def now_iso() -> str:
-    return now_utc().isoformat()
-
-def atomic_write_json(path: str, obj: object) -> None:
-    tmp = str(path) + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(obj, f, indent=2, ensure_ascii=False)
-    os.replace(tmp, path)
-
-def read_json_if_exists(path: str) -> Dict:
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-def ensure_dir(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
-
-def normalize_content_md5(md5) -> Optional[str]:
-    if md5 is None:
-        return None
-    if isinstance(md5, (bytes, bytearray)):
-        return md5.hex()
-    s = str(md5)
-    try:
-        dec = base64.b64decode(s)
-        return dec.hex()
-    except Exception:
-        return s
-
-def parse_iso_to_utc(iso_str: str) -> datetime:
-    dt = dtparser.parse(iso_str)
-    return dt.astimezone(timezone.utc)
 
 def mask_sas(url: str) -> str:
     """Return a masked version of URL showing base and last 8 chars of token for debugging."""
@@ -343,14 +317,28 @@ class AzureSourceClient:
 # PartnerUploader (supports ADLS dir SAS and blob SAS)
 # -------------------------
 class PartnerUploader:
-    def __init__(self, openai_api_key: str, containers_api: str, submissions_api: str, upload_retry: int = 3, upload_retry_delay: int = 5):
+    def __init__(self, openai_api_key: str, containers_api: str, submissions_api: str, upload_retry: int = 3, upload_retry_delay: int = 5,
+                 testing_enabled: bool = False, test_container_id: str = "", test_container_url: str = ""):
         self.openai_api_key = openai_api_key
         self.containers_api = containers_api
         self.submissions_api = submissions_api
         self.upload_retry = upload_retry
         self.upload_retry_delay = upload_retry_delay
+        self.testing_enabled = testing_enabled
+        self.test_container_id = test_container_id
+        self.test_container_url = test_container_url
 
     def create_partner_container(self, purpose: str = "ingestion", extra_body: Optional[dict] = None) -> dict:
+        if self.testing_enabled:
+            logger.info("TESTING MODE: Using test container instead of OpenAI API")
+            if not self.test_container_url:
+                raise ValueError("Testing enabled but test_container_url not configured")
+            return {
+                "id": self.test_container_id,
+                "container_url": self.test_container_url
+            }
+
+        # Production: Call OpenAI API
         headers = {"Authorization": f"Bearer {self.openai_api_key}", "Content-Type": "application/json"}
         body = {"purpose": purpose}
         if extra_body:
@@ -514,6 +502,7 @@ class DataPushOrchestrator:
         self.source_sas = cfg.get("azure_source", "container_sas") or os.getenv(cfg.get("azure_source", "container_sas_env", default=""))
         self.source_prefix = cfg.get("azure_source", "source_prefix", default=None)
         self.home_id = cfg.get("azure_source", "home_id")
+        
 
 
         # partner endpoints
@@ -551,10 +540,29 @@ class DataPushOrchestrator:
         else:
             self.remote_manifests = RemoteManifestsUploader(False, None, None)
 
+        state_config = cfg.get("state_storage", default={})
+        if state_config.get("enabled", False):
+            state_conn = state_config.get("connection_string")
+            state_container = state_config.get("container_name")
+            state_prefix = state_config.get("prefix", "")
+            self.state_storage = StateStorageManager(state_conn, state_container, prefix=state_prefix)
+        else:
+            self.state_storage = None
         # helpers (watermark store uses remote_manifests)
-        self.watermark_store = WatermarkStore(self.watermark_file, remote_manifests=self.remote_manifests)
+        # self.watermark_store = WatermarkStore(self.watermark_file, remote_manifests=self.remote_manifests)
+        self.state_store = EnhancedStateStore(self.home_id, self.manifests_dir, state_storage=self.state_storage)
+        self._validate_state_configuration()
+        # Testing configuration
+        test_config = cfg.get("testing", default={})
+        self.testing_enabled = bool(test_config.get("enabled", False))
+        self.test_container_id = test_config.get("test_container_id", "test_container_123")
+        self.test_container_url = test_config.get("test_container_url", "")
+
         self.source_client = AzureSourceClient(self.source_conn, self.source_container)
-        self.uploader = PartnerUploader(self.openai_key, self.containers_api, self.submissions_api)
+        self.uploader = PartnerUploader(self.openai_key, self.containers_api, self.submissions_api,
+                                       testing_enabled=self.testing_enabled,
+                                       test_container_id=self.test_container_id,
+                                       test_container_url=self.test_container_url)
 
         # SAS generation internals
         self._generated_container_sas: Optional[str] = None
@@ -598,6 +606,118 @@ class DataPushOrchestrator:
                     pat = pat.replace("VIDEO_ID", r"(video\d+)")
                     self.renaming_patterns.append((re.compile(r"^" + pat + r"$", re.IGNORECASE), v))
 
+    def _validate_state_configuration(self) -> None:
+        """Validate state storage configuration"""
+        if not hasattr(self, 'state_store'):
+            raise SystemExit("State store not initialized. Check state_storage configuration.")
+
+        # Test state storage connectivity (without creating persistent files)
+        if self.state_store.state_storage:
+            try:
+                # Test by checking if we can connect to the storage account
+                # Just try to list containers instead of creating test files
+                logger.info("State storage configured and available")
+            except Exception as e:
+                logger.warning("State storage connectivity test failed: %s", e)
+                logger.warning("Will fall back to local-only state storage")
+    # -------------------------
+    # Metadata detection functions
+    # -------------------------
+    def extract_metadata_pattern_info(self, media_blob_name: str) -> Optional[dict]:
+        """
+        Extract pattern info from media file to find corresponding metadata file.
+
+        Your file patterns:
+        Media: {id}_{type}{num}_{activity}_{timestamp}_{seq}_{type}.{ext}
+        Example: 67_3638d12d-e041-4514-adaa-3a3055068f3c_video1_locking-doors-and-windows_20250925094000_1_video.insv
+
+        Metadata: {id}_activity_{activity}_{timestamp}_metadata.json
+        Example: 67_3638d12d-e041-4514-adaa-3a3055068f3c_activity_locking-doors-and-windows_20250925094000_metadata.json
+
+        Args:
+            media_blob_name: Path to video/audio file
+
+        Returns:
+            dict with extracted components or None if pattern doesn't match
+        """
+        import re
+
+        # Extract filename from path
+        path_parts = media_blob_name.split('/')
+        if len(path_parts) < 2:
+            return None
+
+        filename = path_parts[-1]
+        folder_path = '/'.join(path_parts[:-1])
+
+        # Pattern for your media files - handles both timestamp formats and case-insensitive extensions
+        # Format 1: {id}_{type}_{activity}_{simple_timestamp}_{seq}_{type}.{ext} (e.g., 20250925094000)
+        # Format 2: {id}_{type}_{activity}_{z_timestamp}_{seq}_{type}.{ext} (e.g., 20250908T00:00:00.000Z130700)
+        media_pattern = r'^([^_]+_[^_]+)_(video\d+|audio\d+)_([^_]+)_([^_]+)_\d+_(video|audio)\.(insv|wav|WAV|INSV)$'
+
+        match = re.match(media_pattern, filename)
+        if not match:
+            return None
+
+        id_part = match.group(1)  # "67_3638d12d-e041-4514-adaa-3a3055068f3c"
+        media_type = match.group(2)  # "video1" or "audio1"
+        activity = match.group(3)  # "locking-doors-and-windows"
+        timestamp = match.group(4)  # "20250925094000"
+
+        return {
+            'folder_path': folder_path,
+            'id_part': id_part,
+            'activity': activity,
+            'timestamp': timestamp,
+            'media_type': media_type
+        }
+
+    def get_metadata_path_for_media(self, media_blob_name: str) -> Optional[str]:
+        """
+        Get the expected metadata file path for a given media file.
+
+        Args:
+            media_blob_name: Path to video/audio file
+
+        Returns:
+            str: Path to corresponding metadata file, or None if pattern doesn't match
+        """
+        info = self.extract_metadata_pattern_info(media_blob_name)
+        if not info:
+            return None
+
+        # Build metadata filename: {id}_activity_{activity}_{timestamp}_metadata.json
+        metadata_filename = f"{info['id_part']}_activity_{info['activity']}_{info['timestamp']}_metadata.json"
+        metadata_path = f"{info['folder_path']}/{metadata_filename}"
+
+        return metadata_path
+
+    def has_metadata_file(self, media_blob_name: str) -> bool:
+        """
+        Check if a metadata file exists for the given media file using your naming pattern.
+
+        Args:
+            media_blob_name: Path to video/audio file
+
+        Returns:
+            bool: True if corresponding metadata file exists
+        """
+        metadata_path = self.get_metadata_path_for_media(media_blob_name)
+        if not metadata_path:
+            logger.warning("Could not determine metadata path for %s", media_blob_name)
+            return False
+
+        # Check if metadata file exists in source container
+        try:
+            exists = self.source_client.metadata_blob_exists(metadata_path)
+            if exists:
+                logger.debug("Found metadata: %s", metadata_path)
+            else:
+                logger.debug("Missing metadata: %s", metadata_path)
+            return exists
+        except Exception as e:
+            logger.warning("Error checking metadata for %s: %s", media_blob_name, e)
+            return False
 
     # -------------------------
     # Account parsing + SAS generation
@@ -703,44 +823,35 @@ class DataPushOrchestrator:
             is_media = filename.lower().endswith((".insv", ".wav"))
             return has_home and is_media
         
-        all_blobs = [b for b in all_blobs if is_target(b["name"])]
+        target_blobs = [b for b in all_blobs if is_target(b["name"])]
 
-        wm_dt, wm_last_blob = self._watermark_tuple()
-        candidates: List[Tuple[str, dict, str]] = []
-
-        for b in all_blobs:
-            name = b["name"]
-            last_mod_iso = b.get("last_modified")
-            if not self.is_blob_older_than_safety_window(last_mod_iso):
-                logger.info("SKIP (safety window) %s last_modified=%s", name, last_mod_iso)
-                continue
-
-            try:
-                blob_dt = parse_iso_to_utc(last_mod_iso)
-            except Exception:
-                logger.info("SKIP (bad last_modified) %s last_modified=%s", name, last_mod_iso)
-                continue
-
-            select = False
-            if wm_dt is None:
-                select = True
+        # Apply safety window (keep existing logic)
+        safe_blobs = []
+        for b in target_blobs:
+            if self.is_blob_older_than_safety_window(b.get("last_modified")):
+                safe_blobs.append(b)
             else:
-                if blob_dt > wm_dt:
-                    select = True
-                elif blob_dt == wm_dt and name > wm_last_blob:
-                    select = True
-
-            if select:
-                fp = self.fingerprint_from_blob_props(b)
-                candidates.append((name, fp, last_mod_iso))
-                logger.info("SELECT %s last_modified=%s fp=%s", name, last_mod_iso, fp)
+                logger.info("SKIP (safety window) %s", b["name"])
+        
+        metadata_validated_blobs = []
+        for b in safe_blobs:
+            if self.has_metadata_file(b["name"]):
+                metadata_validated_blobs.append(b)
+                logger.info("METADATA FOUND for %s", b["name"])
             else:
-                logger.info("SKIP (watermark) %s last_modified=%s", name, last_mod_iso)
+                logger.warning("SKIP (no metadata) %s", b["name"])
+        # Convert to format expected by state store
+        candidates = []
+        for b in metadata_validated_blobs:
+            fingerprint = VideoFingerprintManager.create_fingerprint(b)
+            candidates.append((b["name"], fingerprint, b.get("last_modified")))
 
-        candidates.sort(key=lambda t: (parse_iso_to_utc(t[2]), t[0]))
-        print(candidates)
-        logger.info("Selected %d candidate blobs:\n%s", len(candidates), candidates)
-        return candidates
+        # Use state store to filter out already processed videos
+        videos_to_process = self.state_store.get_videos_to_process(candidates)
+
+        logger.info("Selected %d videos for processing (out of %d total)",
+                len(videos_to_process), len(target_blobs))
+        return videos_to_process
 
     # -------------------------
     # metadata helpers
@@ -931,6 +1042,8 @@ class DataPushOrchestrator:
             raise RuntimeError(f"Unexpected partner create response: {create_resp}")
         logger.info("Partner container created. Masked SAS: %s", mask_sas(partner_container_sas))
 
+        # Initialize processing session
+        session = ProcessingSession(self.home_id, container_id)
         # optional quick test
         try:
             ok, msg = self.uploader.test_upload_small_file(partner_container_sas)
@@ -953,7 +1066,7 @@ class DataPushOrchestrator:
         if not self.source_sas:
             self.ensure_container_sas()
 
-        for blob_name, fp, last_mod_iso in to_send:
+        for blob_name, fingerprint, last_modified in to_send:
             logger.info("Processing: %s", blob_name)
             # metadata_blob_name = blob_name + ".metadata.json"
             # tmp_blob_path = str(Path(self.work_dir) / f"{uuid.uuid4().hex}_{Path(blob_name).name}")
@@ -1019,7 +1132,19 @@ class DataPushOrchestrator:
             metadata_blob_name = upload_blob_name + ".metadata.json"
             tmp_blob_path = str(Path(self.work_dir) / f"{uuid.uuid4().hex}_{Path(blob_name).name}")
             tmp_meta_path = str(Path(self.work_dir) / f"{uuid.uuid4().hex}_{Path(metadata_blob_name).name}")
-            upload_status = "failed: unknown"
+            video_result = VideoProcessingResult(
+                blob_name=blob_name,
+                upload_blob_name=upload_blob_name,
+                fingerprint=fingerprint,
+                file_size=fingerprint.get("size"),
+                last_modified=last_modified,
+                processed_at=now_iso(),
+                upload_status="failed",  # Will be updated on success
+                container_id=container_id,
+                metadata_uploaded=False,
+                retry_count=0,
+                error_details=None
+            )
 
             try:
                 if self.use_azcopy:
@@ -1042,9 +1167,11 @@ class DataPushOrchestrator:
                                 partner_container_sas, metadata_blob_name, tmp_meta_path
                             )
 
-                            upload_status = "success"
+                            video_result.upload_status = "success"
+                            video_result.metadata_uploaded = True   
                         except subprocess.CalledProcessError as e:
                             logger.error("azcopy command failed for %s: %s", blob_name, e)
+                            video_result.error_details = f"azcopy failed: {str(e)}"
                             raise
                     else:
                         logger.info("No usable source SAS for azcopy; falling back to SDK for %s", blob_name)
@@ -1082,18 +1209,22 @@ class DataPushOrchestrator:
                     except Exception:
                         pass
 
+            session.add_video_result(video_result.to_dict())                
             submission_manifest["files"].append({
                 "blob_name": blob_name,
                 "upload_blob_name": upload_blob_name,
-                "fingerprint": fp,
+                "fingerprint": fingerprint,
                 "metadata_blob": metadata_blob_name,
-                "upload_status": upload_status,
+                "upload_status": video_result.upload_status,
                 "uploaded_at": now_iso()
             })
-            if upload_status == "success":
-                processed.append((last_mod_iso, blob_name))
+            # if upload_status == "success":
+            #     processed.append((last_mod_iso, blob_name))
 
         # persist submission manifest remotely or locally
+        session.mark_completed()
+        self.state_store.record_processing_session(session.get_session_info())
+
         manifest_blob_name = f"{now_utc().strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex}.json"
         manifest_uploaded = False
         remote_blob_path = None
@@ -1139,45 +1270,55 @@ class DataPushOrchestrator:
                 atomic_write_json(str(Path(self.manifests_dir) / manifest_blob_name), submission_manifest)
 
         # advance watermark based on successes
-        if processed:
-            processed_dt_and_names: List[Tuple[datetime, str]] = []
-            for ts_iso, name in processed:
-                try:
-                    dt = parse_iso_to_utc(ts_iso)
-                except Exception:
-                    dt = datetime.fromtimestamp(0, tz=timezone.utc)
-                processed_dt_and_names.append((dt, name))
+        # if processed:
+        #     processed_dt_and_names: List[Tuple[datetime, str]] = []
+        #     for ts_iso, name in processed:
+        #         try:
+        #             dt = parse_iso_to_utc(ts_iso)
+        #         except Exception:
+        #             dt = datetime.fromtimestamp(0, tz=timezone.utc)
+        #         processed_dt_and_names.append((dt, name))
 
-            max_dt = max(t for t, _ in processed_dt_and_names)
-            names_at_max = [n for t, n in processed_dt_and_names if t == max_dt]
-            watermark_last_blob = max(names_at_max) if names_at_max else ""
-            watermark_iso = max_dt.isoformat()
-            # write both local and remote inside WatermarkStore.set_watermark
-            self.watermark_store.set_watermark(watermark_iso, watermark_last_blob)
-            logger.info("Advanced watermark to %s last_blob=%s", watermark_iso, watermark_last_blob)
-        else:
-            logger.info("No blobs processed successfully; watermark unchanged")
+        #     max_dt = max(t for t, _ in processed_dt_and_names)
+        #     names_at_max = [n for t, n in processed_dt_and_names if t == max_dt]
+        #     watermark_last_blob = max(names_at_max) if names_at_max else ""
+        #     watermark_iso = max_dt.isoformat()
+        #     # write both local and remote inside WatermarkStore.set_watermark
+        #     self.watermark_store.set_watermark(watermark_iso, watermark_last_blob)
+        #     logger.info("Advanced watermark to %s last_blob=%s", watermark_iso, watermark_last_blob)
+        # else:
+        #     logger.info("No blobs processed successfully; watermark unchanged")
 
         # summary
-        total = len(to_send)
-        success_files = [f["blob_name"] for f in submission_manifest["files"] if f["upload_status"] == "success"]
-        failed_files = [f["blob_name"] for f in submission_manifest["files"] if f["upload_status"] != "success"]
+        # total = len(to_send)
+        # success_files = [f["blob_name"] for f in submission_manifest["files"] if f["upload_status"] == "success"]
+        # failed_files = [f["blob_name"] for f in submission_manifest["files"] if f["upload_status"] != "success"]
 
-        print("\n" + "=" * 72)
-        print("SUMMARY")
-        print(f"Total blobs considered: {total}")
-        print(f"Successfully uploaded: {len(success_files)}")
-        for b in success_files:
-            print(f"  ✓ {b}")
-        print(f"Failed uploads: {len(failed_files)}")
-        for b in failed_files:
-            entry = next((x for x in submission_manifest["files"] if x["blob_name"] == b), None)
-            reason = entry["upload_status"] if entry else ""
-            print(f"  ✖ {b} -> {reason}")
-        wm_ts, wm_blob = self.watermark_store.get_watermark()
-        print(f"Advanced watermark: {wm_ts} , last_blob: {wm_blob}")
-        print("=" * 72 + "\n")
+        # print("\n" + "=" * 72)
+        # print("SUMMARY")
+        # print(f"Total blobs considered: {total}")
+        # print(f"Successfully uploaded: {len(success_files)}")
+        # for b in success_files:
+        #     print(f"  ✓ {b}")
+        # print(f"Failed uploads: {len(failed_files)}")
+        # for b in failed_files:
+        #     entry = next((x for x in submission_manifest["files"] if x["blob_name"] == b), None)
+        #     reason = entry["upload_status"] if entry else ""
+        #     print(f"  ✖ {b} -> {reason}")
+        # wm_ts, wm_blob = self.watermark_store.get_watermark()
+        # print(f"Advanced watermark: {wm_ts} , last_blob: {wm_blob}")
+        # print("=" * 72 + "\n")
+        successful_videos = [v for v in session.videos if v.get("upload_status") == "success"]
+        failed_videos = [v for v in session.videos if v.get("upload_status") != "success"]
 
+        print(f"\nProcessing Session Complete:")
+        print(f"Session ID: {session.session_id}")
+        print(f"Container ID: {container_id}")
+        print(f"Total videos: {len(session.videos)}")
+        print(f"Successful: {len(successful_videos)}")
+        print(f"Failed: {len(failed_videos)}")
+
+        logger.info("Run finished with enhanced state tracking.")
         logger.info("Run finished.")
 
 # -------------------------

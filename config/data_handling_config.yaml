@@ -9,8 +9,8 @@ openai:
 azure_source:
   connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"   # env var name containing source connection string
   container_name: "instavideo"                  # source container name
-  source_prefix: "multi_chunk"
-  home_id: "raw_"                 # optional prefix to limit processed blobs
+  source_prefix: "one-data-platform/"
+  home_id: "64"                 # optional prefix to limit processed blobs
   # Optional source container SAS (for azcopy mode). Provide env var name or literal (not recommended)
   container_sas_env: ""        # optional: env var name that holds source container SAS URL
   # container_sas: "https://...<sas>"          # optional: avoid storing SAS in file for security
@@ -32,6 +32,11 @@ submission:
   retry_attempts: 3
   retry_delay_seconds: 60
 
+testing:
+    enabled: false                        # Set to false for production
+    test_container_id: "oslo_test_container"
+    test_container_url: "https://oslotestvideo.blob.core.windows.net/test-container?sv=2023-01-03&st=2025-09-27T23%3A14%3A07Z&se=2026-09-27T23%3A14%3A00Z&sr=c&sp=rcwl&sig=nm1sG6VRoou7u3moJTKXNGI8y0DbIMAjP0qDl6MFLdc%3D"
+
 # NEW: remote manifests container settings (optional)
 remote_manifests:
   enabled: true                    # set to true to upload manifests to an azure container
@@ -45,7 +50,18 @@ logging:
   max_mb: 10                # rotate at ~10 MB
   backup_count: 5           # keep 5 old files
 
+state_storage:
+  enabled: true
+  connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"  # Your blob storage connection
+  container_name: "instavideo"        # Your container for state files
+  prefix: "upload_state_files"                           # Optional: organize under prefix
 
+state_tracking:
+  enabled: true
+  local_dir: "./upload_state"
+  backup_enabled: true
+  max_daily_entries: 365  # Keep 1 year of daily data
+  compression_enabled: true
 
 
 renaming:
