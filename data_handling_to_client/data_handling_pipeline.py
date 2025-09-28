@@ -621,6 +621,105 @@ class DataPushOrchestrator:
                 logger.warning("State storage connectivity test failed: %s", e)
                 logger.warning("Will fall back to local-only state storage")
     # -------------------------
+    # Metadata detection functions
+    # -------------------------
+    def extract_metadata_pattern_info(self, media_blob_name: str) -> Optional[dict]:
+        """
+        Extract pattern info from media file to find corresponding metadata file.
+
+        Your file patterns:
+        Media: {id}_{type}{num}_{activity}_{timestamp}_{seq}_{type}.{ext}
+        Example: 67_3638d12d-e041-4514-adaa-3a3055068f3c_video1_locking-doors-and-windows_20250925094000_1_video.insv
+
+        Metadata: {id}_activity_{activity}_{timestamp}_metadata.json
+        Example: 67_3638d12d-e041-4514-adaa-3a3055068f3c_activity_locking-doors-and-windows_20250925094000_metadata.json
+
+        Args:
+            media_blob_name: Path to video/audio file
+
+        Returns:
+            dict with extracted components or None if pattern doesn't match
+        """
+        import re
+
+        # Extract filename from path
+        path_parts = media_blob_name.split('/')
+        if len(path_parts) < 2:
+            return None
+
+        filename = path_parts[-1]
+        folder_path = '/'.join(path_parts[:-1])
+
+        # Pattern for your media files - handles both timestamp formats and case-insensitive extensions
+        # Format 1: {id}_{type}_{activity}_{simple_timestamp}_{seq}_{type}.{ext} (e.g., 20250925094000)
+        # Format 2: {id}_{type}_{activity}_{z_timestamp}_{seq}_{type}.{ext} (e.g., 20250908T00:00:00.000Z130700)
+        media_pattern = r'^([^_]+_[^_]+)_(video\d+|audio\d+)_([^_]+)_([^_]+)_\d+_(video|audio)\.(insv|wav|WAV|INSV)$'
+
+        match = re.match(media_pattern, filename)
+        if not match:
+            return None
+
+        id_part = match.group(1)  # "67_3638d12d-e041-4514-adaa-3a3055068f3c"
+        media_type = match.group(2)  # "video1" or "audio1"
+        activity = match.group(3)  # "locking-doors-and-windows"
+        timestamp = match.group(4)  # "20250925094000"
+
+        return {
+            'folder_path': folder_path,
+            'id_part': id_part,
+            'activity': activity,
+            'timestamp': timestamp,
+            'media_type': media_type
+        }
+
+    def get_metadata_path_for_media(self, media_blob_name: str) -> Optional[str]:
+        """
+        Get the expected metadata file path for a given media file.
+
+        Args:
+            media_blob_name: Path to video/audio file
+
+        Returns:
+            str: Path to corresponding metadata file, or None if pattern doesn't match
+        """
+        info = self.extract_metadata_pattern_info(media_blob_name)
+        if not info:
+            return None
+
+        # Build metadata filename: {id}_activity_{activity}_{timestamp}_metadata.json
+        metadata_filename = f"{info['id_part']}_activity_{info['activity']}_{info['timestamp']}_metadata.json"
+        metadata_path = f"{info['folder_path']}/{metadata_filename}"
+
+        return metadata_path
+
+    def has_metadata_file(self, media_blob_name: str) -> bool:
+        """
+        Check if a metadata file exists for the given media file using your naming pattern.
+
+        Args:
+            media_blob_name: Path to video/audio file
+
+        Returns:
+            bool: True if corresponding metadata file exists
+        """
+        metadata_path = self.get_metadata_path_for_media(media_blob_name)
+        if not metadata_path:
+            logger.warning("Could not determine metadata path for %s", media_blob_name)
+            return False
+
+        # Check if metadata file exists in source container
+        try:
+            exists = self.source_client.metadata_blob_exists(metadata_path)
+            if exists:
+                logger.debug("Found metadata: %s", metadata_path)
+            else:
+                logger.debug("Missing metadata: %s", metadata_path)
+            return exists
+        except Exception as e:
+            logger.warning("Error checking metadata for %s: %s", media_blob_name, e)
+            return False
+
+    # -------------------------
     # Account parsing + SAS generation
     # -------------------------
     def _parse_account_from_connstr(self, conn_str: str) -> Tuple[Optional[str], Optional[str]]:
@@ -733,10 +832,17 @@ class DataPushOrchestrator:
                 safe_blobs.append(b)
             else:
                 logger.info("SKIP (safety window) %s", b["name"])
-
+        
+        metadata_validated_blobs = []
+        for b in safe_blobs:
+            if self.has_metadata_file(b["name"]):
+                metadata_validated_blobs.append(b)
+                logger.info("METADATA FOUND for %s", b["name"])
+            else:
+                logger.warning("SKIP (no metadata) %s", b["name"])
         # Convert to format expected by state store
         candidates = []
-        for b in safe_blobs:
+        for b in metadata_validated_blobs:
             fingerprint = VideoFingerprintManager.create_fingerprint(b)
             candidates.append((b["name"], fingerprint, b.get("last_modified")))
 
