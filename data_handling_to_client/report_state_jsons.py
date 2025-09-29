@@ -1,14 +1,22 @@
 #!/usr/bin/env python3
 """
-Fetches all *_state.json from Azure blob storage and produces a
-single consolidated JSON file for all homes.
+Fetches all *_state.json from Azure blob storage and produces consolidated reports
+in multiple formats for all homes.
 
-Output:
-  consolidated_state_report.json
+Outputs:
+  consolidated_state_report.json     - Complete JSON report
+  consolidated_state_files.csv       - Detailed file-level data with summary rows
+
+The CSV file includes both detailed file information (one row per file) and 
+summary information (one row per home at the end). Summary rows have 'SUMMARY' 
+in the 'row_type' column.
+
+All files are also uploaded to Azure Blob Storage.
 """
 
 import os
 import json
+import csv
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from azure.storage.blob import BlobServiceClient
@@ -19,6 +27,7 @@ CONTAINER_NAME = os.getenv("CONTAINER_NAME", "instavideo")
 STATE_PREFIX = os.getenv("STATE_PREFIX", "upload_state_files/customer/")
 INCLUDE_SUFFIX = "_state.json"
 OUTPUT_FILE = "consolidated_state_report.json"
+FILES_CSV_FILE = "consolidated_state_files.csv"
 # ----------------------------------------------------- #
 
 
@@ -125,6 +134,97 @@ def upload_to_blob(bsc: BlobServiceClient, local_path: str, target_blob_name: st
     print("✅ Upload completed.")
 
 
+def export_files_to_csv(consolidated_data: Dict[str, Any]) -> None:
+    """
+    Export detailed file data to CSV format with summary information
+    """
+    print(f"📁 Exporting files data with summary to {FILES_CSV_FILE}...")
+    
+    with open(FILES_CSV_FILE, 'w', newline='', encoding='utf-8') as csvfile:
+        fieldnames = [
+            'home_id', 'row_type', 'day', 'container_id', 'status', 
+            'file_type', 'blob_name', 'upload_blob_name', 'file_size_gb', 'upload_duration_seconds',
+            'state_blob_name', 'total_data_processed_gb',
+            'total_processing_time_seconds', 'files_processed', 'video_files_processed',
+            'audio_files_processed', 'video_files_successful', 'audio_files_successful',
+            'files_failed'
+        ]
+        
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        
+        # Process each home: files first, then summary for that home
+        for home in consolidated_data.get("homes", []):
+            summary = home.get("summary", {})
+            files = home.get("files", [])
+            
+            # File rows for this home
+            for file_entry in files:
+                row = {
+                    'home_id': summary.get("home_id"),
+                    'row_type': 'FILE',
+                    'day': file_entry.get("day"),
+                    'container_id': file_entry.get("container_id"),
+                    'status': file_entry.get("status"),
+                    'file_type': file_entry.get("file_type"),
+                    'blob_name': file_entry.get("blob_name"),
+                    'upload_blob_name': file_entry.get("blob_name"),  # Same as blob_name for now
+                    'file_size_gb': file_entry.get("file_size_gb"),
+                    'upload_duration_seconds': file_entry.get("upload_duration_seconds"),
+                    'state_blob_name': '',
+                    'total_data_processed_gb': '',
+                    'total_processing_time_seconds': '',
+                    'files_processed': '',
+                    'video_files_processed': '',
+                    'audio_files_processed': '',
+                    'video_files_successful': '',
+                    'audio_files_successful': '',
+                    'files_failed': ''
+                }
+                writer.writerow(row)
+            
+            # Summary row for this home (immediately after its files)
+            summary_row = {
+                'home_id': summary.get("home_id"),
+                'row_type': 'SUMMARY',
+                'day': '',
+                'container_id': '',
+                'status': '',
+                'file_type': '',
+                'blob_name': '',
+                'upload_blob_name': '',
+                'file_size_gb': '',
+                'upload_duration_seconds': '',
+                'state_blob_name': summary.get("state_blob_name"),
+                'total_data_processed_gb': summary.get("total_data_processed_gb"),
+                'total_processing_time_seconds': summary.get("total_processing_time_seconds"),
+                'files_processed': summary.get("files_processed"),
+                'video_files_processed': summary.get("video_files_processed"),
+                'audio_files_processed': summary.get("audio_files_processed"),
+                'video_files_successful': summary.get("video_files_successful"),
+                'audio_files_successful': summary.get("audio_files_successful"),
+                'files_failed': summary.get("files_failed")
+            }
+            writer.writerow(summary_row)
+    
+    print(f"✅ Files CSV with summary saved to {FILES_CSV_FILE}")
+
+
+def upload_csv_to_blob(bsc: BlobServiceClient, local_path: str, target_blob_name: str):
+    """
+    Upload a CSV file to Azure Blob Storage.
+    """
+    container_client = bsc.get_container_client(CONTAINER_NAME)
+    print(f"Uploading {local_path} to {CONTAINER_NAME}/{target_blob_name} ...")
+    with open(local_path, "rb") as data:
+        container_client.upload_blob(
+            name=target_blob_name,
+            data=data,
+            overwrite=True
+        )
+    print("✅ CSV upload completed.")
+
+
 
 def build_consolidated_json():
     bsc = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
@@ -155,12 +255,23 @@ def build_consolidated_json():
 
     print(f"\n✅ Consolidated JSON saved to {OUTPUT_FILE}")
 
+    # === Export to CSV ===
+    export_files_to_csv(consolidated)
 
-        # === Upload to Azure ===
-    target_blob_name = f"{STATE_PREFIX.rstrip('/')}/consolidated_state_report.json"
-    upload_to_blob(bsc, OUTPUT_FILE, target_blob_name)
+    # === Upload to Azure ===
+    # Upload JSON
+    json_target_blob = f"{STATE_PREFIX.rstrip('/')}/consolidated_state_report.json"
+    upload_to_blob(bsc, OUTPUT_FILE, json_target_blob)
+    print(f"✅ JSON uploaded to Azure as: {CONTAINER_NAME}/{json_target_blob}")
 
-    print(f"✅ Also uploaded to Azure as: {CONTAINER_NAME}/{target_blob_name}")
+    # Upload CSV file
+    files_csv_target = f"{STATE_PREFIX.rstrip('/')}/consolidated_state_files.csv"
+    upload_csv_to_blob(bsc, FILES_CSV_FILE, files_csv_target)
+    print(f"✅ Files CSV uploaded to Azure as: {CONTAINER_NAME}/{files_csv_target}")
+
+    print(f"\n🎉 All files generated and uploaded successfully!")
+    print(f"   📄 JSON: {OUTPUT_FILE}")
+    print(f"   📁 Files CSV (with summary): {FILES_CSV_FILE}")
 
 
 if __name__ == "__main__":

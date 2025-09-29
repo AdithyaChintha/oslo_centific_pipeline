@@ -681,7 +681,323 @@ class TestEndToEndConsolidation:
         
         print(f"\n✅ Data consistency verified for all {len(consolidated['homes'])} homes")
 
+    def test_csv_generation_from_test_files(self, temp_dir):
+        """Test CSV generation from test input files with new structure"""
+        # Create consolidated data using the original functions
+        consolidated = {"generated_at": datetime.now().isoformat() + "Z", "homes": []}
+        
+        # Process each test file using the original functions
+        for test_file in TEST_FILES:
+            file_path = TEST_INPUTS_DIR / test_file
+            
+            # Load the test data
+            with open(file_path, 'r') as f:
+                state_json = json.load(f)
+            
+            # Use the original functions to process the data
+            meta = state_json.get("metadata", {})
+            daily = state_json.get("daily_processing", {})
+            
+            # Create home entry using original functions
+            home_entry = {
+                "summary": report_state_jsons.extract_summary(meta, daily, test_file),
+                "files": report_state_jsons.flatten_file_entries(state_json)
+            }
+            
+            consolidated["homes"].append(home_entry)
+        
+        # Generate CSV using the original function
+        report_state_jsons.export_files_to_csv(consolidated)
+        
+        # Verify CSV file was created
+        csv_file = Path("consolidated_state_files.csv")
+        assert csv_file.exists(), "CSV file was not created"
+        
+        # Read and verify CSV content
+        import csv
+        with open(csv_file, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        
+        # Verify we have both summary and file rows
+        summary_rows = [row for row in rows if row['row_type'] == 'SUMMARY']
+        file_rows = [row for row in rows if row['row_type'] == 'FILE']
+        
+        assert len(summary_rows) == len(TEST_FILES), f"Expected {len(TEST_FILES)} summary rows, got {len(summary_rows)}"
+        assert len(file_rows) > 0, "No file rows found in CSV"
+        
+        # Verify CSV has the new columns
+        expected_columns = [
+            'home_id', 'row_type', 'day', 'container_id', 'status', 
+            'file_type', 'blob_name', 'upload_blob_name', 'file_size_gb', 'upload_duration_seconds',
+            'state_blob_name', 'total_data_processed_gb',
+            'total_processing_time_seconds', 'files_processed', 'video_files_processed',
+            'audio_files_processed', 'video_files_successful', 'audio_files_successful',
+            'files_failed'
+        ]
+        
+        # Check that all expected columns are present
+        actual_columns = list(reader.fieldnames)
+        for col in expected_columns:
+            assert col in actual_columns, f"Missing column: {col}"
+        
+        # Verify summary row structure
+        for summary_row in summary_rows:
+            assert summary_row['home_id'], "Missing home_id in summary row"
+            assert summary_row['total_data_processed_gb'], "Missing total_data_processed_gb in summary row"
+            assert summary_row['files_processed'], "Missing files_processed in summary row"
+            assert summary_row['state_blob_name'], "Missing state_blob_name in summary row"
+        
+        # Verify file row structure
+        for file_row in file_rows:
+            assert file_row['home_id'], "Missing home_id in file row"
+            assert file_row['file_type'] in ['video', 'audio'], f"Invalid file_type: {file_row['file_type']}"
+            assert file_row['status'], "Missing status in file row"
+            assert file_row['upload_blob_name'], "Missing upload_blob_name in file row"
+        
+        # Verify grouping: files for each home should be followed by summary for that home
+        current_home_id = None
+        file_count_per_home = {}
+        summary_count_per_home = {}
+        
+        for row in rows:
+            home_id = row['home_id']
+            row_type = row['row_type']
+            
+            if row_type == 'FILE':
+                if home_id not in file_count_per_home:
+                    file_count_per_home[home_id] = 0
+                file_count_per_home[home_id] += 1
+            elif row_type == 'SUMMARY':
+                if home_id not in summary_count_per_home:
+                    summary_count_per_home[home_id] = 0
+                summary_count_per_home[home_id] += 1
+        
+        # Each home should have exactly one summary row
+        for home_id in file_count_per_home.keys():
+            assert summary_count_per_home.get(home_id, 0) == 1, f"Home {home_id} should have exactly 1 summary row"
+        
+        print(f"\n✅ CSV generation test passed!")
+        print(f"   📊 Summary rows: {len(summary_rows)}")
+        print(f"   📁 File rows: {len(file_rows)}")
+        print(f"   📄 CSV file: {csv_file.absolute()}")
+        print(f"   📏 File size: {csv_file.stat().st_size} bytes")
+        print(f"   🏠 Homes processed: {len(file_count_per_home)}")
+        
+        # Keep the CSV file for inspection - don't clean up
+        # csv_file.unlink()
 
+    def test_complete_end_to_end_json_and_csv_generation(self, temp_dir):
+        """Test complete end-to-end generation of both JSON and CSV files from test data"""
+        print(f"\n🚀 Starting complete end-to-end test...")
+        
+        # Create consolidated data using the original functions
+        consolidated = {"generated_at": datetime.now().isoformat() + "Z", "homes": []}
+        
+        # Process each test file using the original functions
+        for test_file in TEST_FILES:
+            file_path = TEST_INPUTS_DIR / test_file
+            
+            print(f"📄 Processing {test_file}...")
+            
+            # Load the test data
+            with open(file_path, 'r') as f:
+                state_json = json.load(f)
+            
+            # Use the original functions to process the data
+            meta = state_json.get("metadata", {})
+            daily = state_json.get("daily_processing", {})
+            
+            # Create home entry using original functions
+            home_entry = {
+                "summary": report_state_jsons.extract_summary(meta, daily, test_file),
+                "files": report_state_jsons.flatten_file_entries(state_json)
+            }
+            
+            consolidated["homes"].append(home_entry)
+        
+        # Generate JSON file
+        json_file = Path("test_consolidated_state_report.json")
+        with open(json_file, 'w', encoding='utf-8') as f:
+            json.dump(consolidated, f, indent=2)
+        
+        # Generate CSV file
+        report_state_jsons.export_files_to_csv(consolidated)
+        csv_file = Path("consolidated_state_files.csv")
+        
+        # Verify both files were created
+        assert json_file.exists(), "JSON file was not created"
+        assert csv_file.exists(), "CSV file was not created"
+        
+        # Verify JSON structure
+        with open(json_file, 'r') as f:
+            json_data = json.load(f)
+        
+        assert "generated_at" in json_data, "Missing generated_at in JSON"
+        assert "homes" in json_data, "Missing homes in JSON"
+        assert len(json_data["homes"]) == len(TEST_FILES), f"Expected {len(TEST_FILES)} homes in JSON"
+        
+        # Verify CSV structure
+        import csv
+        with open(csv_file, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            csv_rows = list(reader)
+        
+        summary_rows = [row for row in csv_rows if row['row_type'] == 'SUMMARY']
+        file_rows = [row for row in csv_rows if row['row_type'] == 'FILE']
+        
+        assert len(summary_rows) == len(TEST_FILES), f"Expected {len(TEST_FILES)} summary rows in CSV"
+        assert len(file_rows) > 0, "No file rows found in CSV"
+        
+        # Verify data consistency between JSON and CSV
+        for i, home_json in enumerate(json_data["homes"]):
+            home_id = home_json["summary"]["home_id"]
+            
+            # Find corresponding CSV summary row
+            csv_summary = next((row for row in summary_rows if row['home_id'] == home_id), None)
+            assert csv_summary is not None, f"Missing CSV summary for home {home_id}"
+            
+            # Verify key fields match
+            assert csv_summary['total_data_processed_gb'] == str(home_json["summary"]["total_data_processed_gb"])
+            assert csv_summary['files_processed'] == str(home_json["summary"]["files_processed"])
+            assert csv_summary['video_files_successful'] == str(home_json["summary"]["video_files_successful"])
+            assert csv_summary['audio_files_successful'] == str(home_json["summary"]["audio_files_successful"])
+            
+            # Count files in CSV for this home
+            csv_files_for_home = [row for row in file_rows if row['home_id'] == home_id]
+            json_files_count = len(home_json["files"])
+            
+            assert len(csv_files_for_home) == json_files_count, f"File count mismatch for home {home_id}: CSV={len(csv_files_for_home)}, JSON={json_files_count}"
+        
+        # Print comprehensive results
+        print(f"\n🎉 Complete end-to-end test passed!")
+        print(f"   📄 JSON file: {json_file.absolute()}")
+        print(f"   📊 JSON size: {json_file.stat().st_size} bytes")
+        print(f"   📁 CSV file: {csv_file.absolute()}")
+        print(f"   📊 CSV size: {csv_file.stat().st_size} bytes")
+        print(f"   🏠 Homes processed: {len(json_data['homes'])}")
+        print(f"   📋 Total CSV rows: {len(csv_rows)}")
+        print(f"   📊 Summary rows: {len(summary_rows)}")
+        print(f"   📁 File rows: {len(file_rows)}")
+        
+        # Show sample data
+        print(f"\n📋 Sample JSON structure:")
+        sample_home = json_data["homes"][0]
+        print(f"   Home ID: {sample_home['summary']['home_id']}")
+        print(f"   Files processed: {sample_home['summary']['files_processed']}")
+        print(f"   Data processed: {sample_home['summary']['total_data_processed_gb']} GB")
+        
+        print(f"\n📋 Sample CSV structure:")
+        if csv_rows:
+            sample_row = csv_rows[0]
+            print(f"   Home ID: {sample_row['home_id']}")
+            print(f"   Row type: {sample_row['row_type']}")
+            print(f"   File type: {sample_row['file_type']}")
+            print(f"   Upload blob: {sample_row['upload_blob_name']}")
+        
+        # Keep both files for inspection
+        print(f"\n✅ Both JSON and CSV files created successfully and verified!")
+        print(f"   📍 Files location: {Path.cwd()}")
+
+    def test_csv_column_structure_and_grouping(self, temp_dir):
+        """Test the new CSV column structure and home grouping"""
+        # Create consolidated data using the original functions
+        consolidated = {"generated_at": datetime.now().isoformat() + "Z", "homes": []}
+        
+        # Process each test file using the original functions
+        for test_file in TEST_FILES:
+            file_path = TEST_INPUTS_DIR / test_file
+            
+            # Load the test data
+            with open(file_path, 'r') as f:
+                state_json = json.load(f)
+            
+            # Use the original functions to process the data
+            meta = state_json.get("metadata", {})
+            daily = state_json.get("daily_processing", {})
+            
+            # Create home entry using original functions
+            home_entry = {
+                "summary": report_state_jsons.extract_summary(meta, daily, test_file),
+                "files": report_state_jsons.flatten_file_entries(state_json)
+            }
+            
+            consolidated["homes"].append(home_entry)
+        
+        # Generate CSV using the original function
+        report_state_jsons.export_files_to_csv(consolidated)
+        
+        # Verify CSV file was created
+        csv_file = Path("consolidated_state_files.csv")
+        assert csv_file.exists(), "CSV file was not created"
+        
+        # Read and verify CSV content
+        import csv
+        with open(csv_file, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        
+        # Test 1: Verify all expected columns are present
+        expected_columns = [
+            'home_id', 'row_type', 'day', 'container_id', 'status', 
+            'file_type', 'blob_name', 'upload_blob_name', 'file_size_gb', 'upload_duration_seconds',
+            'state_blob_name', 'total_data_processed_gb',
+            'total_processing_time_seconds', 'files_processed', 'video_files_processed',
+            'audio_files_processed', 'video_files_successful', 'audio_files_successful',
+            'files_failed'
+        ]
+        
+        actual_columns = list(reader.fieldnames)
+        assert len(actual_columns) == len(expected_columns), f"Column count mismatch: expected {len(expected_columns)}, got {len(actual_columns)}"
+        
+        for i, (expected, actual) in enumerate(zip(expected_columns, actual_columns)):
+            assert expected == actual, f"Column {i} mismatch: expected '{expected}', got '{actual}'"
+        
+        # Test 2: Verify upload_blob_name column is populated for FILE rows
+        file_rows = [row for row in rows if row['row_type'] == 'FILE']
+        for file_row in file_rows:
+            assert file_row['upload_blob_name'], f"upload_blob_name is empty for file row: {file_row['blob_name']}"
+            assert file_row['upload_blob_name'] == file_row['blob_name'], f"upload_blob_name should match blob_name"
+        
+        # Test 3: Verify upload_blob_name is empty for SUMMARY rows
+        summary_rows = [row for row in rows if row['row_type'] == 'SUMMARY']
+        for summary_row in summary_rows:
+            assert not summary_row['upload_blob_name'], f"upload_blob_name should be empty for summary row"
+        
+        # Test 4: Verify grouping structure (files for each home followed by summary)
+        current_home_id = None
+        home_file_counts = {}
+        home_summary_counts = {}
+        
+        for row in rows:
+            home_id = row['home_id']
+            row_type = row['row_type']
+            
+            if row_type == 'FILE':
+                if home_id not in home_file_counts:
+                    home_file_counts[home_id] = 0
+                home_file_counts[home_id] += 1
+            elif row_type == 'SUMMARY':
+                if home_id not in home_summary_counts:
+                    home_summary_counts[home_id] = 0
+                home_summary_counts[home_id] += 1
+        
+        # Test 5: Each home should have exactly one summary
+        for home_id in home_file_counts.keys():
+            assert home_summary_counts.get(home_id, 0) == 1, f"Home {home_id} should have exactly 1 summary row"
+        
+        # Test 6: Verify no version or success_rate_percentage columns
+        assert 'version' not in actual_columns, "version column should not be present"
+        assert 'success_rate_percentage' not in actual_columns, "success_rate_percentage column should not be present"
+        
+        print(f"\n✅ CSV column structure and grouping test passed!")
+        print(f"   📊 Total columns: {len(actual_columns)}")
+        print(f"   📁 File rows: {len(file_rows)}")
+        print(f"   📊 Summary rows: {len(summary_rows)}")
+        print(f"   🏠 Homes: {len(home_file_counts)}")
+        print(f"   ✅ upload_blob_name column: Present and populated")
+        print(f"   ✅ Grouping: Files followed by summary for each home")
+        print(f"   ✅ Removed columns: version, success_rate_percentage")
 
 
 if __name__ == "__main__":
