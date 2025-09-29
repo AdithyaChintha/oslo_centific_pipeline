@@ -1,0 +1,2089 @@
+{
+  "generated_at": "2025-09-29T12:52:02.649996Z",
+  "homes": [
+    {
+      "summary": {
+        "state_blob_name": "15_state.json",
+        "home_id": "15",
+        "version": "2.0",
+        "total_data_processed_gb": 559.589,
+        "total_processing_time_seconds": 451.321483,
+        "files_processed": 59,
+        "video_files_processed": 32,
+        "audio_files_processed": 27,
+        "video_files_successful": 32,
+        "audio_files_successful": 27,
+        "files_failed": 0
+      },
+      "files": [
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-audio-call-with-friends/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_audio-call-with-friends_20250908T00:00:00.000Z213400_01_audio.WAV",
+          "file_size_gb": 0.096,
+          "upload_duration_seconds": 25.017527
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-audio-call-with-friends/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_audio-call-with-friends_20250908T00:00:00.000Z213400_01_video.insv",
+          "file_size_gb": 39.617,
+          "upload_duration_seconds": 18.861139
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-audio-call-with-friends/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_audio-call-with-friends_20250908T00:00:00.000Z213400_02_video.insv",
+          "file_size_gb": 1.615,
+          "upload_duration_seconds": 8.679603
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-cleaning-surfaces/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_cleaning-surfaces_20250908T00:00:00.000Z174600_01_audio.WAV",
+          "file_size_gb": 0.493,
+          "upload_duration_seconds": 2.988432
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-cleaning-surfaces/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_cleaning-surfaces_20250908T00:00:00.000Z174600_01_video.insv",
+          "file_size_gb": 20.233,
+          "upload_duration_seconds": 11.041945
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-closing-windows-and-locking-doors/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_closing-windows-and-locking-doors_20250906T00:00:00.000Z182600_01_audio.WAV",
+          "file_size_gb": 0.06,
+          "upload_duration_seconds": 3.043277
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-closing-windows-and-locking-doors/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_closing-windows-and-locking-doors_20250906T00:00:00.000Z182600_01_video.insv",
+          "file_size_gb": 2.497,
+          "upload_duration_seconds": 5.040978
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-combing-hair/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_combing-hair_20250906T00:00:00.000Z190000_01_audio.WAV",
+          "file_size_gb": 0.125,
+          "upload_duration_seconds": 3.038642
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-combing-hair/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_combing-hair_20250906T00:00:00.000Z190000_02_audio.WAV",
+          "file_size_gb": 0.058,
+          "upload_duration_seconds": 3.057469
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-combing-hair/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_combing-hair_20250906T00:00:00.000Z190000_01_video.insv",
+          "file_size_gb": 2.389,
+          "upload_duration_seconds": 3.022862
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_day-walkthrough_20250906T00:00:00.000Z100600_01_audio.WAV",
+          "file_size_gb": 0.128,
+          "upload_duration_seconds": 2.986421
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-day-walkthrough/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_day-walkthrough_20250906T00:00:00.000Z100600_01_video.insv",
+          "file_size_gb": 5.221,
+          "upload_duration_seconds": 4.986026
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-eating-food/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_eating-food_20250906T00:00:00.000Z231100_01_audio.WAV",
+          "file_size_gb": 0.691,
+          "upload_duration_seconds": 3.0014
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-eating-food/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_eating-food_20250906T00:00:00.000Z231100_01_video.insv",
+          "file_size_gb": 28.25,
+          "upload_duration_seconds": 13.082518
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-folding-clothes/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_folding-clothes_20250910T00:00:00.000Z020900_01_audio.WAV",
+          "file_size_gb": 0.19,
+          "upload_duration_seconds": 3.04046
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-folding-clothes/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_folding-clothes_20250910T00:00:00.000Z020900_01_video.insv",
+          "file_size_gb": 7.738,
+          "upload_duration_seconds": 4.986646
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-listening-to-music/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_listening-to-music_20250906T00:00:00.000Z154800_01_audio.WAV",
+          "file_size_gb": 1.639,
+          "upload_duration_seconds": 5.034759
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-listening-to-music/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_listening-to-music_20250906T00:00:00.000Z154800_01_video.insv",
+          "file_size_gb": 39.618,
+          "upload_duration_seconds": 17.016594
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-listening-to-music/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_listening-to-music_20250906T00:00:00.000Z154800_02_video.insv",
+          "file_size_gb": 27.662,
+          "upload_duration_seconds": 10.987455
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-looking-at-coupons/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_looking-at-coupons_20250908T00:00:00.000Z171300_01_audio.WAV",
+          "file_size_gb": 0.174,
+          "upload_duration_seconds": 3.193347
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-looking-at-coupons/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_looking-at-coupons_20250908T00:00:00.000Z171300_01_video.insv",
+          "file_size_gb": 7.129,
+          "upload_duration_seconds": 6.979443
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-looking-through-mail/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_looking-through-mail_20250908T00:00:00.000Z165500_01_audio.WAV",
+          "file_size_gb": 0.336,
+          "upload_duration_seconds": 3.024731
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-looking-through-mail/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_looking-through-mail_20250908T00:00:00.000Z165500_01_video.insv",
+          "file_size_gb": 13.848,
+          "upload_duration_seconds": 8.985058
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-night-walkthrough/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_night-walkthrough_20250906T00:00:00.000Z225300_01_audio.WAV",
+          "file_size_gb": 0.117,
+          "upload_duration_seconds": 3.039757
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-night-walkthrough/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_night-walkthrough_20250906T00:00:00.000Z225300_01_video.insv",
+          "file_size_gb": 4.794,
+          "upload_duration_seconds": 4.957872
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-opening-cabinets-and-drawers-and-organizing-utensils/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_opening-cabinets-and-drawers-and-organizing-utensils_20250906T00:00:00.000Z001500_01_audio.WAV",
+          "file_size_gb": 0.392,
+          "upload_duration_seconds": 3.001206
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-opening-cabinets-and-drawers-and-organizing-utensils/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_opening-cabinets-and-drawers-and-organizing-utensils_20250906T00:00:00.000Z001500_01_video.insv",
+          "file_size_gb": 16.075,
+          "upload_duration_seconds": 8.986766
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-playing-game-on-pc/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_playing-game-on-pc_20250908T00:00:00.000Z190900_01_audio.WAV",
+          "file_size_gb": 1.051,
+          "upload_duration_seconds": 5.055966
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-playing-game-on-pc/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_playing-game-on-pc_20250908T00:00:00.000Z190900_01_video.insv",
+          "file_size_gb": 39.617,
+          "upload_duration_seconds": 17.097074
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-playing-game-on-pc/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_playing-game-on-pc_20250908T00:00:00.000Z190900_02_video.insv",
+          "file_size_gb": 20.345,
+          "upload_duration_seconds": 9.025155
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-playing-games-with-friends/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_playing-games-with-friends_20250908T00:00:00.000Z231500_01_audio.WAV",
+          "file_size_gb": 0.39,
+          "upload_duration_seconds": 3.026183
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-playing-games-with-friends/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_playing-games-with-friends_20250908T00:00:00.000Z231500_01_video.insv",
+          "file_size_gb": 39.617,
+          "upload_duration_seconds": 17.026978
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-playing-games-with-friends/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_playing-games-with-friends_20250908T00:00:00.000Z231500_02_video.insv",
+          "file_size_gb": 20.345,
+          "upload_duration_seconds": 8.97535
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-prepping-for-power-outage/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_prepping-for-power-outage_20250906T00:00:00.000Z184300_01_audio.WAV",
+          "file_size_gb": 0.064,
+          "upload_duration_seconds": 3.092704
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-prepping-for-power-outage/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_prepping-for-power-outage_20250906T00:00:00.000Z184300_01_video.insv",
+          "file_size_gb": 2.547,
+          "upload_duration_seconds": 5.073058
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-reading-and-making-notes/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_reading-and-making-notes_20250908T00:00:00.000Z172400_01_audio.WAV",
+          "file_size_gb": 0.493,
+          "upload_duration_seconds": 3.068755
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-reading-and-making-notes/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_reading-and-making-notes_20250908T00:00:00.000Z172400_01_video.insv",
+          "file_size_gb": 20.174,
+          "upload_duration_seconds": 11.093583
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-rearranging-objects/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_rearranging-objects_20250906T00:00:00.000Z222400_01_audio.WAV",
+          "file_size_gb": 0.071,
+          "upload_duration_seconds": 5.369393
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-rearranging-objects/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_rearranging-objects_20250906T00:00:00.000Z222400_01_video.insv",
+          "file_size_gb": 2.869,
+          "upload_duration_seconds": 5.018076
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-recording-statistics/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_recording-statistics_20250906T00:00:00.000Z201000_01_audio.WAV",
+          "file_size_gb": 0.967,
+          "upload_duration_seconds": 3.111856
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-recording-statistics/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_recording-statistics_20250906T00:00:00.000Z201000_01_video.insv",
+          "file_size_gb": 39.617,
+          "upload_duration_seconds": 17.029347
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-recording-statistics/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_recording-statistics_20250906T00:00:00.000Z201000_02_video.insv",
+          "file_size_gb": 0.111,
+          "upload_duration_seconds": 3.154663
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-skincare/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_skincare_20250906T00:00:00.000Z185200_01_audio.WAV",
+          "file_size_gb": 0.125,
+          "upload_duration_seconds": 3.078415
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-skincare/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_skincare_20250906T00:00:00.000Z185200_01_video.insv",
+          "file_size_gb": 5.058,
+          "upload_duration_seconds": 5.047643
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-vacumming-room/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_vacumming-room_20250908T00:00:00.000Z172300_01_audio.WAV",
+          "file_size_gb": 0.363,
+          "upload_duration_seconds": 3.038012
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-vacumming-room/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_vacumming-room_20250908T00:00:00.000Z172300_01_video.insv",
+          "file_size_gb": 14.791,
+          "upload_duration_seconds": 15.02791
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-walking-between-rooms/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_walking-between-rooms_20250908T00:00:00.000Z133200_01_audio.WAV",
+          "file_size_gb": 0.653,
+          "upload_duration_seconds": 3.009334
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-walking-between-rooms/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_walking-between-rooms_20250908T00:00:00.000Z133200_01_video.insv",
+          "file_size_gb": 26.729,
+          "upload_duration_seconds": 21.002617
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-walking-in-place/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_walking-in-place_20250908T00:00:00.000Z193000_01_audio.WAV",
+          "file_size_gb": 0.336,
+          "upload_duration_seconds": 3.006333
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-walking-in-place/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_walking-in-place_20250908T00:00:00.000Z193000_01_video.insv",
+          "file_size_gb": 13.751,
+          "upload_duration_seconds": 8.984786
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-washing-dishes/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_washing-dishes_20250906T00:00:00.000Z000500_01_audio.WAV",
+          "file_size_gb": 0.26,
+          "upload_duration_seconds": 3.079749
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-washing-dishes/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_washing-dishes_20250906T00:00:00.000Z000500_01_video.insv",
+          "file_size_gb": 10.719,
+          "upload_duration_seconds": 7.012729
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-watching-twitch-stream/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_watching-twitch-stream_20250906T00:00:00.000Z023900_01_audio.WAV",
+          "file_size_gb": 1.298,
+          "upload_duration_seconds": 4.948345
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-watching-twitch-stream/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_watching-twitch-stream_20250906T00:00:00.000Z023900_01_video.insv",
+          "file_size_gb": 39.618,
+          "upload_duration_seconds": 19.061271
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-watching-twitch-stream/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_watching-twitch-stream_20250906T00:00:00.000Z023900_02_video.insv",
+          "file_size_gb": 13.566,
+          "upload_duration_seconds": 11.120794
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-watering-plants/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_watering-plants_20250906T00:00:00.000Z230200_01_audio.WAV",
+          "file_size_gb": 0.049,
+          "upload_duration_seconds": 3.091884
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-watering-plants/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_watering-plants_20250906T00:00:00.000Z230200_01_video.insv",
+          "file_size_gb": 2.028,
+          "upload_duration_seconds": 5.118326
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-working-out-with-weights/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_audio1_working-out-with-weights_20250906T00:00:00.000Z191000_01_audio.WAV",
+          "file_size_gb": 0.495,
+          "upload_duration_seconds": 4.992226
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/15-a5737c5f-7869-46e7-92cc-71b7a7f3487b-working-out-with-weights/15_a5737c5f-7869-46e7-92cc-71b7a7f3487b_video1_working-out-with-weights_20250906T00:00:00.000Z191000_01_video.insv",
+          "file_size_gb": 20.288,
+          "upload_duration_seconds": 23.066172
+        }
+      ]
+    },
+    {
+      "summary": {
+        "state_blob_name": "23_state.json",
+        "home_id": "23",
+        "version": "2.0",
+        "total_data_processed_gb": 247.04,
+        "total_processing_time_seconds": 298.945294,
+        "files_processed": 60,
+        "video_files_processed": 18,
+        "audio_files_processed": 42,
+        "video_files_successful": 18,
+        "audio_files_successful": 42,
+        "files_failed": 0
+      },
+      "files": [
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-brushing-teeth/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_brushing-teeth-_20250904T00:00:00.000Z130800_01_audio.WAV",
+          "file_size_gb": 0.18,
+          "upload_duration_seconds": 4.965175
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-brushing-teeth/23_307f7136-5f14-4af9-bcf8-f46bd3982895_video1_brushing-teeth-_20250904T00:00:00.000Z130800_01_video.insv",
+          "file_size_gb": 7.426,
+          "upload_duration_seconds": 4.982096
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-check-smoke-alarms/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_check-smoke-alarms_20250904160500_01_audio.wav",
+          "file_size_gb": 0.118,
+          "upload_duration_seconds": 3.029461
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-check-smoke-alarms/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_check-smoke-alarms_20250904T00:00:00.000Z160500_01_audio.WAV",
+          "file_size_gb": 0.118,
+          "upload_duration_seconds": 2.973919
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-check-smoke-alarms/23_307f7136-5f14-4af9-bcf8-f46bd3982895_video1_check-smoke-alarms_20250904T00:00:00.000Z160500_01_video.insv",
+          "file_size_gb": 4.98,
+          "upload_duration_seconds": 5.008005
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-cooking/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_cooking_20250904101500_01_audio.wav",
+          "file_size_gb": 0.434,
+          "upload_duration_seconds": 3.111149
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-cooking/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_cooking_20250904T00:00:00.000Z101500_01_audio.WAV",
+          "file_size_gb": 0.434,
+          "upload_duration_seconds": 2.999997
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-cooking/23_307f7136-5f14-4af9-bcf8-f46bd3982895_video1_cooking_20250904T00:00:00.000Z101500_01_video.insv",
+          "file_size_gb": 17.304,
+          "upload_duration_seconds": 8.962742
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-eating/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_eating_20250904103500_01_audio.wav",
+          "file_size_gb": 0.462,
+          "upload_duration_seconds": 2.957095
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-eating/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_eating_20250904T00:00:00.000Z103500_01_audio.WAV",
+          "file_size_gb": 0.462,
+          "upload_duration_seconds": 3.002814
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-eating/23_307f7136-5f14-4af9-bcf8-f46bd3982895_video1_eating_20250904T00:00:00.000Z103500_01_video.insv",
+          "file_size_gb": 18.845,
+          "upload_duration_seconds": 9.091209
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-groomed-my-hair/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_groomed-my-hair_20250904131500_01_audio.wav",
+          "file_size_gb": 0.208,
+          "upload_duration_seconds": 2.949072
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-home-workout/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_home-workout_20250904100000_01_audio.wav",
+          "file_size_gb": 0.84,
+          "upload_duration_seconds": 5.023402
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-home-workout/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_home-workout_20250904T00:00:00.000Z100000_01_audio.WAV",
+          "file_size_gb": 0.84,
+          "upload_duration_seconds": 3.052513
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-hosting-a-meeting/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_hosting-a-meeting_20250904093000_01_audio.wav",
+          "file_size_gb": 0.765,
+          "upload_duration_seconds": 5.015466
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-hosting-a-meeting/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_hosting-a-meeting_20250904T00:00:00.000Z093000_01_audio.WAV",
+          "file_size_gb": 0.765,
+          "upload_duration_seconds": 5.003476
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-hosting-a-meeting/23_307f7136-5f14-4af9-bcf8-f46bd3982895_video1_hosting-a-meeting_20250904T00:00:00.000Z093000_01_video.insv",
+          "file_size_gb": 31.49,
+          "upload_duration_seconds": 12.992745
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-indoor-garden-car/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_indoor-garden-car_20250904220000_01_audio.wav",
+          "file_size_gb": 0.388,
+          "upload_duration_seconds": 3.006848
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-indoor-garden-car/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_indoor-garden-car_20250904T00:00:00.000Z220000_01_audio.WAV",
+          "file_size_gb": 0.388,
+          "upload_duration_seconds": 2.977931
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-indoor-garden-car/23_307f7136-5f14-4af9-bcf8-f46bd3982895_video1_indoor-garden-car_20250904T00:00:00.000Z220000_01_video.insv",
+          "file_size_gb": 16.084,
+          "upload_duration_seconds": 9.074533
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-locking-doors-and-windows/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_locking-doors-and-windows_20250904154500_01_audio.wav",
+          "file_size_gb": 0.164,
+          "upload_duration_seconds": 2.947424
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-locking-doors-and-windows/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_locking-doors-and-windows_20250904T00:00:00.000Z154500_01_audio.WAV",
+          "file_size_gb": 0.164,
+          "upload_duration_seconds": 2.964351
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-locking-doors-and-windows/23_307f7136-5f14-4af9-bcf8-f46bd3982895_video1_locking-doors-and-windows_20250904T00:00:00.000Z154500_01_video.insv",
+          "file_size_gb": 7.071,
+          "upload_duration_seconds": 6.96531
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-opening-closet-door/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_opening-closet-door_20250904133900_01_audio.wav",
+          "file_size_gb": 0.077,
+          "upload_duration_seconds": 3.015008
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-opening-closet-door/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_opening-closet-door_20250904T00:00:00.000Z133900_01_audio.WAV",
+          "file_size_gb": 0.077,
+          "upload_duration_seconds": 2.953007
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-opening-closet-door/23_307f7136-5f14-4af9-bcf8-f46bd3982895_video1_opening-closet-door_20250904133900_01_video.insv",
+          "file_size_gb": 3.068,
+          "upload_duration_seconds": 7.050852
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-opening-closet-door/23_307f7136-5f14-4af9-bcf8-f46bd3982895_video1_opening-closet-door_20250904T00:00:00.000Z133900_01_video.insv",
+          "file_size_gb": 3.068,
+          "upload_duration_seconds": 5.04043
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-organize-desk/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_organize-desk_20250904094000_01_audio.wav",
+          "file_size_gb": 0.516,
+          "upload_duration_seconds": 5.02989
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-organize-desk/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_organize-desk_20250904T00:00:00.000Z094000_01_audio.WAV",
+          "file_size_gb": 0.516,
+          "upload_duration_seconds": 5.072411
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-organize-desk/23_307f7136-5f14-4af9-bcf8-f46bd3982895_video1_organize-desk_20250904T00:00:00.000Z094000_01_video.insv",
+          "file_size_gb": 21.052,
+          "upload_duration_seconds": 11.020211
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-package-received/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_package-received-_20250904T00:00:00.000Z155500_01_audio.WAV",
+          "file_size_gb": 0.113,
+          "upload_duration_seconds": 3.043522
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-package-received/23_307f7136-5f14-4af9-bcf8-f46bd3982895_video1_package-received-_20250904T00:00:00.000Z155500_01_video.insv",
+          "file_size_gb": 4.907,
+          "upload_duration_seconds": 5.078671
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-playing-on-my-ps5/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_playing-on-my-ps5_20250904140000_01_audio.wav",
+          "file_size_gb": 1.67,
+          "upload_duration_seconds": 7.061303
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-playing-on-my-ps5/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_playing-on-my-ps5_20250904T00:00:00.000Z140000_01_audio.WAV",
+          "file_size_gb": 1.67,
+          "upload_duration_seconds": 4.993227
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-reading/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_reading_20250904132400_01_audio.wav",
+          "file_size_gb": 0.971,
+          "upload_duration_seconds": 5.001886
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-reading/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_reading_20250904T00:00:00.000Z132400_01_audio.WAV",
+          "file_size_gb": 0.971,
+          "upload_duration_seconds": 5.037289
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-sorting-mail/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_sorting-mail_20250904162500_01_audio.wav",
+          "file_size_gb": 0.486,
+          "upload_duration_seconds": 2.981299
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-sorting-mail/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_sorting-mail_20250904T00:00:00.000Z162500_01_audio.WAV",
+          "file_size_gb": 0.486,
+          "upload_duration_seconds": 2.970161
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-sorting-mail/23_307f7136-5f14-4af9-bcf8-f46bd3982895_video1_sorting-mail_20250904T00:00:00.000Z162500_01_video.insv",
+          "file_size_gb": 20.002,
+          "upload_duration_seconds": 8.982876
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-strech/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_strech_20250904173000_01_audio.wav",
+          "file_size_gb": 0.5,
+          "upload_duration_seconds": 3.044169
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-strech/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_strech_20250904T00:00:00.000Z173000_01_audio.WAV",
+          "file_size_gb": 0.5,
+          "upload_duration_seconds": 2.948175
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-strech/23_307f7136-5f14-4af9-bcf8-f46bd3982895_video1_strech_20250904T00:00:00.000Z173000_01_video.insv",
+          "file_size_gb": 20.454,
+          "upload_duration_seconds": 10.928842
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-tidying-surface/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_tidying-surface-_20250904T00:00:00.000Z134500_01_audio.WAV",
+          "file_size_gb": 0.767,
+          "upload_duration_seconds": 3.063145
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-tidying-surface/23_307f7136-5f14-4af9-bcf8-f46bd3982895_video1_tidying-surface-_20250904T00:00:00.000Z134500_01_video.insv",
+          "file_size_gb": 31.522,
+          "upload_duration_seconds": 13.008657
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-up-and-down-the-stairs/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_up-and-down-the-stairs_20250904120000_01_audio.wav",
+          "file_size_gb": 0.195,
+          "upload_duration_seconds": 3.090348
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-up-and-down-the-stairs/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_up-and-down-the-stairs_20250904T00:00:00.000Z120000_01_audio.WAV",
+          "file_size_gb": 0.195,
+          "upload_duration_seconds": 2.930181
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-up-and-down-the-stairs/23_307f7136-5f14-4af9-bcf8-f46bd3982895_video1_up-and-down-the-stairs_20250904T00:00:00.000Z120000_01_video.insv",
+          "file_size_gb": 8.025,
+          "upload_duration_seconds": 7.037411
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-walkthrough/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_walkthrough_20250904110000_01_audio.wav",
+          "file_size_gb": 0.063,
+          "upload_duration_seconds": 2.988181
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-walkthrough/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_walkthrough_20250904230000_01_audio.wav",
+          "file_size_gb": 0.051,
+          "upload_duration_seconds": 2.974731
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-walkthrough/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_walkthrough_20250904T00:00:00.000Z110000_01_audio.WAV",
+          "file_size_gb": 0.063,
+          "upload_duration_seconds": 2.979948
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-walkthrough/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_walkthrough_20250904T00:00:00.000Z230000_01_audio.WAV",
+          "file_size_gb": 0.051,
+          "upload_duration_seconds": 3.026393
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-walkthrough/23_307f7136-5f14-4af9-bcf8-f46bd3982895_video1_walkthrough_20250904110000_01_video.insv",
+          "file_size_gb": 2.492,
+          "upload_duration_seconds": 7.077491
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-walkthrough/23_307f7136-5f14-4af9-bcf8-f46bd3982895_video1_walkthrough_20250904230000_01_video.insv",
+          "file_size_gb": 2.105,
+          "upload_duration_seconds": 4.977583
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-walkthrough/23_307f7136-5f14-4af9-bcf8-f46bd3982895_video1_walkthrough_20250904T00:00:00.000Z230000_01_video.insv",
+          "file_size_gb": 2.105,
+          "upload_duration_seconds": 5.11029
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-watching-tv/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_watching-tv_20250904204000_01_audio.wav",
+          "file_size_gb": 1.462,
+          "upload_duration_seconds": 4.967907
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-watching-tv/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_watching-tv_20250904T00:00:00.000Z204000_01_audio.WAV",
+          "file_size_gb": 1.462,
+          "upload_duration_seconds": 3.042738
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-working-at-desk/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_working-at-desk_20250904104000_01_audio.wav",
+          "file_size_gb": 1.593,
+          "upload_duration_seconds": 5.033616
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-working-at-desk/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_working-at-desk_20250904T00:00:00.000Z104000_01_audio.WAV",
+          "file_size_gb": 1.593,
+          "upload_duration_seconds": 4.942181
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-writing-at-desk/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_writing-at-desk_20250904143000_01_audio.wav",
+          "file_size_gb": 1.13,
+          "upload_duration_seconds": 4.985994
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/23-307f7136-5f14-4af9-bcf8-f46bd3982895-writing-at-desk/23_307f7136-5f14-4af9-bcf8-f46bd3982895_audio1_writing-at-desk_20250904T00:00:00.000Z143000_01_audio.WAV",
+          "file_size_gb": 1.13,
+          "upload_duration_seconds": 3.07098
+        }
+      ]
+    },
+    {
+      "summary": {
+        "state_blob_name": "62_state.json",
+        "home_id": "62",
+        "version": "2.0",
+        "total_data_processed_gb": 660.401,
+        "total_processing_time_seconds": 477.564945,
+        "files_processed": 56,
+        "video_files_processed": 32,
+        "audio_files_processed": 24,
+        "video_files_successful": 32,
+        "audio_files_successful": 24,
+        "files_failed": 0
+      },
+      "files": [
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-brushing-teeth/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_brushing-teeth_20250925102700_1_audio.wav",
+          "file_size_gb": 0.146,
+          "upload_duration_seconds": 2.992334
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-brushing-teeth/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_brushing-teeth_20250925102700_1_video.insv",
+          "file_size_gb": 6.005,
+          "upload_duration_seconds": 6.973644
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-checking-smoke-alarm/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_checking-smoke-alarm_20250926080300_1_audio.wav",
+          "file_size_gb": 0.044,
+          "upload_duration_seconds": 3.001528
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-checking-smoke-alarm/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_checking-smoke-alarm_20250926080300_1_video.insv",
+          "file_size_gb": 1.788,
+          "upload_duration_seconds": 5.055665
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-cleaning-kitchen/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_cleaning-kitchen_20250925041400_1_audio.wav",
+          "file_size_gb": 2.0,
+          "upload_duration_seconds": 5.009958
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-cleaning-kitchen/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_cleaning-kitchen_20250925041400_2_audio.wav",
+          "file_size_gb": 0.815,
+          "upload_duration_seconds": 4.983024
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-cleaning-kitchen/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_cleaning-kitchen_20250925041400_1_video.insv",
+          "file_size_gb": 39.618,
+          "upload_duration_seconds": 17.018633
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-cleaning-kitchen/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_cleaning-kitchen_20250925041400_2_video.insv",
+          "file_size_gb": 39.619,
+          "upload_duration_seconds": 16.965977
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-cleaning-kitchen/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_cleaning-kitchen_20250925041400_3_video.insv",
+          "file_size_gb": 36.27,
+          "upload_duration_seconds": 15.044492
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-cleaning-room/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_cleaning-room_20250925104400_3_audio.wav",
+          "file_size_gb": 1.191,
+          "upload_duration_seconds": 5.003458
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-cleaning-room/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_cleaning-room_20250925104400_1_video.insv",
+          "file_size_gb": 39.618,
+          "upload_duration_seconds": 15.377756
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-cleaning-room/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_cleaning-room_20250925104400_2_video.insv",
+          "file_size_gb": 9.322,
+          "upload_duration_seconds": 6.977524
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-closing-window/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_closing-window_20250926080500_1_audio.wav",
+          "file_size_gb": 0.026,
+          "upload_duration_seconds": 2.988484
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-closing-window/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_closing-window_20250926080500_1_video.insv",
+          "file_size_gb": 1.22,
+          "upload_duration_seconds": 3.042425
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-cooking-food/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_cooking-food_20250925073800_1_audio.wav",
+          "file_size_gb": 2.0,
+          "upload_duration_seconds": 5.03114
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-cooking-food/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_cooking-food_20250925073800_2_audio.wav",
+          "file_size_gb": 0.248,
+          "upload_duration_seconds": 4.995414
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-cooking-food/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_cooking-food_20250925073800_1_video.insv",
+          "file_size_gb": 39.618,
+          "upload_duration_seconds": 14.994042
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-cooking-food/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_cooking-food_20250925073800_2_video.insv",
+          "file_size_gb": 39.619,
+          "upload_duration_seconds": 16.998
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-cooking-food/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_cooking-food_20250925073800_3_video.insv",
+          "file_size_gb": 12.91,
+          "upload_duration_seconds": 6.991818
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-eating-food/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_eating-food_20250925134800_1_audio.wav",
+          "file_size_gb": 0.975,
+          "upload_duration_seconds": 4.987177
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-eating-food/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_eating-food_20250925134800_1_video.insv",
+          "file_size_gb": 39.618,
+          "upload_duration_seconds": 16.981883
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-eating-food/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_eating-food_20250925134800_2_video.insv",
+          "file_size_gb": 0.424,
+          "upload_duration_seconds": 3.075378
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-folding-clothes/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_folding-clothes_20250925233800_1_audio.wav",
+          "file_size_gb": 0.742,
+          "upload_duration_seconds": 2.971938
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-folding-clothes/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_folding-clothes_20250925233800_1_video.insv",
+          "file_size_gb": 30.593,
+          "upload_duration_seconds": 20.992513
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-going-between-rooms/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_going-between-rooms_20250925195700_1_audio.wav",
+          "file_size_gb": 0.223,
+          "upload_duration_seconds": 3.001703
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-going-between-rooms/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_going-between-rooms_20250925195700_1_video.insv",
+          "file_size_gb": 9.302,
+          "upload_duration_seconds": 6.98558
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-loading-dryer/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_loading-dryer_20250925134000_1_audio.wav",
+          "file_size_gb": 0.157,
+          "upload_duration_seconds": 4.962884
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-loading-dryer/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_loading-dryer_20250925134000_1_video.insv",
+          "file_size_gb": 6.496,
+          "upload_duration_seconds": 4.966668
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-loading-washer/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_loading-washer_20250925113900_1_audio.wav",
+          "file_size_gb": 0.148,
+          "upload_duration_seconds": 2.977844
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-loading-washer/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_loading-washer_20250925113900_1_video.insv",
+          "file_size_gb": 6.444,
+          "upload_duration_seconds": 5.031631
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-opening-cabinet/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_opening-cabinet_20250925094100_1_audio.wav",
+          "file_size_gb": 0.118,
+          "upload_duration_seconds": 2.994962
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-opening-cabinet/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_opening-cabinet_20250925094100_1_video.insv",
+          "file_size_gb": 5.006,
+          "upload_duration_seconds": 6.98473
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-playing-with-friend/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_playing-with-friend_20250925224200_1_audio.wav",
+          "file_size_gb": 1.164,
+          "upload_duration_seconds": 2.963574
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-playing-with-friend/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_playing-with-friend_20250925224200_1_video.insv",
+          "file_size_gb": 39.618,
+          "upload_duration_seconds": 14.996673
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-playing-with-friend/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_playing-with-friend_20250925224200_2_video.insv",
+          "file_size_gb": 8.052,
+          "upload_duration_seconds": 12.187377
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-receiving-packages/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_receiving-packages_20250926074900_1_audio.wav",
+          "file_size_gb": 0.081,
+          "upload_duration_seconds": 3.05575
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-receiving-packages/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_receiving-packages_20250926074900_1_video.insv",
+          "file_size_gb": 3.535,
+          "upload_duration_seconds": 10.944567
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-skincare/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_skincare_20250925103100_1_audio.wav",
+          "file_size_gb": 0.336,
+          "upload_duration_seconds": 6.421405
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-skincare/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_skincare_20250925103100_1_video.insv",
+          "file_size_gb": 13.914,
+          "upload_duration_seconds": 12.157319
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-soccer-practice/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_soccer-practice_20250926073600_1_audio.wav",
+          "file_size_gb": 0.1,
+          "upload_duration_seconds": 2.975521
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-soccer-practice/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_soccer-practice_20250926073600_1_video.insv",
+          "file_size_gb": 4.104,
+          "upload_duration_seconds": 8.292754
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-stretching/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_stretching_20250926074100_1_audio.wav",
+          "file_size_gb": 0.115,
+          "upload_duration_seconds": 6.932614
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-stretching/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_stretching_20250926074100_1_video.insv",
+          "file_size_gb": 4.853,
+          "upload_duration_seconds": 7.051779
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-taking-out-trash/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_taking-out-trash_20250925094600_1_audio.wav",
+          "file_size_gb": 0.163,
+          "upload_duration_seconds": 4.986133
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-taking-out-trash/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_taking-out-trash_20250925094600_1_video.insv",
+          "file_size_gb": 6.754,
+          "upload_duration_seconds": 5.040664
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-talking-to-friend/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_talking-to-friend_20250925201800_1_audio.wav",
+          "file_size_gb": 1.935,
+          "upload_duration_seconds": 6.490029
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-talking-to-friend/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_talking-to-friend_20250925201800_1_video.insv",
+          "file_size_gb": 39.618,
+          "upload_duration_seconds": 19.881657
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-talking-to-friend/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_talking-to-friend_20250925201800_3_video.insv",
+          "file_size_gb": 0.336,
+          "upload_duration_seconds": 6.020334
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-watching-stream/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_watching-stream_20250925115600_1_audio.wav",
+          "file_size_gb": 2.0,
+          "upload_duration_seconds": 5.054001
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-watching-stream/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_watching-stream_20250925115600_2_audio.wav",
+          "file_size_gb": 0.591,
+          "upload_duration_seconds": 4.976851
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-watching-stream/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_watching-stream_20250925115600_1_video.insv",
+          "file_size_gb": 39.618,
+          "upload_duration_seconds": 18.98248
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-watching-stream/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_watching-stream_20250925115600_2_video.insv",
+          "file_size_gb": 39.619,
+          "upload_duration_seconds": 19.019015
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-watching-stream/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_watching-stream_20250925115600_3_video.insv",
+          "file_size_gb": 27.035,
+          "upload_duration_seconds": 16.984007
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-working-on-laptop/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_C30024404_working-on-laptop_20250926000500_1_audio.wav",
+          "file_size_gb": 1.299,
+          "upload_duration_seconds": 2.968593
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-working-on-laptop/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_working-on-laptop_20250926000500_1_video.insv",
+          "file_size_gb": 39.618,
+          "upload_duration_seconds": 16.947142
+        },
+        {
+          "day": "2025-09-29",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/62-9adea5f9-1e0d-4d53-8357-0b7ea45382ad-working-on-laptop/62_9adea5f9-1e0d-4d53-8357-0b7ea45382ad_IAHYA2507SVPF3_working-on-laptop_20250926000500_2_video.insv",
+          "file_size_gb": 13.62,
+          "upload_duration_seconds": 8.988364
+        }
+      ]
+    },
+    {
+      "summary": {
+        "state_blob_name": "63_state.json",
+        "home_id": "63",
+        "version": "2.0",
+        "total_data_processed_gb": 476.504,
+        "total_processing_time_seconds": 421.405502,
+        "files_processed": 49,
+        "video_files_processed": 27,
+        "audio_files_processed": 22,
+        "video_files_successful": 27,
+        "audio_files_successful": 22,
+        "files_failed": 0
+      },
+      "files": [
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-bedroom-movement/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_bedroom-movement_20250925115500_1_audio.wav",
+          "file_size_gb": 0.072,
+          "upload_duration_seconds": 3.092119
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-bedroom-movement/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_bedroom-movement_20250925115500_1_video.insv",
+          "file_size_gb": 3.08,
+          "upload_duration_seconds": 4.973354
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-brush-dogs-teeth/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_brush-dogs-teeth_20250924124000_1_audio.wav",
+          "file_size_gb": 0.246,
+          "upload_duration_seconds": 2.968535
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-brush-dogs-teeth/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_brush-dogs-teeth_20250924124000_1_video.insv",
+          "file_size_gb": 10.113,
+          "upload_duration_seconds": 7.033935
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-brushing-teeth/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_brushing-teeth_20250924075400_1_audio.wav",
+          "file_size_gb": 0.117,
+          "upload_duration_seconds": 3.133185
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-brushing-teeth/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_brushing-teeth_20250924075400_1_video.insv",
+          "file_size_gb": 4.922,
+          "upload_duration_seconds": 7.159279
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-checking-door-lock/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_checking-door-lock_20250924134200_1_audio.wav",
+          "file_size_gb": 0.283,
+          "upload_duration_seconds": 2.909892
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-checking-door-lock/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_checking-door-lock_20250924134200_1_video.insv",
+          "file_size_gb": 11.662,
+          "upload_duration_seconds": 7.157085
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-checking-smoke-detector/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_checking-smoke-detector_20250924135200_1_audio.wav",
+          "file_size_gb": 0.107,
+          "upload_duration_seconds": 2.974341
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-checking-smoke-detector/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_checking-smoke-detector_20250924135200_1_video.insv",
+          "file_size_gb": 4.488,
+          "upload_duration_seconds": 6.963992
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-cleaning-bedroom/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_cleaning-bedroom_20250924091200_1_audio.wav",
+          "file_size_gb": 0.652,
+          "upload_duration_seconds": 5.090622
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-cleaning-bedroom/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_cleaning-bedroom_20250924091200_1_video.insv",
+          "file_size_gb": 26.603,
+          "upload_duration_seconds": 12.997256
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-cleaning-keyboard/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_cleaning-keyboard_20250924002100_1_audio.wav",
+          "file_size_gb": 0.641,
+          "upload_duration_seconds": 5.048451
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-cleaning-keyboard/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_cleaning-keyboard_20250924002100_1_video.insv",
+          "file_size_gb": 26.322,
+          "upload_duration_seconds": 19.023946
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-cooking-dinner/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_cooking-dinner_20250925112200_1_audio.wav",
+          "file_size_gb": 0.377,
+          "upload_duration_seconds": 3.127113
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-cooking-dinner/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_cooking-dinner_20250925112200_1_video.insv",
+          "file_size_gb": 15.499,
+          "upload_duration_seconds": 8.96253
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-doing-dishes/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_doing-dishes_20250924122800_1_audio.wav",
+          "file_size_gb": 0.145,
+          "upload_duration_seconds": 3.091617
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-doing-dishes/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_doing-dishes_20250924122800_1_video.insv",
+          "file_size_gb": 6.017,
+          "upload_duration_seconds": 9.029314
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-eating-lunch/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_eating-lunch_20250924102300_1_audio.wav",
+          "file_size_gb": 0.283,
+          "upload_duration_seconds": 2.957201
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-eating-lunch/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_eating-lunch_20250924102300_1_video.insv",
+          "file_size_gb": 11.541,
+          "upload_duration_seconds": 7.120127
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-giving-pets-treats/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_giving-pets-treats_20250924123300_1_audio.wav",
+          "file_size_gb": 0.106,
+          "upload_duration_seconds": 3.021583
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-giving-pets-treats/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_giving-pets-treats_20250924123300_1_video.insv",
+          "file_size_gb": 4.281,
+          "upload_duration_seconds": 5.153388
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-kitchen-movement/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_kitchen-movement_20250925012000_1_audio.wav",
+          "file_size_gb": 0.06,
+          "upload_duration_seconds": 3.043567
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-kitchen-movement/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_kitchen-movement_20250925012000_1_video.insv",
+          "file_size_gb": 2.554,
+          "upload_duration_seconds": 5.189042
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-night-workout/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_night-workout_20250925013100_1_audio.wav",
+          "file_size_gb": 0.747,
+          "upload_duration_seconds": 5.087897
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-night-workout/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_night-workout_20250925013100_1_video.insv",
+          "file_size_gb": 30.769,
+          "upload_duration_seconds": 15.184773
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-organzing-files/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_organzing-files_20250925000300_1_audio.wav",
+          "file_size_gb": 0.038,
+          "upload_duration_seconds": 3.074016
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-organzing-files/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_organzing-files_20250925000300_1_video.insv",
+          "file_size_gb": 1.692,
+          "upload_duration_seconds": 4.982614
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-playing-chess/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_playing-chess_20250924204700_1_audio.wav",
+          "file_size_gb": 1.127,
+          "upload_duration_seconds": 5.062983
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-playing-chess/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_playing-chess_20250924204700_1_video.insv",
+          "file_size_gb": 39.618,
+          "upload_duration_seconds": 23.058551
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-playing-chess/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_playing-chess_20250924204700_2_video.insv",
+          "file_size_gb": 6.674,
+          "upload_duration_seconds": 7.040185
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-playing-pc-games/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_playing-pc-games_20250924191100_1_audio.wav",
+          "file_size_gb": 1.394,
+          "upload_duration_seconds": 5.007626
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-playing-pc-games/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_playing-pc-games_20250924191100_1_video.insv",
+          "file_size_gb": 39.618,
+          "upload_duration_seconds": 18.99786
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-playing-pc-games/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_playing-pc-games_20250924191100_2_video.insv",
+          "file_size_gb": 17.694,
+          "upload_duration_seconds": 9.038618
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-playing-uno/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_playing-uno_20250924222200_1_audio.wav",
+          "file_size_gb": 1.068,
+          "upload_duration_seconds": 3.009888
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-playing-uno/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_playing-uno_20250924222200_1_video.insv",
+          "file_size_gb": 39.618,
+          "upload_duration_seconds": 25.062855
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-playing-uno/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_playing-uno_20250924222200_2_video.insv",
+          "file_size_gb": 4.271,
+          "upload_duration_seconds": 4.989686
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-reading-on-tablet/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_reading-on-tablet_20250924141400_1_audio.wav",
+          "file_size_gb": 1.089,
+          "upload_duration_seconds": 5.007952
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-reading-on-tablet/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_reading-on-tablet_20250924141400_1_video.insv",
+          "file_size_gb": 39.618,
+          "upload_duration_seconds": 24.424707
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-reading-on-tablet/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_reading-on-tablet_20250924141400_2_video.insv",
+          "file_size_gb": 5.08,
+          "upload_duration_seconds": 11.784673
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-shredding-papers/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_shredding-papers_20250925001100_1_audio.wav",
+          "file_size_gb": 0.068,
+          "upload_duration_seconds": 5.019608
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-shredding-papers/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_shredding-papers_20250925001100_1_video.insv",
+          "file_size_gb": 2.912,
+          "upload_duration_seconds": 5.504818
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-stretching/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_stretching_20250924130200_1_audio.wav",
+          "file_size_gb": 0.236,
+          "upload_duration_seconds": 3.008136
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-stretching/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_stretching_20250924130200_1_video.insv",
+          "file_size_gb": 9.785,
+          "upload_duration_seconds": 7.06175
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-work-from-home/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_work-from-home_20250925002300_1_audio.wav",
+          "file_size_gb": 1.49,
+          "upload_duration_seconds": 14.046796
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-work-from-home/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_work-from-home_20250925002300_1_video.insv",
+          "file_size_gb": 39.618,
+          "upload_duration_seconds": 32.310297
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-work-from-home/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_work-from-home_20250925002300_2_video.insv",
+          "file_size_gb": 21.491,
+          "upload_duration_seconds": 13.094779
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "audio",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-working-from-home/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_C30024454_working-from-home_20250924012200_1_audio.wav",
+          "file_size_gb": 0.998,
+          "upload_duration_seconds": 7.89705
+        },
+        {
+          "day": "2025-09-28",
+          "container_id": "oslo_test_container",
+          "status": "success",
+          "file_type": "video",
+          "blob_name": "one-data-platform/63-0347e6fd-ade1-46c2-ba07-bb0419c99a90-working-from-home/63_0347e6fd-ade1-46c2-ba07-bb0419c99a90_IAHYA2507Q8TUF_working-from-home_20250924012200_1_video.insv",
+          "file_size_gb": 39.618,
+          "upload_duration_seconds": 18.579208
+        }
+      ]
+    }
+  ]
+}
