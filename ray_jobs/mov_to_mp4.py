@@ -1,8 +1,11 @@
 import subprocess
 import os
+import ray
+from typing import Dict
 from utils.logger import get_logger
 
 logger = get_logger("MOV2MP4")
+
 @ray.remote
 def convert_mov_to_mp4_task(
     input_mov_path: str,

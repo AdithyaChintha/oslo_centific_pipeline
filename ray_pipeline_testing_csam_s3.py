@@ -1516,6 +1516,130 @@ def pipeline_main_with_blob_polling(base_prefix: str, output_base_dir: str, azur
         # Sleep for the polling interval
         time.sleep(polling_interval_minutes * 60)
 
+# =============================================================================
+# AZURE UTILITY FUNCTIONS FOR S3 PIPELINE
+# =============================================================================
+
+def generate_azure_sas_url(blob_client, container_name, blob_name, account_name, account_key, expiry_days=365):
+    """Generate SAS URL for Azure blob"""
+    from datetime import datetime, timedelta
+    from azure.storage.blob import generate_blob_sas, BlobSasPermissions
+    
+    try:
+        sas_token = generate_blob_sas(
+            account_name=account_name,
+            container_name=container_name,
+            blob_name=blob_name,
+            account_key=account_key,
+            permission=BlobSasPermissions(read=True),
+            expiry=datetime.utcnow() + timedelta(days=expiry_days)
+        )
+        
+        sas_url = f"https://{account_name}.blob.core.windows.net/{container_name}/{blob_name}?{sas_token}"
+        return sas_url
+    except Exception as e:
+        logger.error(f"Failed to generate Azure SAS URL: {e}")
+        return None
+
+def create_labelstudio_task_for_azure(filename: str, azure_video_url: str,
+                                     results: dict, config: dict) -> int:
+    """
+    Create Label Studio task for Azure video using EXACT SAME format as existing pipeline.
+    
+    Args:
+        filename: Video filename
+        azure_video_url: Azure SAS URL
+        results: Processing results from process_single_shard_through_pipeline
+        config: Configuration
+        
+    Returns:
+        Label Studio task ID
+    """
+    import requests
+    import random
+    import string
+
+    def _mk_id(prefix):
+        """Generate unique IDs for predictions (same as existing function)."""
+        return f"{prefix}_{''.join(random.choices(string.ascii_letters + string.digits, k=6))}"
+
+    predictions = []
+
+    # Extract NSFW segments from results
+    nsfw_segments = []
+    nsfw_data = results.get('nsfw', {})
+    if nsfw_data.get('success') and nsfw_data.get('total_nsfw_detections', 0) > 0:
+        for seg in nsfw_data.get('flagged_segments', []) or []:
+            s = float(seg.get('start_time', 0))
+            e = float(seg.get('end_time', 0))
+            if e > s:
+                nsfw_segments.append((s, e))
+
+    # Extract minor segments from face detection
+    minor_segments = []
+    face_data = results.get('face', {})
+    if face_data.get('success'):
+        for seg in face_data.get('flagged_segments', []) or []:
+            desc = str(seg.get('description', '')).lower()
+            ftype = str(seg.get('flag_type', '')).lower()
+            if 'minor' in desc or 'minor' in ftype:
+                s = float(seg.get('start_time', 0))
+                e = float(seg.get('end_time', 0))
+                if e > s:
+                    minor_segments.append((s, e))
+
+    # Create NSFW predictions
+    for start, end in nsfw_segments:
+        predictions.append({
+            "id": _mk_id("nsfw"),
+            "type": "videoregion",
+            "value": {
+                "start": start,
+                "end": end,
+                "labels": ["nsfw"]
+            },
+            "score": 0.8
+        })
+
+    # Create minor predictions
+    for start, end in minor_segments:
+        predictions.append({
+            "id": _mk_id("minor"),
+            "type": "videoregion", 
+            "value": {
+                "start": start,
+                "end": end,
+                "labels": ["minor"]
+            },
+            "score": 0.8
+        })
+
+    # Create task data
+    task_data = {
+        "data": {
+            "video": azure_video_url,
+            "filename": filename
+        },
+        "predictions": predictions
+    }
+
+    # Send to Label Studio
+    labelstudio_config = config['labelstudio']
+    url = f"{labelstudio_config['server_url']}/api/projects/{labelstudio_config['project_id']}/tasks/"
+    
+    headers = {
+        "Authorization": f"Token {labelstudio_config['api_token']}",
+        "Content-Type": "application/json"
+    }
+
+    response = requests.post(url, json=task_data, headers=headers)
+    response.raise_for_status()
+    
+    task_id = response.json()["id"]
+    logger.info(f"Created Label Studio task: ID={task_id}")
+
+    return task_id
+
 def pipeline_s3_mode(config: dict, s3_config: dict):
     logger.info("Starting S3 polling mode")
     
@@ -1524,9 +1648,40 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
     input_prefix = s3_config['s3']['input_prefix']
     output_prefix = s3_config['s3']['output_prefix']
 
+    # Load Azure configuration for upload functionality
+    try:
+        azure_config = load_azure_config("blobfuse2_config.yaml")
+        blob_client = create_azure_blob_client(azure_config)
+        
+        # Extract Azure storage config - handle both direct and nested structures
+        if 'azstorage' in azure_config:
+            # Nested structure from blobfuse2_config.yaml
+            az_config = azure_config['azstorage']
+        else:
+            # Direct structure
+            az_config = azure_config
+            
+        container_name = az_config['container']
+        account_name = az_config['account-name']
+        account_key = az_config['account-key']
+        
+        # Load pipeline config for upload settings
+        pipeline_config = load_pipeline_config("config/pipeline_config.yaml")
+        upload_config = pipeline_config.get('blob_upload', {})
+        
+        logger.info("✅ Azure blob client configured for upload")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to configure Azure blob client: {e} - upload will be skipped")
+        azure_config = None
+        blob_client = None
+        container_name = None
+        account_name = None
+        account_key = None
+        upload_config = {}
+
     # Initialize state tracker
     state_file = os.path.join(
-        config['processing']['output_dir'],
+        s3_config['processing']['output_dir'],
         s3_config['state_tracking']['state_file']
     )
     tracker = S3VideoStateTracker(state_file, s3_config)
@@ -1581,7 +1736,7 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                     logger.info(f"Processing video {idx}/{len(new_videos)}:{filename} (ID: {video_id})")
                     try:
                         # Download
-                        temp_dir = config['processing']['temp_dir']
+                        temp_dir = s3_config['processing']['temp_dir']
                         os.makedirs(temp_dir, exist_ok=True)
                         local_video_path = os.path.join(temp_dir, filename)
 
@@ -1593,7 +1748,7 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                                 raise Exception("Download failed")
 
                         tracker.mark_downloaded(s3_key, local_video_path)
-                        output_dir = os.path.join(config['processing']['output_dir'], video_id)
+                        output_dir = os.path.join(s3_config['processing']['output_dir'], video_id)
                         os.makedirs(output_dir, exist_ok=True)
 
                         # ============= MOV TO MP4 CONVERSION =============
@@ -1644,44 +1799,53 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                         nsfw_detected = results.get('nsfw', {}).get('detected', False)
                         minors_detected = results.get('face', {}).get('minors_detected', False)
 
-                        # Upload results to S3
-                        s3_results_path = f"{output_prefix}{video_id}/"
-                        logger.info(f"Uploading results to s3://{bucket}/{s3_results_path}")
-                        with timer.time_operation(f"video.{video_id}.upload"):
-                            upload_results_to_s3(s3_client, bucket, output_dir, s3_results_path)
-                        
-                        # If we converted MOV to MP4, use the MP4 URL for Label Studio
-                        # Otherwise, use the original video URL
-                        if converted_mp4_path and os.path.exists(converted_mp4_path):
-                            # MP4 is already uploaded as part of results folder
-                            mp4_s3_key = f"{s3_results_path}{os.path.basename(converted_mp4_path)}"
-                            s3_video_url = generate_presigned_url(
-                                s3_client, bucket, mp4_s3_key,
-                                expiry_days=s3_config['s3']['presigned_url_expiry_days']
-                            )
-                            logger.info(f"✅ Using converted MP4 URL for Label Studio")
+                        # Upload results to Azure Blob Storage
+                        if blob_client and container_name and account_name and account_key:
+                            azure_output_prefix = f"{pipeline_config['azure_storage']['output_blob_prefix']}{video_id}/"
+                            logger.info(f"Uploading results to Azure blob storage: {azure_output_prefix}")
+                            with timer.time_operation(f"video.{video_id}.upload"):
+                                upload_result = upload_output_directory_with_sas_optimized(
+                                    output_dir, blob_client, container_name,
+                                    azure_output_prefix, video_id,
+                                    account_name, account_key,
+                                    365,  # sas_expiry_days
+                                    upload_config
+                                )
+                            
+                            # Generate Azure SAS URL for video
+                            if converted_mp4_path and os.path.exists(converted_mp4_path):
+                                # MP4 is already uploaded as part of results folder
+                                mp4_blob_name = f"{azure_output_prefix}{os.path.basename(converted_mp4_path)}"
+                                azure_video_url = generate_azure_sas_url(
+                                    blob_client, container_name, mp4_blob_name,
+                                    account_name, account_key, 365
+                                )
+                                logger.info(f"✅ Using converted MP4 URL for Label Studio")
+                            else:
+                                # For now, we'll use the converted MP4 as the primary video
+                                azure_video_url = None
                         else:
-                            # Use original video URL
-                            s3_video_url = generate_presigned_url(
-                                s3_client, bucket, s3_key,
-                                expiry_days=s3_config['s3']['presigned_url_expiry_days']
-                            )
+                            logger.warning("⚠️ Azure configuration missing - skipping upload")
+                            azure_output_prefix = None
+                            azure_video_url = None
                         
                         # Create Label Studio task
-                        if s3_config['labelstudio']['auto_create_tasks']:
+                        if s3_config['labelstudio']['auto_create_tasks'] and azure_video_url:
                             logger.info("Creating Label Studio task...")
                             with timer.time_operation(f"video.{video_id}.labelstudio_task"):
-                                task_id = create_labelstudio_task_for_s3(
-                                    filename, s3_video_url, results, s3_config
+                                task_id = create_labelstudio_task_for_azure(
+                                    filename, azure_video_url, results, s3_config
                                 )
                             logger.info(f"Label Studio task created: ID={task_id}")
                         else:
                             task_id = None
+                            if not azure_video_url:
+                                logger.warning("⚠️ No Azure video URL available for Label Studio task creation")
                         
                          # Mark completed
                         tracker.mark_completed(s3_key, {
-                            's3_video_url': s3_video_url,
-                            's3_results_path': s3_results_path,
+                            'azure_video_url': azure_video_url,
+                            'azure_results_path': azure_output_prefix,
                             's3_key': s3_key,
                             'output_path': output_dir,
                             'labelstudio_task_id': task_id,
@@ -1689,7 +1853,7 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                             'minors_detected': minors_detected
                         })
                          # Cleanup
-                        if config['processing'].get('cleanup_after_processing', True):
+                        if s3_config['processing'].get('cleanup_after_processing', True):
                             os.remove(local_video_path)
                             os.remove(output_dir)
 
@@ -1748,8 +1912,9 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
 
                     except Exception as e:
                         logger.warning(f"Failed to export timing data: {e}")
-                                # Print summary
-                                tracker.print_summary()
+                
+                # Print summary
+                tracker.print_summary()
 
             # Wait for next cycle
             logger.info(f"Waiting {polling_interval} minutes for next poll...")
@@ -3297,7 +3462,7 @@ def create_multiview_consolidated_predictions(view_results):
     pii_types = set()     # label choices for pii_type_audio (e.g., "Addresses", "Full names"...)
 
     # Consolidate across all views (audio is shared but many pipelines attach under each view)
-    fDoor view_name, view_result in view_results.items():
+    for view_name, view_result in view_results.items():
         if not view_result.get("success", True):
             continue
         audio_list = view_result.get("audio") or []
