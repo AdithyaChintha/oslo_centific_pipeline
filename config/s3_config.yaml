@@ -1,0 +1,29 @@
+s3:
+  aws_access_key_id: "${AWS_ACCESS_KEY_ID}"
+  aws_secret_access_key: "${AWS_SECRET_ACCESS_KEY}"
+  region: "us-west-2"
+  bucket_name: "my-video-bucket"
+  input_prefix: "videos/"
+  output_prefix: "results/"
+  presigned_url_expiry_days: 7
+
+state_tracking:
+  enabled: true
+  state_file: "s3_state.json"
+  max_retry_attempts: 3
+
+polling:
+  enabled: true
+  interval_minutes: 5
+  max_videos_per_cycle: 10
+
+processing:
+  temp_dir: "./temp_downloads"
+  output_dir: "./output"
+  cleanup_after_processing: true
+
+labelstudio:
+  api_url: "http://localhost:8080"
+  api_key: "${LABELSTUDIO_API_KEY}"
+  project_id: 1
+  auto_create_tasks: true

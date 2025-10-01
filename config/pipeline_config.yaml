@@ -2,6 +2,8 @@
 # This file configures the batch processing, polling, and storage settings
 
 # Azure Blob Storage Configuration
+execution:
+    mode: "blob_polling"  # Options: integrated, standalone, multi_chunks, multi_sessions, blob_polling, s3
 azure_storage:
   # Input directory configuration
   input_blob_prefix: "one-data-platform/"  # Default blob prefix to search for videos
