@@ -72,7 +72,7 @@ from ray_jobs.face_age_detector_optimized import process_video_chunks_for_face_d
 from ray_jobs.labelstudio_tasks import (assign_views_to_labelstudio_positions, generate_multiview_4view_labelstudio_task,
     generate_consolidated_shard_labelstudio_task, 
     import_consolidated_tasks_to_labelstudio,
-    update_labelstudio_tasks_with_video_domain_and_activity, create_labelstudio_task_for_s3)
+    update_labelstudio_tasks_with_video_domain_and_activity, create_labelstudio_task_for_s3_mode)
    
 from ray_jobs.video_unwarp_task import erp_unwarp_task
 from ray_jobs.video_unwarp_task import insv_unwarp_task
@@ -1542,183 +1542,6 @@ def generate_azure_sas_url(blob_client, container_name, blob_name, account_name,
         logger.error(f"Failed to generate Azure SAS URL: {e}")
         return None
 
-def create_labelstudio_task_for_azure(
-    filename: str,
-    azure_video_url: str,
-    results: dict,
-    config: dict,
-    s3_key: str = None,
-    source_s3_key: str = None,
-    source_video_id: str = None,
-    clip_id: str = None,
-    start_ms: int = None,
-    end_ms: int = None,
-    duration_ms: int = None,
-    bucket: str = None,
-    movement_loader = None
-) -> int:
-    """
-    Create Label Studio task for Azure video with comprehensive clip metadata.
-
-    Args:
-        filename: Display filename (e.g., "video_name_1000-1008.mov")
-        azure_video_url: Azure SAS URL for video streaming
-        results: Processing results from process_single_shard_through_pipeline
-        config: Configuration dictionary
-        s3_key: Full S3 key path (e.g., "input-videos/video_name/1000-1008.mov")
-        source_s3_key: Full S3 key path to original source video
-                      (e.g., "input-videos/9360653015/00eEzUmL_9360653015.mp4")
-        source_video_id: Source video folder name (e.g., "video_name")
-        clip_id: Clip identifier (e.g., "1000-1008")
-        start_ms: Clip start time in milliseconds (e.g., 1000)
-        end_ms: Clip end time in milliseconds (e.g., 1008)
-        duration_ms: Clip duration in milliseconds (e.g., 8)
-        bucket: S3 bucket name
-        movement_loader: MovementMetadataLoader instance for looking up movement data
-
-    Returns:
-        Label Studio task ID (int)
-    """
-    import requests
-    import random
-    import string
-
-    def _mk_id(prefix):
-        """Generate unique IDs for predictions (same as existing function)."""
-        return f"{prefix}_{''.join(random.choices(string.ascii_letters + string.digits, k=6))}"
-
-    predictions = []
-
-    # Extract NSFW segments from results
-    nsfw_segments = []
-    nsfw_data = results.get('nsfw', {})
-    if nsfw_data.get('success') and nsfw_data.get('total_nsfw_detections', 0) > 0:
-        for seg in nsfw_data.get('flagged_segments', []) or []:
-            s = float(seg.get('start_time', 0))
-            e = float(seg.get('end_time', 0))
-            if e > s:
-                nsfw_segments.append((s, e))
-
-    # Extract minor segments from face detection
-    minor_segments = []
-    face_data = results.get('face', {})
-    if face_data.get('success'):
-        for seg in face_data.get('flagged_segments', []) or []:
-            desc = str(seg.get('description', '')).lower()
-            ftype = str(seg.get('flag_type', '')).lower()
-            if 'minor' in desc or 'minor' in ftype:
-                s = float(seg.get('start_time', 0))
-                e = float(seg.get('end_time', 0))
-                if e > s:
-                    minor_segments.append((s, e))
-
-    # Create NSFW predictions
-    for start, end in nsfw_segments:
-        predictions.append({
-            "id": _mk_id("nsfw"),
-            "type": "videoregion",
-            "value": {
-                "start": start,
-                "end": end,
-                "labels": ["nsfw"]
-            },
-            "score": 0.8
-        })
-
-    # Create minor predictions
-    for start, end in minor_segments:
-        predictions.append({
-            "id": _mk_id("minor"),
-            "type": "videoregion", 
-            "value": {
-                "start": start,
-                "end": end,
-                "labels": ["minor"]
-            },
-            "score": 0.8
-        })
-
-    # Add model execution status to metadata
-    model_status = {}
-
-    # NSFW detection status - True if detected, None if not detected or failed
-    if nsfw_data.get('success'):
-        nsfw_count = nsfw_data.get('total_nsfw_detections', 0)
-        model_status['nsfw_detection'] = True if nsfw_count > 0 else None
-    else:
-        model_status['nsfw_detection'] = None
-
-    # Minor detection status - count if detected, None if not detected or failed
-    if face_data.get('success'):
-        potential_minors = 0
-        for seg in face_data.get('flagged_segments', []) or []:
-            potential_minors += seg.get('metadata', {}).get('potential_minors', 0)
-
-        model_status['minor_detection'] = potential_minors if potential_minors > 0 else None
-    else:
-        model_status['minor_detection'] = None
-
-    # Format S3 keys as full URIs: s3://bucket/path
-    s3_uri = f"s3://{bucket}/{s3_key}" if bucket and s3_key else None
-    source_s3_uri = f"s3://{bucket}/{source_s3_key}" if bucket and source_s3_key else None
-
-    movement_metadata = None
-    if movement_loader and movement_loader.is_loaded() and s3_uri:
-        movement_metadata = movement_loader.get_movement_metadata(s3_uri)
-        if movement_metadata:
-            logger.debug(f"Found movement metadata for {s3_uri}")
-        else:
-            logger.debug(f"No movement metadata found for {s3_uri}")
-
-    # Create task data
-    task_data = {
-        "data": {
-            "video": azure_video_url,
-            "filename": filename,
-            "s3_key": s3_uri,
-            "source_s3_key": source_s3_uri,
-            "source_video_id": source_video_id,
-            "clip_id": clip_id,
-            "start_ms": start_ms,
-            "end_ms": end_ms,
-            "duration_ms": duration_ms,
-            "azure_url": azure_video_url,
-            "model_status": model_status,
-            "preannotations": movement_metadata
-        },
-        "predictions": predictions
-    }
-
-    # Send to Label Studio
-    labelstudio_config = config['labelstudio']
-
-    # Build URL - handle both 'server_url' and 'api_url' formats
-    if 'server_url' in labelstudio_config:
-        url = f"{labelstudio_config['server_url']}/api/projects/{labelstudio_config['project_id']}/tasks/"
-    else:
-        # api_url format includes base path
-        base_url = labelstudio_config['api_url'].rstrip('/')
-        url = f"{base_url}/{labelstudio_config['project_id']}/tasks/"
-
-    # Handle both 'api_token' and 'api_key' naming
-    api_token = labelstudio_config.get('api_token') or labelstudio_config.get('api_key')
-
-    headers = {
-        "Authorization": f"Token {api_token}",
-        "Content-Type": "application/json"
-    }
-
-    logger.info(f"Label Studio task metadata: filename={filename}, "
-               f"source_video_id={source_video_id}, clip_id={clip_id}, "
-               f"duration={duration_ms}ms")
-
-    response = requests.post(url, json=task_data, headers=headers)
-    response.raise_for_status()
-    
-    task_id = response.json()["id"]
-    logger.info(f"Created Label Studio task: ID={task_id}")
-
-    return task_id
 
 def pipeline_s3_mode(config: dict, s3_config: dict):
     logger.info("Starting S3 polling mode")
@@ -1998,7 +1821,7 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                         if s3_config['labelstudio']['auto_create_tasks'] and azure_video_url:
                             logger.info("Creating Label Studio task...")
                             with timer.time_operation(f"video.{video_id}.labelstudio_task"):
-                                task_id = create_labelstudio_task_for_azure(
+                                task_id = create_labelstudio_task_for_s3_mode(
                                 display_filename,  # Use formatted filename
                                 azure_video_url,
                                 results,

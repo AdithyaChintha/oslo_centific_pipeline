@@ -1340,22 +1340,42 @@ def extract_people_count_prediction_from_consolidated(consolidated_results):
     return str(max_unique_people) if max_unique_people > 0 else "0"
 
 
-def create_labelstudio_task_for_s3(filename: str, s3_video_url: str,
-                                   results: dict, config: dict) -> int:
+def create_labelstudio_task_for_s3_mode(
+    filename: str,
+    azure_video_url: str,
+    results: dict,
+    config: dict,
+    s3_key: str = None,
+    source_s3_key: str = None,
+    source_video_id: str = None,
+    clip_id: str = None,
+    start_ms: int = None,
+    end_ms: int = None,
+    duration_ms: int = None,
+    bucket: str = None,
+    movement_loader = None
+) -> int:
     """
-    Create Label Studio task for S3 video using EXACT SAME format as existing pipeline.
-
-    Uses the same prediction format as create_multiview_consolidated_predictions()
-    for perfect compatibility with existing Label Studio project.
+    Create Label Studio task for Azure video with comprehensive clip metadata.
 
     Args:
-        filename: Video filename
-        s3_video_url: Pre-signed S3 URL
+        filename: Display filename (e.g., "video_name_1000-1008.mov")
+        azure_video_url: Azure SAS URL for video streaming
         results: Processing results from process_single_shard_through_pipeline
-        config: Configuration
+        config: Configuration dictionary
+        s3_key: Full S3 key path (e.g., "input-videos/video_name/1000-1008.mov")
+        source_s3_key: Full S3 key path to original source video
+                      (e.g., "input-videos/9360653015/00eEzUmL_9360653015.mp4")
+        source_video_id: Source video folder name (e.g., "video_name")
+        clip_id: Clip identifier (e.g., "1000-1008")
+        start_ms: Clip start time in milliseconds (e.g., 1000)
+        end_ms: Clip end time in milliseconds (e.g., 1008)
+        duration_ms: Clip duration in milliseconds (e.g., 8)
+        bucket: S3 bucket name
+        movement_loader: MovementMetadataLoader instance for looking up movement data
 
     Returns:
-        Label Studio task ID
+        Label Studio task ID (int)
     """
     import requests
     import random
@@ -1390,173 +1410,109 @@ def create_labelstudio_task_for_s3(filename: str, s3_video_url: str,
                 if e > s:
                     minor_segments.append((s, e))
 
-    # NSFW Predictions (EXACT format from create_multiview_consolidated_predictions)
-    if nsfw_segments:
-        nsfw_segments.sort(key=lambda x: x[0])
-        s, e = nsfw_segments[0]  # Use first segment for start/end times
-        s_min, s_sec = int(s // 60), int(s % 60)
-        e_min, e_sec = int(e // 60), int(e % 60)
-
-        # val_nudity_video: Yes
+    # Create NSFW predictions
+    for start, end in nsfw_segments:
         predictions.append({
-            "id": _mk_id("nudity_yes"),
-            "type": "choices",
-            "value": {"choices": ["Yes"]},
-            "model_version": "auto_preannotator_v1",
-            "from_name": "val_nudity_video",
-            "to_name": "video_left"
+            "id": _mk_id("nsfw"),
+            "type": "videoregion",
+            "value": {
+                "start": start,
+                "end": end,
+                "labels": ["nsfw"]
+            },
+            "score": 0.8
         })
 
-        # Start/End times (minute/second format)
-        predictions.extend([
-            {
-                "id": _mk_id("nudity_smin"),
-                "type": "number",
-                "value": {"number": s_min},
-                "model_version": "auto_preannotator_v1",
-                "from_name": "nudity_start_minute",
-                "to_name": "video_left"
+    # Create minor predictions
+    for start, end in minor_segments:
+        predictions.append({
+            "id": _mk_id("minor"),
+            "type": "videoregion", 
+            "value": {
+                "start": start,
+                "end": end,
+                "labels": ["minor"]
             },
-            {
-                "id": _mk_id("nudity_ssec"),
-                "type": "number",
-                "value": {"number": s_sec},
-                "model_version": "auto_preannotator_v1",
-                "from_name": "nudity_start_second",
-                "to_name": "video_left"
-            },
-            {
-                "id": _mk_id("nudity_emin"),
-                "type": "number",
-                "value": {"number": e_min},
-                "model_version": "auto_preannotator_v1",
-                "from_name": "nudity_end_minute",
-                "to_name": "video_left"
-            },
-            {
-                "id": _mk_id("nudity_esec"),
-                "type": "number",
-                "value": {"number": e_sec},
-                "model_version": "auto_preannotator_v1",
-                "from_name": "nudity_end_second",
-                "to_name": "video_left"
-            }
-        ])
+            "score": 0.8
+        })
+
+    # Add model execution status to metadata
+    model_status = {}
+
+    # NSFW detection status - True if detected, None if not detected or failed
+    if nsfw_data.get('success'):
+        nsfw_count = nsfw_data.get('total_nsfw_detections', 0)
+        model_status['nsfw_detection'] = True if nsfw_count > 0 else None
     else:
-        # No NSFW detected
-        predictions.append({
-            "id": _mk_id("nudity_no"),
-            "type": "choices",
-            "value": {"choices": ["No"]},
-            "model_version": "auto_preannotator_v1",
-            "from_name": "val_nudity_video",
-            "to_name": "video_left"
-        })
+        model_status['nsfw_detection'] = None
 
-    # Minors Predictions (EXACT format from create_multiview_consolidated_predictions)
-    if minor_segments:
-        minor_segments.sort(key=lambda x: x[0])
-        s, e = minor_segments[0]  # Use first segment for start/end times
-        s_min, s_sec = int(s // 60), int(s % 60)
-        e_min, e_sec = int(e // 60), int(e % 60)
+    # Minor detection status - count if detected, None if not detected or failed
+    if face_data.get('success'):
+        potential_minors = 0
+        for seg in face_data.get('flagged_segments', []) or []:
+            potential_minors += seg.get('metadata', {}).get('potential_minors', 0)
 
-        # val_minors_video: Yes
-        predictions.append({
-            "id": _mk_id("minors_yes"),
-            "type": "choices",
-            "value": {"choices": ["Yes"]},
-            "model_version": "auto_preannotator_v1",
-            "from_name": "val_minors_video",
-            "to_name": "video_left"
-        })
-
-        # Start/End times (minute/second format)
-        predictions.extend([
-            {
-                "id": _mk_id("minors_smin"),
-                "type": "number",
-                "value": {"number": s_min},
-                "model_version": "auto_preannotator_v1",
-                "from_name": "minors_start_minute",
-                "to_name": "video_left"
-            },
-            {
-                "id": _mk_id("minors_ssec"),
-                "type": "number",
-                "value": {"number": s_sec},
-                "model_version": "auto_preannotator_v1",
-                "from_name": "minors_start_second",
-                "to_name": "video_left"
-            },
-            {
-                "id": _mk_id("minors_emin"),
-                "type": "number",
-                "value": {"number": e_min},
-                "model_version": "auto_preannotator_v1",
-                "from_name": "minors_end_minute",
-                "to_name": "video_left"
-            },
-            {
-                "id": _mk_id("minors_esec"),
-                "type": "number",
-                "value": {"number": e_sec},
-                "model_version": "auto_preannotator_v1",
-                "from_name": "minors_end_second",
-                "to_name": "video_left"
-            }
-        ])
+        model_status['minor_detection'] = potential_minors if potential_minors > 0 else None
     else:
-        # No minors detected
-        predictions.append({
-            "id": _mk_id("minors_no"),
-            "type": "choices",
-            "value": {"choices": ["No"]},
-            "model_version": "auto_preannotator_v1",
-            "from_name": "val_minors_video",
-            "to_name": "video_left"
-        })
+        model_status['minor_detection'] = None
 
-    # Optional: Auto-fill comment (same as existing function)
-    nsfw_yes = any(p.get("from_name") == "val_nudity_video" and "Yes" in p["value"]["choices"]
-                   for p in predictions if p["type"] == "choices")
-    minors_yes = any(p.get("from_name") == "val_minors_video" and "Yes" in p["value"]["choices"]
-                     for p in predictions if p["type"] == "choices")
+    # Format S3 keys as full URIs: s3://bucket/path
+    s3_uri = f"s3://{bucket}/{s3_key}" if bucket and s3_key else None
+    source_s3_uri = f"s3://{bucket}/{source_s3_key}" if bucket and source_s3_key else None
 
-    if nsfw_yes or minors_yes:
-        txt = "nsfw and minor" if (nsfw_yes and minors_yes) else ("nsfw" if nsfw_yes else "minor")
-        predictions.append({
-            "id": _mk_id("comment_video"),
-            "type": "textarea",
-            "value": {"text": [txt]},
-            "model_version": "auto_preannotator_v1",
-            "from_name": "compliance_video_comment",
-            "to_name": "md_home_id"
-        })
+    movement_metadata = None
+    if movement_loader and movement_loader.is_loaded() and s3_uri:
+        movement_metadata = movement_loader.get_movement_metadata(s3_uri)
+        if movement_metadata:
+            logger.debug(f"Found movement metadata for {s3_uri}")
+        else:
+            logger.debug(f"No movement metadata found for {s3_uri}")
 
-    # TODO: Change label studio JSON based on project
+    # Create task data
     task_data = {
         "data": {
-            "video": s3_video_url,
-            "video_filename": filename
+            "video": azure_video_url,
+            "filename": filename,
+            "s3_key": s3_uri,
+            "source_s3_key": source_s3_uri,
+            "source_video_id": source_video_id,
+            "clip_id": clip_id,
+            "start_ms": start_ms,
+            "end_ms": end_ms,
+            "duration_ms": duration_ms,
+            "azure_url": azure_video_url,
+            "model_status": model_status,
+            "preannotations": movement_metadata
         },
-        "predictions": [{
-            "result": predictions,
-            "model_version": "auto_preannotator_v1"
-        }]
+        "predictions": predictions
     }
 
     # Send to Label Studio
-    api_url = config['labelstudio']['api_url']
-    api_token = config['labelstudio']['api_token']
-    project_id = config['labelstudio']['project_id']
+    labelstudio_config = config['labelstudio']
 
-    response = requests.post(
-        f"{api_url}/api/projects/{project_id}/tasks",
-        headers={"Authorization": f"Token {api_token}"},
-        json=task_data
-    )
+    # Build URL - handle both 'server_url' and 'api_url' formats
+    if 'server_url' in labelstudio_config:
+        url = f"{labelstudio_config['server_url']}/api/projects/{labelstudio_config['project_id']}/tasks/"
+    else:
+        # api_url format includes base path
+        base_url = labelstudio_config['api_url'].rstrip('/')
+        url = f"{base_url}/{labelstudio_config['project_id']}/tasks/"
 
+    # Handle both 'api_token' and 'api_key' naming
+    api_token = labelstudio_config.get('api_token') or labelstudio_config.get('api_key')
+
+    headers = {
+        "Authorization": f"Token {api_token}",
+        "Content-Type": "application/json"
+    }
+
+    logger.info(f"Label Studio task metadata: filename={filename}, "
+               f"source_video_id={source_video_id}, clip_id={clip_id}, "
+               f"duration={duration_ms}ms")
+
+    response = requests.post(url, json=task_data, headers=headers)
     response.raise_for_status()
+    
     task_id = response.json()["id"]
     logger.info(f"Created Label Studio task: ID={task_id}")
 
