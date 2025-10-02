@@ -408,3 +408,77 @@ def generate_performance_summary(hierarchical_timing_data: Dict) -> Dict:
         "total_models_executed": len(model_stats),
         "total_execution_time": round(sum(all_execution_times), 2)
     }
+
+
+def export_s3_timing_to_csv(raw_timing_data: Dict, output_dir: str, video_id: str) -> str:
+    """
+    Export S3 pipeline timing data to a simple flat CSV file.
+    Designed for single-video S3 processing (no shards, no hierarchical structure).
+
+    Args:
+        raw_timing_data: Raw timing data from timer.get_timing_data()
+        output_dir: Directory to save CSV file
+        video_id: Video identifier for filename
+
+    Returns:
+        Path to generated CSV file
+    """
+    import csv
+    import os
+    from pathlib import Path
+
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    csv_filename = output_path / f"{video_id}_timing.csv"
+
+    # Prepare CSV rows
+    rows = []
+
+    for operation_id, timing_data in raw_timing_data.items():
+        # Parse operation_id to extract operation type and model name
+        # Expected formats:
+        # - "video.{video_id}.upload"
+        # - "video.{video_id}.shard.0.front.nsfw_detection"
+        # - "video.{video_id}.shard.0.front.face_detection"
+
+        parts = operation_id.split('.')
+
+        if len(parts) >= 3:
+            operation_type = "unknown"
+            model_name = ""
+
+            if len(parts) == 3:
+                # Video-level operation like upload
+                operation_type = parts[2]
+                model_name = parts[2]
+            elif len(parts) >= 6 and parts[2] == "shard":
+                # Model operation: video.{video_id}.shard.{index}.{view}.{model}
+                operation_type = "model_execution"
+                model_name = parts[5]
+
+            row = {
+                "video_id": video_id,
+                "operation_id": operation_id,
+                "operation_type": operation_type,
+                "model_name": model_name,
+                "execution_time": timing_data.get("execution_time", 0),
+                "start_time": timing_data.get("start_time", ""),
+                "end_time": timing_data.get("end_time", ""),
+                "status": timing_data.get("status", ""),
+                "timing_id": timing_data.get("timing_id", operation_id)
+            }
+            rows.append(row)
+
+    # Write CSV
+    if rows:
+        fieldnames = [
+            "video_id", "operation_id", "operation_type", "model_name",
+            "execution_time", "start_time", "end_time", "status", "timing_id"
+        ]
+
+        with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+    return str(csv_filename)
