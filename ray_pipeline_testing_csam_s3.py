@@ -1787,6 +1787,26 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                         nsfw_detected = results.get('nsfw', {}).get('detected', False)
                         minors_detected = results.get('face', {}).get('minors_detected', False)
 
+                        # Save consolidated results and Label Studio JSON to output directory (before upload)
+                        logger.info("Saving consolidated results and Label Studio JSON to output directory...")
+                        saved_files = save_s3_consolidated_results_and_labelstudio(
+                            output_dir=output_dir,
+                            results=results,
+                            video_id=video_id,
+                            s3_key=s3_key,
+                            source_s3_key=source_s3_key,
+                            source_video_id=source_video_id_display,
+                            clip_id=clip_id,
+                            start_ms=start_ms,
+                            end_ms=end_ms,
+                            duration_ms=duration_ms,
+                            azure_video_url=None,  # Will be set after upload
+                            s3_config=s3_config,
+                            movement_loader=movement_loader,
+                            bucket=bucket
+                        )
+                        logger.info(f"Saved files: {saved_files}")
+
                         # Upload results to Azure Blob Storage
                         if blob_client and container_name and account_name and account_key:
                             # Use base prefix only - upload function will add video_id
@@ -1800,7 +1820,7 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                                     365,  # sas_expiry_days
                                     upload_config
                                 )
-                            
+
                             # Generate Azure SAS URL for video
                             if converted_mp4_path and os.path.exists(converted_mp4_path):
                                 # MP4 is uploaded to: prefix/video_id/filename
@@ -1811,6 +1831,25 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                                     account_name, account_key, 365
                                 )
                                 logger.info(f"✅ Using converted MP4 URL for Label Studio: {mp4_blob_name}")
+
+                                # Update Label Studio JSON with Azure video URL and re-upload
+                                if saved_files.get('labelstudio_json') and os.path.exists(saved_files['labelstudio_json']):
+                                    logger.info("Updating Label Studio JSON with Azure video URL...")
+                                    with open(saved_files['labelstudio_json'], 'r') as f:
+                                        labelstudio_task = json.load(f)
+                                    labelstudio_task['data']['video'] = azure_video_url
+                                    with open(saved_files['labelstudio_json'], 'w') as f:
+                                        json.dump(labelstudio_task, f, indent=2)
+                                    logger.info(f"Updated Label Studio JSON with Azure URL: {azure_video_url}")
+
+                                    # Re-upload the updated Label Studio JSON to Azure
+                                    labelstudio_filename = os.path.basename(saved_files['labelstudio_json'])
+                                    labelstudio_blob_name = f"{azure_output_prefix.rstrip('/')}/{video_id}/{labelstudio_filename}"
+                                    logger.info(f"Re-uploading updated Label Studio JSON to: {labelstudio_blob_name}")
+                                    blob_client_ls = blob_client.get_blob_client(container=container_name, blob=labelstudio_blob_name)
+                                    with open(saved_files['labelstudio_json'], 'rb') as data:
+                                        blob_client_ls.upload_blob(data, overwrite=True)
+                                    logger.info(f"✅ Updated Label Studio JSON uploaded to Azure")
                             else:
                                 # For now, we'll use the converted MP4 as the primary video
                                 azure_video_url = None
@@ -3202,7 +3241,7 @@ def generate_consolidated_model_results_json(shard_output_dir, shard_number, vie
     """
     Generate consolidated JSON file with view1 and view2 as top-level keys,
     containing all individual model results.
-    
+
     Args:
         shard_output_dir: Directory to save the consolidated JSON
         shard_number: Shard number for filename
@@ -3210,7 +3249,7 @@ def generate_consolidated_model_results_json(shard_output_dir, shard_number, vie
         view2_results: Results from view 2 processing (may be empty for single-view)
         total_shards: Total number of shards in the processing job
         video_name: Name of the video being processed
-        
+
     Returns:
         Path to the generated consolidated JSON file
     """
@@ -3225,7 +3264,7 @@ def generate_consolidated_model_results_json(shard_output_dir, shard_number, vie
         "is_first_shard_processed": False,
         "is_last_shard_processed": False
     })
-    
+
     consolidated_data = {
         "shard_info": {
             "shard_number": shard_number,
@@ -3247,7 +3286,7 @@ def generate_consolidated_model_results_json(shard_output_dir, shard_number, vie
             "signal_quality": view1_results.get('signal_quality', {})
         }
     }
-    
+
     # Add view2 data if available
     if view2_results:
         consolidated_data["view2"] = {
@@ -3265,14 +3304,145 @@ def generate_consolidated_model_results_json(shard_output_dir, shard_number, vie
         consolidated_data["view2"] = {
             "processing_status": "not_processed_single_view_mode"
         }
-    
+
     # Save consolidated JSON
     json_file = os.path.join(shard_output_dir, f"shard_{shard_number}_consolidated_model_results.json")
     with open(json_file, 'w') as f:
         json.dump(consolidated_data, f, indent=2)
-    
+
     logger.info(f"Consolidated model results saved to: {json_file}")
     return json_file
+
+
+def save_s3_consolidated_results_and_labelstudio(output_dir, results, video_id, s3_key,
+                                                  source_s3_key=None, source_video_id=None,
+                                                  clip_id=None, start_ms=None, end_ms=None,
+                                                  duration_ms=None, azure_video_url=None,
+                                                  s3_config=None, movement_loader=None, bucket=None):
+    """
+    Save consolidated model results and Label Studio task JSON in the output directory.
+    This mirrors the blob polling pipeline functionality for S3 mode.
+
+    Args:
+        output_dir: Output directory path
+        results: Model results dictionary from pipeline
+        video_id: Video identifier
+        s3_key: S3 key of the processed clip
+        source_s3_key: S3 key of the source video
+        source_video_id: Source video identifier
+        clip_id: Clip identifier
+        start_ms: Clip start time in milliseconds
+        end_ms: Clip end time in milliseconds
+        duration_ms: Clip duration in milliseconds
+        azure_video_url: Azure video URL for Label Studio
+        s3_config: S3 configuration dictionary
+        movement_loader: Movement metadata loader instance
+        bucket: S3 bucket name
+
+    Returns:
+        Dictionary with paths to saved files
+    """
+    logger.info(f"Saving consolidated results and Label Studio JSON for {video_id}")
+
+    saved_files = {
+        'consolidated_json': None,
+        'labelstudio_json': None
+    }
+
+    # 1. Save consolidated model results JSON
+    consolidated_data = {
+        "video_info": {
+            "video_id": video_id,
+            "s3_key": s3_key,
+            "source_s3_key": source_s3_key,
+            "source_video_id": source_video_id,
+            "clip_id": clip_id,
+            "start_ms": start_ms,
+            "end_ms": end_ms,
+            "duration_ms": duration_ms,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "processing_mode": "s3"
+        },
+        "model_results": {
+            "audio": results.get('audio', {}),
+            "yolo": results.get('yolo', {}),
+            "scene": results.get('scene', {}),
+            "nsfw": results.get('nsfw', {}),
+            "motion": results.get('motion', {}),
+            "face": results.get('face', {}),
+            "clap": results.get('clap', {}),
+            "signal_quality": results.get('signal_quality', {})
+        }
+    }
+
+    consolidated_json_path = os.path.join(output_dir, f"{video_id}_consolidated_model_results.json")
+    with open(consolidated_json_path, 'w') as f:
+        json.dump(consolidated_data, f, indent=2)
+
+    saved_files['consolidated_json'] = consolidated_json_path
+    logger.info(f"Consolidated model results saved to: {consolidated_json_path}")
+
+    # 2. Save Label Studio task JSON if Azure video URL is available
+    if azure_video_url and s3_config and s3_config.get('labelstudio', {}).get('auto_create_tasks'):
+        labelstudio_task_path = os.path.join(output_dir, f"{video_id}_labelstudio_task.json")
+
+        # Build task JSON structure (simplified version for S3 mode)
+        task = {
+            "data": {
+                "video": azure_video_url,
+                "video_id": video_id,
+                "s3_key": s3_key,
+                "source_video_id": source_video_id,
+                "clip_id": clip_id,
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+                "duration_ms": duration_ms
+            },
+            "predictions": [{
+                "model_version": "s3_pipeline_v1",
+                "result": [],
+                "score": 0.0
+            }],
+            "meta": {
+                "processing_mode": "s3",
+                "bucket": bucket,
+                "timestamp": datetime.utcnow().isoformat() + "Z"
+            }
+        }
+
+        # Add model predictions if available
+        if results.get('nsfw', {}).get('detected'):
+            task['predictions'][0]['result'].append({
+                "type": "choices",
+                "value": {"choices": ["NSFW Detected"]},
+                "from_name": "nsfw_detection",
+                "to_name": "video"
+            })
+
+        if results.get('face', {}).get('minors_detected'):
+            task['predictions'][0]['result'].append({
+                "type": "choices",
+                "value": {"choices": ["Minors Detected"]},
+                "from_name": "face_detection",
+                "to_name": "video"
+            })
+
+        # Add movement metadata if available
+        if movement_loader:
+            try:
+                movement_data = movement_loader.get_metadata_for_clip(s3_key)
+                if movement_data:
+                    task['data']['movement_metadata'] = movement_data
+            except Exception as e:
+                logger.warning(f"Failed to add movement metadata: {e}")
+
+        with open(labelstudio_task_path, 'w') as f:
+            json.dump(task, f, indent=2)
+
+        saved_files['labelstudio_json'] = labelstudio_task_path
+        logger.info(f"Label Studio task JSON saved to: {labelstudio_task_path}")
+
+    return saved_files
 
 def generate_final_combined_model_results_json(output_dir, consolidated_json_paths):
     """

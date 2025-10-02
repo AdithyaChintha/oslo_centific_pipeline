@@ -1,0 +1,391 @@
+# Pyrenees Video Processing Pipeline
+
+## Overview
+
+The Pyrenees pipeline is a mode that is added to our comprehensive video processing system that analyzes videos using multiple AI models and generates annotations for Label Studio. It supports one mode:
+
+1. **S3 Mode**: Processes video clips from S3 buckets with movement metadata integration
+
+## Architecture
+
+### Core Components
+
+- **Ray Pipeline** (`ray_pipeline_testing_csam_s3.py`): Main orchestration pipeline
+- **AI Models**:
+  - NSFW content detection
+  - Face detection & age estimation
+
+### Output Structure
+
+```
+output_dir/
+├── {video_id}_consolidated_model_results.json    # All model results
+├── {video_id}_labelstudio_task.json             # Label Studio task
+├── nsfw_output/                                 # NSFW detection results
+├── face_output/                                 # Face detection results
+```
+
+## Prerequisites
+
+### System Requirements
+
+- Python 3.8+
+- CUDA-capable GPU (recommended for faster processing)
+- Ray cluster (recommended for distributed processing)
+
+### Python Dependencies
+
+Install required packages:
+
+```bash
+pip install -r requirements.txt
+```
+
+Key dependencies:
+- `ray` - Distributed computing
+- `boto3` - AWS S3 integration
+- `azure-storage-blob` - Azure Blob Storage
+- `torch` - PyTorch for AI models
+- `opencv-python` - Video processing
+- `pandas` - Data processing
+- `pyarrow` - Parquet file handling
+
+## Configuration
+
+### 1. Environment Variables
+
+Create a `.env` file or export these variables:
+
+```bash
+# AWS S3 Configuration (for S3 mode)
+export AWS_ACCESS_KEY_ID="your_aws_access_key"
+export AWS_SECRET_ACCESS_KEY="your_aws_secret_key"
+
+```
+
+### 2. S3 Configuration File
+
+Modify `config/s3_config.yaml` if any changes are needed:
+
+```yaml
+s3:
+  # AWS Credentials (optional if using env vars)
+  aws_access_key_id: "your_key"
+  aws_secret_access_key: "your_secret"
+  region_name: "us-east-1"
+
+  # S3 Bucket Configuration
+  bucket_name: "your-bucket-name"
+  input_prefix: "outputs/batch_1_tier_1/clips/"     # Where clips are stored
+  # output_prefix: "results/batch_1_tier_1/"          # Where to save results
+  source_video_prefix: "transcoding_profile_id=5"              # Source video location
+
+  # Movement Metadata (optional)
+  movement_metadata:
+    enabled: true
+    s3_key: "outputs/batch_1_tier_1/batch_1_tier_1_metadata.parquet"
+
+# Processing Configuration
+processing:
+  output_dir: "./output_s3"
+  cleanup_after_processing: false  # Set true to delete local files after processing
+  convert_mov_to_mp4: true
+
+# Polling Configuration (for continuous processing)
+polling:
+  interval_minutes: 5
+  max_videos_per_cycle: 10
+
+# State Tracking
+state_tracking:
+  state_file: "s3_video_state.json"
+
+# Label Studio Integration
+labelstudio:
+  auto_create_tasks: true
+  url: "http://localhost:8080"
+  api_key: "your_api_key"
+  project_id: 1
+```
+
+
+### 4. Pipeline Configuration
+
+Modify `config/pipeline_config.yaml` to change the output pblob path to store the results and blob upload configuration:
+
+```yaml
+# Azure Storage Upload Settings
+azure_storage:
+  output_blob_prefix: "output_test"
+
+# Blob Upload Configuration
+blob_upload:
+  max_workers: 8
+  timeout_seconds: 300
+  retry_attempts: 3
+```
+
+## Running the Pipeline
+
+### Mode 1: S3 Polling Mode (Recommended)
+
+Process videos from S3 bucket continuously:
+
+```bash
+python ray_pipeline_testing_csam_s3.py \
+  --mode s3 \
+  --s3-config config/s3_config.yaml > log/run.log 2>&1
+```
+
+
+## Output Files
+
+### 1. Consolidated Model Results JSON
+
+`{video_id}_consolidated_model_results.json`:
+
+```json
+{
+  "video_info": {
+    "video_id": "00eEzUmL_9360653015_1000-1008",
+    "s3_key": "outputs/batch_1_tier_1/clips/00eEzUmL_9360653015/1000-1008.mov",
+    "source_video_id": "9360653015",
+    "clip_id": "1000-1008.mov",
+    "start_ms": 1000,
+    "end_ms": 1008,
+    "duration_ms": 8000
+  },
+  "model_results": {
+    "nsfw": { ... },
+    "face": { ... },
+  }
+}
+```
+
+### 2. Label Studio Task JSON
+
+`{video_id}_labelstudio_task.json`:
+
+```json
+{
+  "data": {
+    "video": "https://azure_url_with_sas_token",
+    "filename": "9360653015_1000-1008.mov",
+    "s3_key": "s3://troveo-videodb-shared/outputs/batch_1_tier_1/clips/00eEzUmL_9360653015/1000-1008.mov",
+    "source_s3_key": "s3://troveo-videodb-shared/transcoding_profile_id=5/00eEzUmL_9360653015.mp4",
+    "source_video_id": "9360653015",
+    "clip_id": "1000-1008.mov",
+    "start_ms": 1000000,
+    "end_ms": 1008000,
+    "duration_ms": 8000000,
+    "azure_url": "https://azure_url_with_sas_token",
+    "model_status": {
+      "nsfw_detection": true,
+      "minor_detection": 2
+    },
+    "preannotations": {
+      "has_movement": "Yes",
+      "movement_type_primary": "Walking",
+      "movement_type_secondary": null,
+      "movement_confidence_primary": 0.95,
+      "movement_confidence_secondary": null
+    }
+  },
+  "predictions": [
+    {
+      "id": "nsfw_Xy12Ab",
+      "type": "videoregion",
+      "value": {
+        "start": 2.5,
+        "end": 5.8,
+        "labels": ["nsfw"]
+      },
+      "score": 0.8
+    },
+    {
+      "id": "minor_Cd34Ef",
+      "type": "videoregion",
+      "value": {
+        "start": 1.0,
+        "end": 7.5,
+        "labels": ["minor"]
+      },
+      "score": 0.8
+    }
+  ]
+}
+```
+
+**Key Fields:**
+- `data.video`: Azure SAS URL for video playback
+- `data.filename`: Display filename for the clip
+- `data.s3_key`: Full S3 URI of the clip (s3://bucket/path format)
+- `data.source_s3_key`: Full S3 URI of the source video
+- `data.source_video_id`: Source video identifier (numeric ID only)
+- `data.clip_id`: Clip filename with extension
+- `data.start_ms/end_ms/duration_ms`: Clip temporal metadata in milliseconds
+- `data.azure_url`: Azure SAS URL (same as video field)
+- `data.model_status`: Model detection results
+  - `nsfw_detection`: `true` if NSFW detected, `null` if not detected or model failed
+  - `minor_detection`: count of minors if detected, `null` if not detected or model failed
+- `data.preannotations`: Movement metadata from parquet file (optional)
+  - `has_movement`: "Yes"/"No"
+  - `movement_type_primary/secondary`: Movement classification
+  - `movement_confidence_primary/secondary`: Confidence scores (0.0-1.0)
+- `predictions[]`: Array of video region annotations
+  - `id`: Unique identifier for each prediction
+  - `type`: "videoregion" for temporal segments
+  - `value.start/end`: Start and end time in seconds (float)
+  - `value.labels`: Array with single label - `["nsfw"]` or `["minor"]`
+  - `score`: Confidence score (0.0-1.0)
+
+## State Tracking
+
+The pipeline maintains state in `s3_video_state.json`:
+
+```json
+{
+  "outputs/batch_1_tier_1/clips/video_001.mov": {
+    "status": "completed",
+    "etag": "abc123...",
+    "discovered_at": "2025-10-02T10:00:00Z",
+    "processing_started_at": "2025-10-02T10:01:00Z",
+    "completed_at": "2025-10-02T10:05:00Z",
+    "output_path": "/output_s3/video_001",
+    "azure_video_url": "https://...",
+    "labelstudio_task_id": 123
+  }
+}
+```
+
+## Monitoring and Debugging
+
+### View Processing Logs
+
+```bash
+# Real-time logs
+tail -f log/run.log
+
+# Search for errors
+grep "ERROR" logs/pipeline.log
+
+# View specific video processing
+grep "video_id" logs/pipeline.log
+```
+
+### Check State
+
+```python
+import json
+
+with open('s3_video_state.json') as f:
+    state = json.load(f)
+
+# Count by status
+from collections import Counter
+statuses = Counter(v['status'] for v in state.values())
+print(statuses)
+```
+
+### Performance Metrics
+
+The pipeline generates timing data in CSV format:
+
+```bash
+# View timing summary
+cat output_s3/timing_summary.csv
+
+# Analyze bottlenecks
+python -c "import pandas as pd; df = pd.read_csv('output_s3/timing_summary.csv'); print(df.sort_values('duration_seconds', ascending=False).head(10))"
+```
+
+## Troubleshooting
+
+### Common Issues
+
+1. **AWS Credentials Error**
+   ```
+   Solution: Ensure AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are set
+   ```
+
+2. **Azure Upload Failed**
+   ```
+   Solution: Check Azure credentials in blobfuse2_config.yaml
+   ```
+
+3. **CUDA Out of Memory**
+   ```
+   Solution: Reduce batch size or number of parallel workers
+   ```
+
+4. **Ray Connection Failed**
+   ```
+   Solution: Start Ray cluster: ray start --head
+   ```
+
+5. **Movement Metadata Not Found**
+   ```
+   Solution: Verify s3_key in movement_metadata config points to correct parquet file
+   ```
+
+## Advanced Features
+
+### Movement Metadata Integration
+
+The pipeline can enrich clips with preannotations movement metadata from parquet files:
+
+```yaml
+movement_metadata:
+  enabled: true
+  s3_key: "outputs/batch_1_tier_1/batch_1_tier_1_metadata.parquet"
+```
+
+Metadata includes:
+- Movement type
+- Has movement flag
+- Confidence scores
+
+### Label Studio Auto-Import
+
+To automatically import tasks to Label Studio:
+
+```yaml
+labelstudio:
+  auto_create_tasks: true
+  url: "http://localhost:8080"
+  api_key: "your_api_key"
+  project_id: 1
+```
+
+
+## API Reference
+
+### Main Functions
+
+#### `pipeline_s3_mode(config, s3_config)`
+Main S3 polling pipeline
+
+#### `save_s3_consolidated_results_and_labelstudio(...)`
+Save consolidated results and Label Studio JSON
+
+#### `process_single_shard_through_pipeline(...)`
+Process single video through all AI models
+
+#### `create_labelstudio_task_for_s3_mode(...)`
+Create Label Studio task with S3 metadata
+
+### Cleanup
+
+```yaml
+# Auto-cleanup local files after upload
+processing:
+  cleanup_after_processing: true
+```
+
+## Support
+
+For issues and questions:
+- Check logs in `logs/pipeline.log`
+- Review state in `s3_video_state.json`
+- Contact: Leela Krishna, Sai Charith Pasula, Gouti Pavan, Adithya Chintha, Mangesh Damre
+
