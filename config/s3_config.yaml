@@ -2,10 +2,16 @@ s3:
   aws_access_key_id: "${AWS_ACCESS_KEY_ID}"
   aws_secret_access_key: "${AWS_SECRET_ACCESS_KEY}"
   region: "us-west-2"
-  bucket_name: "my-video-bucket"
-  input_prefix: "videos/"
+  bucket_name: "troveo-videodb-shared"
+  input_prefix: "outputs/batch_1"
   output_prefix: "results/"
-  presigned_url_expiry_days: 7
+  presigned_url_expiry_days: 365
+  source_video_prefix: "transcoding_profile_id=5"
+  movement_metadata:
+    enabled: true  # Set to false to disable movement metadata lookup
+    s3_key: "outputs/batch_1/batch_1_metadata_samples.parquet"  # Path to parquet file in S3
+    cache_locally: true  # Whether to cache downloaded parquet file
+
 
 state_tracking:
   enabled: true
@@ -15,7 +21,7 @@ state_tracking:
 polling:
   enabled: true
   interval_minutes: 5
-  max_videos_per_cycle: 10
+  max_videos_per_cycle: 1
 
 processing:
   temp_dir: "./temp_downloads"
@@ -23,7 +29,7 @@ processing:
   cleanup_after_processing: true
 
 labelstudio:
-  api_url: "http://localhost:8080"
-  api_key: "${LABELSTUDIO_API_KEY}"
-  project_id: 1
+  api_url: "https://annotations-stg.oneforma2.com/api/projects/"
+  api_key: "1af6610f3fa81575f5215067c8455a26682b92ae"
+  project_id: 6001
   auto_create_tasks: true

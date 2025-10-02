@@ -154,7 +154,8 @@ def discover_videos_in_s3(
                     'key': key,
                     'size': size,
                     'etag': etag,
-                    'last_modified': obj['LastModified']
+                    'last_modified': obj['LastModified'],
+                    'folder': os.path.dirname(key)  # Add folder path for metadata extraction
                 })
 
             # Check if more results
@@ -214,12 +215,11 @@ def download_video_from_s3(
         try:
             logger.info(f"Downloading s3://{bucket}/{s3_key} to {local_path} (attempt {attempt}/{retry_attempts})")
 
-            # Download with timeout
+            # Download file
             s3_client.download_file(
                 bucket,
                 s3_key,
-                local_path,
-                Config=Config(read_timeout=timeout)
+                local_path
             )
 
             # Verify file exists and has size > 0
@@ -486,3 +486,160 @@ def upload_results_to_s3(
 
     logger.info(f"All {successful} files uploaded successfully")
     return True
+
+def parse_clip_metadata_from_s3_key(s3_key: str, input_prefix: str) -> dict:
+    """
+    Parse clip metadata from S3 key format: video_name/1000-1008.mov
+
+    Args:
+        s3_key: Full S3 key (e.g., "input-videos/video_name/1000-1008.mov")
+        input_prefix: S3 prefix to strip (e.g., "input-videos/")
+
+    Returns:
+        dict with:
+            - source_video_id: video folder name
+            - clip_id: "1000-1008"
+            - start_ms: 1000
+            - end_ms: 1008
+            - duration_ms: 8
+            - display_filename: "video_name_1000-1008.mov"
+
+    Raises:
+        ValueError: If S3 key format is invalid
+
+    Example:
+        >>> parse_clip_metadata_from_s3_key(
+        ...     "input-videos/beach_video/1000-1008.mov",
+        ...     "input-videos/"
+        ... )
+        {
+            'source_video_id': 'beach_video',
+            'clip_id': '1000-1008',
+            'start_ms': 1000,
+            'end_ms': 1008,
+            'duration_ms': 8,
+            'display_filename': 'beach_video_1000-1008.mov'
+        }
+    """
+    # Remove input prefix to get relative path
+    relative_key = s3_key[len(input_prefix):] if s3_key.startswith(input_prefix) else s3_key
+
+    # Strip leading/trailing slashes to normalize the path
+    relative_key = relative_key.strip('/')
+
+    # Split into folder and filename
+    # Expected format: video_name/1000-1008.mov
+    parts = relative_key.split('/')
+
+    if parts and parts[0].lower() == 'clips':
+          parts = parts[1:]
+
+    if len(parts) < 2:
+        raise ValueError(f"Invalid S3 key format. Expected 'video_name/clip.mov', got: {s3_key}")
+
+    # Extract source video ID (folder name)
+    source_video_id = parts[0]  # e.g., "beach_video"
+
+    # Extract filename
+    filename = parts[-1]  # e.g., "1000-1008.mov"
+
+    # Parse clip_id from filename (remove extension)
+    clip_id = os.path.splitext(filename)[0]  # e.g., "1000-1008"
+    file_ext = os.path.splitext(filename)[1]  # e.g., ".mov"
+
+    # Parse start_ms and end_ms from clip_id
+    # Expected format: start-end (e.g., "1000-1008")
+    clip_parts = clip_id.split('-')
+    if len(clip_parts) != 2:
+        raise ValueError(f"Invalid clip_id format. Expected 'start-end', got: {clip_id}")
+
+    try:
+        start_ms = int(clip_parts[0]) * 1000
+        end_ms = int(clip_parts[1]) * 1000
+    except ValueError as e:
+        raise ValueError(f"Failed to parse start/end times from clip_id '{clip_id}': {e}")
+
+    # Calculate duration
+    duration_ms = end_ms - start_ms
+
+    # Generate display filename: video_name_1000-1008.mov
+    display_filename = f"{source_video_id}_{clip_id}{file_ext}"
+
+    return {
+        'source_video_id': source_video_id,
+        'clip_id': clip_id,
+        'start_ms': start_ms,
+        'end_ms': end_ms,
+        'duration_ms': duration_ms,
+        'display_filename': display_filename
+    }
+
+def find_source_video_in_s3(s3_client, bucket: str, source_prefix: str,
+                           source_video_id: str, video_filename: str) -> dict:
+    """
+    Find the original source video file in S3.
+
+    Args:
+        s3_client: Boto3 S3 client
+        bucket: S3 bucket name
+        source_prefix: Prefix where source videos are stored (e.g., "input-videos")
+        source_video_id: Full video ID with hash (e.g., "00eEzUmL_9360653015")
+        video_filename: Expected filename (e.g., "00eEzUmL_9360653015.mp4")
+
+    Returns:
+        dict with:
+            - 'found': bool - Whether source video was found
+            - 'source_s3_key': str - Full S3 key to source video (if found)
+            - 'folder_name': str - Folder name searched (video ID without hash)
+            - 'error': str - Error message (if not found)
+
+    Logic:
+        1. Extract folder name by removing hash prefix from video ID
+           - "00eEzUmL_9360653015" → "9360653015"
+        2. Construct expected S3 path:
+           - "{source_prefix}/{folder_name}/{video_filename}"
+        3. Check if file exists in S3
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Extract folder name - remove hash prefix (first underscore and everything before it)
+    # "00eEzUmL_9360653015" → "9360653015"
+    if '_' in source_video_id:
+        folder_name = source_video_id.split('_', 1)[1]  # Take everything after first underscore
+    else:
+        # Fallback if no underscore found
+        folder_name = source_video_id
+
+    # Construct expected S3 key
+    source_prefix = source_prefix.rstrip('/')
+    expected_key = f"{source_prefix}/{folder_name}/{video_filename}"
+
+    logger.info(f"Looking for source video: s3://{bucket}/{expected_key}")
+
+    try:
+        # Check if object exists
+        s3_client.head_object(Bucket=bucket, Key=expected_key)
+
+        logger.info(f"✅ Found source video: {expected_key}")
+        return {
+            'found': True,
+            'source_s3_key': expected_key,
+            'folder_name': folder_name,
+            'error': None
+        }
+
+    except s3_client.exceptions.ClientError as e:
+        error_code = e.response['Error']['Code']
+        if error_code == '404':
+            error_msg = f"Source video not found: {expected_key}"
+        else:
+            error_msg = f"Error checking source video: {e}"
+
+        logger.warning(f"⚠️ {error_msg}")
+        return {
+            'found': False,
+            'source_s3_key': None,
+            'folder_name': folder_name,
+            'error': error_msg
+        }

@@ -147,11 +147,16 @@ class S3VideoStateTracker:
         """
         with self.lock:
             if filename not in self.state['videos']:
+                # Convert last_modified datetime to ISO string for JSON serialization
+                last_modified = video_metadata.get('last_modified')
+                if last_modified and hasattr(last_modified, 'isoformat'):
+                    last_modified = last_modified.isoformat()
+
                 self.state['videos'][filename] = {
                     "s3_key": video_metadata.get('key'),
                     "s3_etag": video_metadata.get('etag'),
                     "size_bytes": video_metadata.get('size', 0),
-                    "s3_last_modified": video_metadata.get('last_modified'),
+                    "s3_last_modified": last_modified,
                     "status": "discovered",
                     "discovered_at": datetime.now().isoformat(),
                     "downloaded_at": None,
@@ -175,7 +180,13 @@ class S3VideoStateTracker:
                 video_data = self.state['videos'][filename]
                 video_data['s3_etag'] = video_metadata.get('etag')
                 video_data['size_bytes'] = video_metadata.get('size', 0)
-                video_data['s3_last_modified'] = video_metadata.get('last_modified')
+
+                # Convert last_modified datetime to ISO string for JSON serialization
+                last_modified = video_metadata.get('last_modified')
+                if last_modified and hasattr(last_modified, 'isoformat'):
+                    last_modified = last_modified.isoformat()
+                video_data['s3_last_modified'] = last_modified
+
                 logger.debug(f"🔄 Updated metadata: {filename}")
 
     def mark_downloading(self, filename: str):

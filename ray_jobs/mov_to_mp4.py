@@ -3,6 +3,7 @@ import os
 import ray
 from typing import Dict
 from utils.logger import get_logger
+import time
 
 logger = get_logger("MOV2MP4")
 
@@ -11,7 +12,7 @@ def convert_mov_to_mp4_task(
     input_mov_path: str,
     output_mp4_path: str,
     video_id: str,
-    timer = None
+    timing_id: str = None
 ) -> Dict[str, any]:
     """
     Ray remote task to convert MOV file to MP4 format using FFmpeg.
@@ -22,7 +23,7 @@ def convert_mov_to_mp4_task(
         input_mov_path: Path to input MOV file
         output_mp4_path: Path to save output MP4 file
         video_id: Video identifier for logging
-        timer: Optional PipelineTimer instance for tracking conversion time
+        timing_id: Optional timing identifier for tracking conversion time
 
     Returns:
         Dict containing:
@@ -69,12 +70,6 @@ def convert_mov_to_mp4_task(
             output_mp4_path
         ]
 
-        # Start timer if provided
-        timer_context = None
-        if timer:
-            timer_context = timer.time_operation(f"video.{video_id}.mov_to_mp4_conversion")
-            timer_context.__enter__()
-
         # Run FFmpeg conversion
         logger.info(f"Running FFmpeg: {' '.join(ffmpeg_cmd)}")
         start_time = time.time()
@@ -88,10 +83,7 @@ def convert_mov_to_mp4_task(
         )
 
         conversion_time = time.time() - start_time
-
-        # Stop timer if provided
-        if timer_context:
-            timer_context.__exit__(None, None, None)
+        end_time = time.time()
 
         # Check if conversion was successful
         if result.returncode != 0:
@@ -112,12 +104,24 @@ def convert_mov_to_mp4_task(
 
         logger.info(f"✅ Conversion successful: {output_size / (1024*1024):.2f} MB in {conversion_time:.2f}s")
 
+        # Prepare timing data in format compatible with main timer (only if timing_id provided)
+        timing_data = None
+        if timing_id:
+            timing_data = {
+                'execution_time': conversion_time,
+                'start_time': start_time,
+                'end_time': end_time,
+                'status': 'completed',
+                'timing_id': timing_id
+            }
+
         return {
             'success': True,
             'output_path': output_mp4_path,
             'file_size': output_size,
             'conversion_time': conversion_time,
-            'input_size': os.path.getsize(input_mov_path)
+            'input_size': os.path.getsize(input_mov_path),
+            'timing': timing_data
         }
 
     except subprocess.TimeoutExpired:

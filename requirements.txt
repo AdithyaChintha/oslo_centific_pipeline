@@ -34,3 +34,5 @@ nudenet
 python-dotenv
 label_studio_sdk
 decord
+pyarrow>=14.0.0  # For parquet file reading
+pandas>=2.0.0    # For DataFrame operations

@@ -29,9 +29,9 @@ from utils.blob_utils import (
 from utils.dynamic_erp_processor import integrate_erp_audio_with_labelstudio_tasks
 from utils.multi_chunk_blob_utils import download_ready_sessions
 from utils.pipeline_timer import PipelineTimer
-from utils.pipeline_timer import generate_hierarchical_timing_structure, generate_performance_summary
+from utils.pipeline_timer import generate_hierarchical_timing_structure, generate_performance_summary, export_s3_timing_to_csv
 from utils.performance_csv_exporter import export_timing_data_to_single_csv
-
+from utils.parquet_metadata_loader import MovementMetadataLoader
 
 from azure.storage.blob import generate_blob_sas, BlobSasPermissions, BlobServiceClient
 from azure.core.exceptions import ResourceNotFoundError
@@ -80,7 +80,8 @@ from ray_jobs.video_lighting_task import lighting_by_second_task
 
 from utils.s3_utils import (
         create_s3_client, discover_videos_in_s3,
-        download_video_from_s3, generate_presigned_url, upload_results_to_s3
+        download_video_from_s3, generate_presigned_url, upload_results_to_s3, parse_clip_metadata_from_s3_key,
+        find_source_video_in_s3
     )
 from utils.s3_video_state_tracker import S3VideoStateTracker
 
@@ -1541,19 +1542,42 @@ def generate_azure_sas_url(blob_client, container_name, blob_name, account_name,
         logger.error(f"Failed to generate Azure SAS URL: {e}")
         return None
 
-def create_labelstudio_task_for_azure(filename: str, azure_video_url: str,
-                                     results: dict, config: dict) -> int:
+def create_labelstudio_task_for_azure(
+    filename: str,
+    azure_video_url: str,
+    results: dict,
+    config: dict,
+    s3_key: str = None,
+    source_s3_key: str = None,
+    source_video_id: str = None,
+    clip_id: str = None,
+    start_ms: int = None,
+    end_ms: int = None,
+    duration_ms: int = None,
+    bucket: str = None,
+    movement_loader = None
+) -> int:
     """
-    Create Label Studio task for Azure video using EXACT SAME format as existing pipeline.
-    
+    Create Label Studio task for Azure video with comprehensive clip metadata.
+
     Args:
-        filename: Video filename
-        azure_video_url: Azure SAS URL
+        filename: Display filename (e.g., "video_name_1000-1008.mov")
+        azure_video_url: Azure SAS URL for video streaming
         results: Processing results from process_single_shard_through_pipeline
-        config: Configuration
-        
+        config: Configuration dictionary
+        s3_key: Full S3 key path (e.g., "input-videos/video_name/1000-1008.mov")
+        source_s3_key: Full S3 key path to original source video
+                      (e.g., "input-videos/9360653015/00eEzUmL_9360653015.mp4")
+        source_video_id: Source video folder name (e.g., "video_name")
+        clip_id: Clip identifier (e.g., "1000-1008")
+        start_ms: Clip start time in milliseconds (e.g., 1000)
+        end_ms: Clip end time in milliseconds (e.g., 1008)
+        duration_ms: Clip duration in milliseconds (e.g., 8)
+        bucket: S3 bucket name
+        movement_loader: MovementMetadataLoader instance for looking up movement data
+
     Returns:
-        Label Studio task ID
+        Label Studio task ID (int)
     """
     import requests
     import random
@@ -1614,23 +1638,79 @@ def create_labelstudio_task_for_azure(filename: str, azure_video_url: str,
             "score": 0.8
         })
 
+    # Add model execution status to metadata
+    model_status = {}
+
+    # NSFW detection status - True if detected, None if not detected or failed
+    if nsfw_data.get('success'):
+        nsfw_count = nsfw_data.get('total_nsfw_detections', 0)
+        model_status['nsfw_detection'] = True if nsfw_count > 0 else None
+    else:
+        model_status['nsfw_detection'] = None
+
+    # Minor detection status - count if detected, None if not detected or failed
+    if face_data.get('success'):
+        potential_minors = 0
+        for seg in face_data.get('flagged_segments', []) or []:
+            potential_minors += seg.get('metadata', {}).get('potential_minors', 0)
+
+        model_status['minor_detection'] = potential_minors if potential_minors > 0 else None
+    else:
+        model_status['minor_detection'] = None
+
+    # Format S3 keys as full URIs: s3://bucket/path
+    s3_uri = f"s3://{bucket}/{s3_key}" if bucket and s3_key else None
+    source_s3_uri = f"s3://{bucket}/{source_s3_key}" if bucket and source_s3_key else None
+
+    movement_metadata = None
+    if movement_loader and movement_loader.is_loaded() and s3_uri:
+        movement_metadata = movement_loader.get_movement_metadata(s3_uri)
+        if movement_metadata:
+            logger.debug(f"Found movement metadata for {s3_uri}")
+        else:
+            logger.debug(f"No movement metadata found for {s3_uri}")
+
     # Create task data
     task_data = {
         "data": {
             "video": azure_video_url,
-            "filename": filename
+            "filename": filename,
+            "s3_key": s3_uri,
+            "source_s3_key": source_s3_uri,
+            "source_video_id": source_video_id,
+            "clip_id": clip_id,
+            "start_ms": start_ms,
+            "end_ms": end_ms,
+            "duration_ms": duration_ms,
+            "azure_url": azure_video_url,
+            "model_status": model_status,
+            "preannotations": movement_metadata
         },
         "predictions": predictions
     }
 
     # Send to Label Studio
     labelstudio_config = config['labelstudio']
-    url = f"{labelstudio_config['server_url']}/api/projects/{labelstudio_config['project_id']}/tasks/"
-    
+
+    # Build URL - handle both 'server_url' and 'api_url' formats
+    if 'server_url' in labelstudio_config:
+        url = f"{labelstudio_config['server_url']}/api/projects/{labelstudio_config['project_id']}/tasks/"
+    else:
+        # api_url format includes base path
+        base_url = labelstudio_config['api_url'].rstrip('/')
+        url = f"{base_url}/{labelstudio_config['project_id']}/tasks/"
+
+    # Handle both 'api_token' and 'api_key' naming
+    api_token = labelstudio_config.get('api_token') or labelstudio_config.get('api_key')
+
     headers = {
-        "Authorization": f"Token {labelstudio_config['api_token']}",
+        "Authorization": f"Token {api_token}",
         "Content-Type": "application/json"
     }
+
+    logger.info(f"Label Studio task metadata: filename={filename}, "
+               f"source_video_id={source_video_id}, clip_id={clip_id}, "
+               f"duration={duration_ms}ms")
 
     response = requests.post(url, json=task_data, headers=headers)
     response.raise_for_status()
@@ -1669,15 +1749,44 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
         pipeline_config = load_pipeline_config("config/pipeline_config.yaml")
         upload_config = pipeline_config.get('blob_upload', {})
         
-        logger.info("✅ Azure blob client configured for upload")
+        logger.info("Azure blob client configured for upload")
     except Exception as e:
-        logger.warning(f"⚠️ Failed to configure Azure blob client: {e} - upload will be skipped")
+        logger.warning(f"Failed to configure Azure blob client: {e} - upload will be skipped")
         azure_config = None
         blob_client = None
         container_name = None
         account_name = None
         account_key = None
         upload_config = {}
+
+    movement_loader = None
+    movement_config = s3_config['s3'].get('movement_metadata', {})
+
+    if movement_config.get('enabled', False):
+        try:
+            movement_s3_key = movement_config.get('s3_key')
+            if movement_s3_key:
+                logger.info(f" Initializing movement metadata loader: s3://{bucket}/{movement_s3_key}")
+                movement_loader = MovementMetadataLoader(
+                    s3_client,
+                    bucket,
+                    movement_s3_key,
+                    cache_dir="./cache/movement_metadata"
+                )
+
+                # Load parquet file
+                if movement_loader.load():
+                    logger.info(" Movement metadata loaded successfully")
+                else:
+                    logger.warning("⚠️ Failed to load movement metadata - will continue without it")
+                    movement_loader = None
+            else:
+                logger.warning("Movement metadata enabled but no s3_key configured")
+        except Exception as e:
+            logger.error(f"Failed to initialize movement metadata loader: {e}")
+            movement_loader = None
+    else:
+        logger.info("Movement metadata lookup disabled in config")
 
     # Initialize state tracker
     state_file = os.path.join(
@@ -1688,7 +1797,7 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
     
     # Get polling settings
     polling_interval = s3_config['polling']['interval_minutes']
-    # max_videos_per_cycle = s3_config['polling']['max_videos_per_cycle']
+    max_videos_per_cycle = s3_config['polling']['max_videos_per_cycle']
     cycle = 0
 
     from utils.pipeline_timer import PipelineTimer
@@ -1713,6 +1822,11 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                 if not tracker.is_video_processed(s3_key, etag):
                     new_videos.append(video)
                     tracker.mark_discovered(s3_key, video)
+                    
+                    if max_videos_per_cycle and len(new_videos) >= max_videos_per_cycle:
+                        logger.info(f"Reached max_videos_per_cycle limit: {max_videos_per_cycle}")
+                        break
+                    
             logger.info(f"{len(new_videos)} new videos to process")
             if not new_videos:
                 logger.info("No new videos found")
@@ -1720,16 +1834,56 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                 for idx, video in enumerate(new_videos, 1):
                     filename = video['filename']
                     s3_key = video['key']
+                    try:
+                        clip_metadata = parse_clip_metadata_from_s3_key(s3_key, input_prefix)
+                        source_video_id = clip_metadata['source_video_id']
+                        clip_id = clip_metadata['clip_id']
+                        display_filename = clip_metadata['display_filename']
+                        start_ms = clip_metadata['start_ms']
+                        end_ms = clip_metadata['end_ms']
+                        duration_ms = clip_metadata['duration_ms']
+                        video_id = f"{source_video_id}_{clip_id}"
 
-                    # Generate unique video_id by preserving folder structure
-                    # This prevents collisions when multiple folders have same filename
-                    # Example: "input-videos/folder1/video.mov" -> video_id = "folder1/video"
-                    relative_key = s3_key
-                    if s3_key.startswith(input_prefix):
-                        relative_key = s3_key[len(input_prefix):]
-                    video_id = os.path.splitext(relative_key)[0]
-                    # Replace directory separators with safe characters for filesystem
-                    video_id = video_id.replace('/', '_').replace('\\', '_')
+                        logger.info(f"Parsed clip metadata: video_id={source_video_id}, clip={clip_id}, "
+                                f"duration={duration_ms}ms")
+                        source_video_prefix = s3_config['s3'].get('source_video_prefix', 'input-videos')
+                        source_video_filename = f"{source_video_id}.mp4"  # Expected source filename
+
+                        source_lookup = find_source_video_in_s3(
+                            s3_client,
+                            bucket,
+                            source_video_prefix,
+                            source_video_id,
+                            source_video_filename
+                        )
+
+                        if source_lookup['found']:
+                            source_s3_key = source_lookup['source_s3_key']
+                            logger.info(f"Source video: s3://{bucket}/{source_s3_key}")
+                        else:
+                            source_s3_key = None
+                            logger.warning(f"Source video not found: {source_lookup['error']}")
+                    except Exception as e:
+                        logger.warning(f"Failed to parse clip metadata from {s3_key}: {e}")
+                        logger.warning("Falling back to original filename behavior")
+                        # Fallback to original behavior for non-clip videos
+                        display_filename = filename
+                        source_video_id = None
+                        clip_id = None
+                        start_ms = None
+                        end_ms = None
+                        duration_ms = None
+                        source_s3_key = None
+
+                        # Generate unique video_id by preserving folder structure
+                        # This prevents collisions when multiple folders have same filename
+                        # Example: "input-videos/folder1/video.mov" -> video_id = "folder1/video"
+                        relative_key = s3_key
+                        if s3_key.startswith(input_prefix):
+                            relative_key = s3_key[len(input_prefix):]
+                        video_id = os.path.splitext(relative_key)[0]
+                        # Replace directory separators with safe characters for filesystem
+                        video_id = video_id.replace('/', '_').replace('\\', '_')
 
                     file_ext = os.path.splitext(filename)[1].lower()
 
@@ -1761,24 +1915,33 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                             # Define MP4 path in results folder
                             converted_mp4_path = os.path.join(output_dir, f"{video_id}.mp4")
 
-                            # Convert using Ray task
+                            # Convert using Ray task (returns timing data)
+                            timing_id = f"video.{video_id}.mov_to_mp4_conversion"
                             conversion_result = ray.get(convert_mov_to_mp4_task.remote(
                                 local_video_path,
                                 converted_mp4_path,
                                 video_id,
-                                timer
+                                timing_id=timing_id
                             ))
 
                             if not conversion_result['success']:
                                 raise Exception(f"MOV to MP4 conversion failed: {conversion_result.get('error')}")
 
-                            logger.info(f" Conversion complete: {conversion_result['file_size'] / (1024*1024):.2f} MB")
+                            logger.info(f" Conversion complete: {conversion_result['file_size'] / (1024*1024):.2f} MB in {conversion_result['conversion_time']:.2f}s")
+
+                            # Add timing from Ray task to main timer
+                            if 'timing' in conversion_result and conversion_result['timing']:
+                                timing_data = conversion_result['timing']
+                                timer.timings[timing_data['timing_id']] = {
+                                    'execution_time': float(timing_data['execution_time']),
+                                    'start_time': float(timing_data['start_time']),
+                                    'end_time': float(timing_data['end_time']),
+                                    'status': timing_data['status'],
+                                    'timing_id': timing_data['timing_id']
+                                }
 
                             # Use converted MP4 for processing
                             processing_video_path = converted_mp4_path
-
-                            # Track conversion in state
-                            tracker.mark_converted(s3_key, converted_mp4_path)
                         logger.info(f"Processing video...")
                         tracker.mark_processing(s3_key)
 
@@ -1801,8 +1964,9 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
 
                         # Upload results to Azure Blob Storage
                         if blob_client and container_name and account_name and account_key:
-                            azure_output_prefix = f"{pipeline_config['azure_storage']['output_blob_prefix']}{video_id}/"
-                            logger.info(f"Uploading results to Azure blob storage: {azure_output_prefix}")
+                            # Use base prefix only - upload function will add video_id
+                            azure_output_prefix = f"{pipeline_config['azure_storage']['output_blob_prefix']}"
+                            logger.info(f"Uploading results to Azure blob storage: {azure_output_prefix}/{video_id}/")
                             with timer.time_operation(f"video.{video_id}.upload"):
                                 upload_result = upload_output_directory_with_sas_optimized(
                                     output_dir, blob_client, container_name,
@@ -1814,13 +1978,14 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                             
                             # Generate Azure SAS URL for video
                             if converted_mp4_path and os.path.exists(converted_mp4_path):
-                                # MP4 is already uploaded as part of results folder
-                                mp4_blob_name = f"{azure_output_prefix}{os.path.basename(converted_mp4_path)}"
+                                # MP4 is uploaded to: prefix/video_id/filename
+                                base_prefix = azure_output_prefix.rstrip('/')
+                                mp4_blob_name = f"{base_prefix}/{video_id}/{os.path.basename(converted_mp4_path)}"
                                 azure_video_url = generate_azure_sas_url(
                                     blob_client, container_name, mp4_blob_name,
                                     account_name, account_key, 365
                                 )
-                                logger.info(f"✅ Using converted MP4 URL for Label Studio")
+                                logger.info(f"✅ Using converted MP4 URL for Label Studio: {mp4_blob_name}")
                             else:
                                 # For now, we'll use the converted MP4 as the primary video
                                 azure_video_url = None
@@ -1834,8 +1999,20 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                             logger.info("Creating Label Studio task...")
                             with timer.time_operation(f"video.{video_id}.labelstudio_task"):
                                 task_id = create_labelstudio_task_for_azure(
-                                    filename, azure_video_url, results, s3_config
-                                )
+                                display_filename,  # Use formatted filename
+                                azure_video_url,
+                                results,
+                                s3_config,
+                                s3_key=s3_key,
+                                source_s3_key=source_s3_key,
+                                source_video_id=source_video_id,
+                                clip_id=clip_id,
+                                start_ms=start_ms,
+                                end_ms=end_ms,
+                                duration_ms=duration_ms,
+                                bucket=bucket,
+                                movement_loader=movement_loader
+                            )
                             logger.info(f"Label Studio task created: ID={task_id}")
                         else:
                             task_id = None
@@ -1847,6 +2024,13 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                             'azure_video_url': azure_video_url,
                             'azure_results_path': azure_output_prefix,
                             's3_key': s3_key,
+                            'source_s3_key': source_s3_key,
+                            'source_video_id': source_video_id,
+                            'clip_id': clip_id,
+                            'start_ms': start_ms,
+                            'end_ms': end_ms,
+                            'duration_ms': duration_ms,
+                            'display_filename': display_filename,
                             'output_path': output_dir,
                             'labelstudio_task_id': task_id,
                             'nsfw_detected': nsfw_detected,
@@ -1854,8 +2038,11 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                         })
                          # Cleanup
                         if s3_config['processing'].get('cleanup_after_processing', True):
-                            os.remove(local_video_path)
-                            os.remove(output_dir)
+                            if os.path.exists(local_video_path):
+                                os.remove(local_video_path)
+                            if os.path.exists(output_dir):
+                                import shutil
+                                shutil.rmtree(output_dir)
 
                         logger.info(f"Successfully processed: {filename}")
 
@@ -1865,53 +2052,50 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
 
                     # Save state after each video
                     tracker.save()
-                    # Get raw timing data
+                    # Export timing data to simple CSV (S3-specific format)
                     try:
                         raw_timing_data = timer.get_timing_data()
 
-                        # Generate hierarchical structure (same as blob polling)
-                        # For S3 mode, we treat each video as a "session"
-                        processing_time = sum(
-                            t.get('execution_time', 0)
-                            for op_id, t in raw_timing_data.items()
-                            if video_id in op_id
-                        )
-
-                        hierarchical_timing_data = generate_hierarchical_timing_structure(
+                        # Use simple S3-specific CSV export (flat structure, no hierarchical complexity)
+                        csv_file_path = export_s3_timing_to_csv(
                             raw_timing_data,
-                            video_id,  # Use video_id as session_id
-                            processing_time,
-                            time.time() - processing_time,  # Approximate start time
-                            results  # Processing results
-                        )
-
-                        # Add performance metrics
-                        hierarchical_timing_data["performance_metrics"] = generate_performance_summary(
-                            hierarchical_timing_data
-                        )
-
-                        # Export to CSV using existing function
-                        # Saves to: output_dir/{video_id}_timing_analysis.csv
-                        csv_file_path = export_timing_data_to_single_csv(
-                            hierarchical_timing_data,
                             output_dir,
                             video_id
                         )
 
-                        logger.info(f"Timing analysis CSV exported to: {csv_file_path}")
+                        logger.info(f"Timing CSV exported to: {csv_file_path}")
 
-                        # Upload CSV to S3 (in results directory)
-                        if s3_config.get('upload_timing_to_s3', True) and os.path.exists(csv_file_path):
-                            upload_file_to_s3(
-                                s3_client,
-                                csv_file_path,
-                                bucket,
-                                f"{s3_results_path}{os.path.basename(csv_file_path)}"
-                            )
-                            logger.info(f"Timing CSV uploaded to s3://{bucket}/{s3_results_path}")
+                        # Upload CSV file to Azure blob storage
+                        if blob_client and container_name and csv_file_path and os.path.exists(csv_file_path):
+                            try:
+                                csv_filename = os.path.basename(csv_file_path)
+                                azure_output_prefix = pipeline_config['azure_storage']['output_blob_prefix'].rstrip('/')
+                                csv_blob_path = f"{azure_output_prefix}/{video_id}/timing_analysis/{csv_filename}"
+
+                                logger.info(f"📤 Uploading CSV to blob: {csv_blob_path}")
+
+                                # Get the specific blob client for this file
+                                csv_blob_client = blob_client.get_blob_client(
+                                    container=container_name,
+                                    blob=csv_blob_path
+                                )
+
+                                with open(csv_file_path, 'rb') as csv_file:
+                                    csv_blob_client.upload_blob(
+                                        data=csv_file,
+                                        overwrite=True
+                                    )
+
+                                logger.info(f"✅ CSV successfully uploaded to: {csv_blob_path}")
+                            except Exception as upload_error:
+                                logger.error(f"❌ Failed to upload CSV to blob: {upload_error}")
+                        else:
+                            logger.warning("⚠️ CSV upload skipped - missing Azure config or CSV file")
 
                     except Exception as e:
+                        import traceback
                         logger.warning(f"Failed to export timing data: {e}")
+                        logger.warning(traceback.format_exc())
                 
                 # Print summary
                 tracker.print_summary()
@@ -5209,7 +5393,7 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
         for model_name, model_timing in timing_results.items():
             if model_timing:
                 timer.timings[f"{base_timing_id}.{model_name}"] = {
-                    "execution_time": model_timing["execution_time"],
+                    "execution_time": float(model_timing["execution_time"]),
                     "start_time": model_timing["start_time"],
                     "end_time": model_timing["end_time"],
                     "status": model_timing["status"],
@@ -5245,12 +5429,12 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     #         json.dump(motion_res, f, indent=2)
     #     logger.info(f"Motion energy results saved to: {motion_file}")
     
-    # # Save Face Age Detection results
-    # if face_res and face_res.get("success"):
-    #     face_file = os.path.join(face_output_dir, f"{video_name}_face_results.json")
-    #     with open(face_file, 'w') as f:
-    #         json.dump(face_res, f, indent=2)
-    #     logger.info(f"Face detection results saved to: {face_file}")
+    # Save Face Age Detection results
+    if face_res and face_res.get("success"):
+        face_file = os.path.join(face_output_dir, f"{video_name}_face_results.json")
+        with open(face_file, 'w') as f:
+            json.dump(face_res, f, indent=2)
+        logger.info(f"Face detection results saved to: {face_file}")
     
     # Save Sensitive Information Analysis results
     # if sensitive_res and isinstance(sensitive_res, list) and len(sensitive_res) > 0:
@@ -6434,6 +6618,12 @@ if __name__ == "__main__":
             s3_config_path = args.s3_config or "config/s3_config.yaml"
             with open(s3_config_path, 'r') as f:
                 s3_config = yaml.safe_load(f)
+
+            # Expand environment variables in S3 config
+            if 'aws_access_key_id' in s3_config.get('s3', {}):
+                s3_config['s3']['aws_access_key_id'] = os.path.expandvars(s3_config['s3']['aws_access_key_id'])
+            if 'aws_secret_access_key' in s3_config.get('s3', {}):
+                s3_config['s3']['aws_secret_access_key'] = os.path.expandvars(s3_config['s3']['aws_secret_access_key'])
 
             logger.info(f" S3 Configuration:")
             logger.info(f"   Bucket: {s3_config['s3']['bucket_name']}")

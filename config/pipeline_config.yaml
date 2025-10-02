@@ -8,7 +8,7 @@ azure_storage:
   # Input directory configuration
   input_blob_prefix: "one-data-platform/"  # Default blob prefix to search for videos
   # Output directory configuration
-  output_blob_prefix: "one_data_platform_csam/"  # Base prefix for uploading processed results
+  output_blob_prefix: "pyranee_test/"  # Base prefix for uploading processed results
   
   # Container settings (these can override blobfuse2_config.yaml if needed)
   # container_name: "instavideo"  # Uncomment to override
