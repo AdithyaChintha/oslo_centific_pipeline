@@ -1659,18 +1659,20 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                     s3_key = video['key']
                     try:
                         clip_metadata = parse_clip_metadata_from_s3_key(s3_key, input_prefix)
-                        source_video_id = clip_metadata['source_video_id']
-                        clip_id = clip_metadata['clip_id']
+                        source_video_id = clip_metadata['source_video_id']  # Full: 00eEzUmL_9360653015
+                        source_video_id_display = clip_metadata['source_video_id_display']  # Display: 9360653015
+                        clip_id = clip_metadata['clip_id']  # With extension: 1000-1008.mov
+                        clip_id_no_ext = clip_metadata['clip_id_no_ext']  # No extension: 1000-1008
                         display_filename = clip_metadata['display_filename']
                         start_ms = clip_metadata['start_ms']
                         end_ms = clip_metadata['end_ms']
                         duration_ms = clip_metadata['duration_ms']
-                        video_id = f"{source_video_id}_{clip_id}"
+                        video_id = f"{source_video_id}_{clip_id_no_ext}"  # Use full ID and no extension
 
                         logger.info(f"Parsed clip metadata: video_id={source_video_id}, clip={clip_id}, "
                                 f"duration={duration_ms}ms")
                         source_video_prefix = s3_config['s3'].get('source_video_prefix', 'input-videos')
-                        source_video_filename = f"{source_video_id}.mp4"  # Expected source filename
+                        source_video_filename = f"{source_video_id}.mp4"  # Expected source filename with full ID
 
                         source_lookup = find_source_video_in_s3(
                             s3_client,
@@ -1828,7 +1830,7 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                                 s3_config,
                                 s3_key=s3_key,
                                 source_s3_key=source_s3_key,
-                                source_video_id=source_video_id,
+                                source_video_id=source_video_id_display,  # Use display version (number only)
                                 clip_id=clip_id,
                                 start_ms=start_ms,
                                 end_ms=end_ms,

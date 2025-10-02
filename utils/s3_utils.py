@@ -537,37 +537,50 @@ def parse_clip_metadata_from_s3_key(s3_key: str, input_prefix: str) -> dict:
     if len(parts) < 2:
         raise ValueError(f"Invalid S3 key format. Expected 'video_name/clip.mov', got: {s3_key}")
 
-    # Extract source video ID (folder name)
-    source_video_id = parts[0]  # e.g., "beach_video"
+    # Extract source video ID (folder name with hash)
+    folder_name = parts[0]  # e.g., "00eEzUmL_9360653015"
+
+    # Keep full folder name for internal use (file operations, video_id construction)
+    source_video_id_full = folder_name  # e.g., "00eEzUmL_9360653015"
+
+    # Extract just the video number for Label Studio (remove hash prefix)
+    # "00eEzUmL_9360653015" -> "9360653015"
+    if '_' in folder_name:
+        source_video_id_display = folder_name.split('_', 1)[1]  # Take everything after first underscore
+    else:
+        source_video_id_display = folder_name  # Fallback if no underscore
 
     # Extract filename
     filename = parts[-1]  # e.g., "1000-1008.mov"
-
-    # Parse clip_id from filename (remove extension)
-    clip_id = os.path.splitext(filename)[0]  # e.g., "1000-1008"
     file_ext = os.path.splitext(filename)[1]  # e.g., ".mov"
 
-    # Parse start_ms and end_ms from clip_id
+    # Parse clip_id from filename - KEEP EXTENSION for Label Studio
+    clip_id = filename  # e.g., "1000-1008.mov" (with extension)
+    clip_id_no_ext = os.path.splitext(filename)[0]  # e.g., "1000-1008" (for parsing times and video_id)
+
+    # Parse start_ms and end_ms from clip_id (without extension)
     # Expected format: start-end (e.g., "1000-1008")
-    clip_parts = clip_id.split('-')
+    clip_parts = clip_id_no_ext.split('-')
     if len(clip_parts) != 2:
-        raise ValueError(f"Invalid clip_id format. Expected 'start-end', got: {clip_id}")
+        raise ValueError(f"Invalid clip_id format. Expected 'start-end', got: {clip_id_no_ext}")
 
     try:
         start_ms = int(clip_parts[0]) * 1000
         end_ms = int(clip_parts[1]) * 1000
     except ValueError as e:
-        raise ValueError(f"Failed to parse start/end times from clip_id '{clip_id}': {e}")
+        raise ValueError(f"Failed to parse start/end times from clip_id '{clip_id_no_ext}': {e}")
 
     # Calculate duration
     duration_ms = end_ms - start_ms
 
-    # Generate display filename: video_name_1000-1008.mov
-    display_filename = f"{source_video_id}_{clip_id}{file_ext}"
+    # Generate display filename: 9360653015_1000-1008.mov
+    display_filename = f"{source_video_id_display}_{clip_id_no_ext}{file_ext}"
 
     return {
-        'source_video_id': source_video_id,
-        'clip_id': clip_id,
+        'source_video_id': source_video_id_full,  # Full name for internal use (00eEzUmL_9360653015)
+        'source_video_id_display': source_video_id_display,  # Number only for Label Studio (9360653015)
+        'clip_id': clip_id,  # With extension for Label Studio (1000-1008.mov)
+        'clip_id_no_ext': clip_id_no_ext,  # Without extension for video_id (1000-1008)
         'start_ms': start_ms,
         'end_ms': end_ms,
         'duration_ms': duration_ms,
