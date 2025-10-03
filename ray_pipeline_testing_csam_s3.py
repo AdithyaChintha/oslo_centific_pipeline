@@ -73,7 +73,7 @@ from ray_jobs.face_detection_serve_manager import FaceDetectionServeManager
 from ray_jobs.labelstudio_tasks import (assign_views_to_labelstudio_positions, generate_multiview_4view_labelstudio_task,
     generate_consolidated_shard_labelstudio_task,
     import_consolidated_tasks_to_labelstudio,
-    update_labelstudio_tasks_with_video_domain_and_activity, create_labelstudio_task_for_s3_mode)
+    update_labelstudio_tasks_with_video_domain_and_activity, create_labelstudio_task_for_s3_mode, export_labelstudio_task_to_csv, upload_csv_to_azure_blob)
    
 from ray_jobs.video_unwarp_task import erp_unwarp_task
 from ray_jobs.video_unwarp_task import insv_unwarp_task
@@ -1447,6 +1447,7 @@ def pipeline_main_with_blob_polling(base_prefix: str, output_base_dir: str, azur
         pipeline_config: Pipeline configuration
         polling_interval_minutes: How long to wait between polling attempts (default: 5 minutes)
     """
+    #TODO: Need to integrate ray serve face detection to oslo pipeline
     logger.info("🔄 Starting blob polling mode - Base: %s, Interval: %d minutes, Output: %s", base_prefix, polling_interval_minutes, output_base_dir)
     
     # Initialize blob client
@@ -1623,6 +1624,7 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
     polling_interval = s3_config['polling']['interval_minutes']
     max_videos_per_cycle = s3_config['polling']['max_videos_per_cycle']
     cycle = 0
+    cycle_start_time = None
 
     from utils.pipeline_timer import PipelineTimer
     timer = PipelineTimer()
@@ -1645,6 +1647,8 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
     try:
         while True:
             cycle += 1
+            cycle_start_time = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+            videos_in_current_cycle = 0
             logger.info(f" S3 POLL CYCLE #{cycle}")
 
             # 1. Discover videos
@@ -1684,7 +1688,7 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                         end_ms = clip_metadata['end_ms']
                         duration_ms = clip_metadata['duration_ms']
                         video_id = f"{source_video_id}_{clip_id_no_ext}"  # Use full ID and no extension
-
+                        videos_in_current_cycle += 1
                         logger.info(f"Parsed clip metadata: video_id={source_video_id}, clip={clip_id}, "
                                 f"duration={duration_ms}ms")
                         source_video_prefix = s3_config['s3'].get('source_video_prefix', 'input-videos')
@@ -1880,25 +1884,76 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                             logger.info("Creating Label Studio task...")
                             with timer.time_operation(f"video.{video_id}.labelstudio_task"):
                                 task_id = create_labelstudio_task_for_s3_mode(
-                                display_filename,  # Use formatted filename
-                                azure_video_url,
-                                results,
-                                s3_config,
-                                s3_key=s3_key,
-                                source_s3_key=source_s3_key,
-                                source_video_id=source_video_id_display,  # Use display version (number only)
-                                clip_id=clip_id,
-                                start_ms=start_ms,
-                                end_ms=end_ms,
-                                duration_ms=duration_ms,
-                                bucket=bucket,
-                                movement_loader=movement_loader
-                            )
-                            logger.info(f"Label Studio task created: ID={task_id}")
-                        else:
-                            task_id = None
-                            if not azure_video_url:
-                                logger.warning("⚠️ No Azure video URL available for Label Studio task creation")
+                                    display_filename,
+                                    azure_video_url,
+                                    results,
+                                    s3_config,
+                                    s3_key=s3_key,
+                                    source_s3_key=source_s3_key,
+                                    source_video_id=source_video_id,
+                                    clip_id=clip_id,
+                                    start_ms=start_ms,
+                                    end_ms=end_ms,
+                                    duration_ms=duration_ms,
+                                    bucket=bucket,
+                                    movement_loader=movement_loader
+                                )
+
+                        # Modified code:
+                        if s3_config['labelstudio']['auto_create_tasks'] and azure_video_url:
+                            export_mode = s3_config['labelstudio'].get('export_mode', 'api')
+
+                            if export_mode in ['csv', 'both']:
+                                # Export to CSV
+                                logger.info("Exporting Label Studio task to CSV...")
+                                csv_output_dir = s3_config['labelstudio'].get('csv_export', {}).get('local_output_dir', './output/labelstudio_csv')
+
+                                with timer.time_operation(f"video.{video_id}.labelstudio_csv_export"):
+                                    csv_path = export_labelstudio_task_to_csv(
+                                        display_filename,
+                                        azure_video_url,
+                                        results,
+                                        s3_config,
+                                        csv_output_dir=csv_output_dir,
+                                        cycle_number=cycle,  # Pass cycle number
+                                        cycle_start_time=cycle_start_time,  # Pass cycle start time
+                                        s3_key=s3_key,
+                                        source_s3_key=source_s3_key,
+                                        source_video_id=source_video_id,
+                                        clip_id=clip_id,
+                                        start_ms=start_ms,
+                                        end_ms=end_ms,
+                                        duration_ms=duration_ms,
+                                        bucket=bucket,
+                                        movement_loader=movement_loader
+                                    )
+
+                                # Upload to Azure if configured
+                                if blob_client and container_name:
+                                    with timer.time_operation(f"video.{video_id}.labelstudio_csv_upload"):
+                                        blob_url = upload_csv_to_azure_blob(csv_path, s3_config, blob_client, container_name)
+                                        if blob_url:
+                                            logger.info(f"CSV uploaded to Azure: {blob_url}")
+
+                            if export_mode in ['api', 'both']:
+                                # Send to Label Studio API
+                                logger.info("Creating Label Studio task via API...")
+                                with timer.time_operation(f"video.{video_id}.labelstudio_task"):
+                                    task_id = create_labelstudio_task_for_s3_mode(
+                                        display_filename,
+                                        azure_video_url,
+                                        results,
+                                        s3_config,
+                                        s3_key=s3_key,
+                                        source_s3_key=source_s3_key,
+                                        source_video_id=source_video_id,
+                                        clip_id=clip_id,
+                                        start_ms=start_ms,
+                                        end_ms=end_ms,
+                                        duration_ms=duration_ms,
+                                        bucket=bucket,
+                                        movement_loader=movement_loader
+                                    )
                         
                          # Mark completed
                         tracker.mark_completed(s3_key, {
