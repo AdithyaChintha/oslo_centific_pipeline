@@ -1,19 +1,48 @@
 #!/usr/bin/env python3
 """
-Convert Label Studio CSV/Excel to Movement Metadata JSON format.
+Convert Label Studio CSV/Excel to Movement Metadata JSONL format.
 
 Input: CSV/Excel file or folder with CSV/Excel files (with columns including movement_metadata JSON string)
-Output: Single JSON file with movement types and confidences from all files
+Output: Single JSONL file with movement types and confidences from all files
 """
 
 import csv
 import json
 import sys
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import glob
 from datetime import datetime
 import pandas as pd
+
+
+def extract_numeric_video_id(source_video_id: str) -> str:
+    """
+    Extract numeric video ID from source_video_id.
+
+    Examples:
+        "00NfzFc8_6066938804" -> "6066938804"
+        "03qJIR4a_542721916" -> "542721916"
+        "6066938804" -> "6066938804" (already numeric)
+
+    Args:
+        source_video_id: Full source video ID
+
+    Returns:
+        Numeric portion of the video ID
+    """
+    if not source_video_id:
+        return ""
+
+    # If it contains underscore, take the part after underscore
+    if '_' in source_video_id:
+        parts = source_video_id.split('_')
+        # Return the last part which should be numeric
+        return parts[-1]
+
+    # If no underscore, return as is
+    return source_video_id
 
 
 def parse_movement_metadata(movement_str: str) -> List[Dict[str, Any]]:
@@ -74,9 +103,12 @@ def process_file(file_path: Path) -> List[Dict[str, Any]]:
 
     for row in rows:
         # Extract base fields - handle both string keys and NaN values
+        full_source_video_id = str(row.get('source_video_id', '')) if pd.notna(row.get('source_video_id')) else ''
+        numeric_video_id = extract_numeric_video_id(full_source_video_id)
+
         record = {
             "source_s3_key": str(row.get('source_s3_key', '')) if pd.notna(row.get('source_s3_key')) else '',
-            "source_video_id": str(row.get('source_video_id', '')) if pd.notna(row.get('source_video_id')) else '',
+            "source_video_id": numeric_video_id,  # Use numeric video ID
             "s3_key": str(row.get('s3_key', '')) if pd.notna(row.get('s3_key')) else '',
             "clip_id": str(row.get('clip_id', '')) if pd.notna(row.get('clip_id')) else '',
             "start_ms": int(row.get('start_ms', 0)) if pd.notna(row.get('start_ms')) else None,
@@ -131,14 +163,14 @@ def process_file(file_path: Path) -> List[Dict[str, Any]]:
 
 def convert_csv_to_json(input_path: str, output_path: Optional[str] = None) -> str:
     """
-    Convert Label Studio CSV/Excel file(s) to movement metadata JSON format.
+    Convert Label Studio CSV/Excel file(s) to movement metadata JSONL format.
 
     Args:
         input_path: Path to input CSV/Excel file or folder containing files
-        output_path: Path to output JSON file (optional)
+        output_path: Path to output JSONL file (optional)
 
     Returns:
-        Path to output JSON file
+        Path to output JSONL file
     """
     input_path = Path(input_path)
     all_results = []
@@ -168,7 +200,7 @@ def convert_csv_to_json(input_path: str, output_path: Optional[str] = None) -> s
             today = datetime.now().strftime('%m%d%Y')
             num_tasks = len(all_results)
             output_filename = f"Troveo_Delivery1_{today}_{num_tasks}"
-            output_path = input_path / f"{output_filename}.json"
+            output_path = input_path / f"{output_filename}.jsonl"
         else:
             output_path = Path(output_path)
 
@@ -182,18 +214,20 @@ def convert_csv_to_json(input_path: str, output_path: Optional[str] = None) -> s
             today = datetime.now().strftime('%m%d%Y')
             num_tasks = len(all_results)
             output_filename = f"Troveo_Delivery1_{today}_{num_tasks}"
-            output_path = input_path.parent / f"{output_filename}.json"
+            output_path = input_path.parent / f"{output_filename}.jsonl"
         else:
             output_path = Path(output_path)
 
     else:
         raise FileNotFoundError(f"Input path does not exist: {input_path}")
 
-    # Write JSON output
+    # Write JSONL output (one JSON object per line)
     with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(all_results, f, indent=2, ensure_ascii=False)
+        for record in all_results:
+            json_line = json.dumps(record, ensure_ascii=False)
+            f.write(json_line + '\n')
 
-    print(f"\n✅ Successfully converted {len(all_results)} total records to JSON")
+    print(f"\n✅ Successfully converted {len(all_results)} total records to JSONL")
     print(f"📄 Output: {output_path}")
 
     return str(output_path)
@@ -202,19 +236,21 @@ def convert_csv_to_json(input_path: str, output_path: Optional[str] = None) -> s
 def main():
     """Main entry point."""
     if len(sys.argv) < 2:
-        print("Usage: python csv_to_movement_json.py <csv_excel_file_or_folder> [output_json]")
+        print("Usage: python pyrenees_post_consolidation_from_xlsx.py <csv_excel_file_or_folder> [output_jsonl]")
         print("\nExamples:")
         print("  # Single CSV file:")
-        print("  python csv_to_movement_json.py labelstudio_tasks_cycle_1.csv")
-        print("  # Output: Troveo_Delivery1_10032025_25.json (today's date + 25 tasks)")
+        print("  python pyrenees_post_consolidation_from_xlsx.py labelstudio_tasks_cycle_1.csv")
+        print("  # Output: Troveo_Delivery1_10032025_25.jsonl (today's date + 25 tasks)")
         print("\n  # Single Excel file:")
-        print("  python csv_to_movement_json.py data.xlsx")
-        print("  # Output: Troveo_Delivery1_10032025_100.json")
+        print("  python pyrenees_post_consolidation_from_xlsx.py data.xlsx")
+        print("  # Output: Troveo_Delivery1_10032025_100.jsonl")
         print("\n  # Folder with multiple CSV/Excel files:")
-        print("  python csv_to_movement_json.py ./csv_files/labelstudio_csv_prod/")
-        print("  # Output: Troveo_Delivery1_10032025_500.json")
+        print("  python pyrenees_post_consolidation_from_xlsx.py ./csv_files/labelstudio_csv_prod/")
+        print("  # Output: Troveo_Delivery1_10032025_500.jsonl")
         print("\n  # Custom output name:")
-        print("  python csv_to_movement_json.py ./csv_files/labelstudio_csv_prod/ custom_output.json")
+        print("  python pyrenees_post_consolidation_from_xlsx.py ./csv_files/labelstudio_csv_prod/ custom_output.jsonl")
+        print("\nNote: source_video_id is automatically converted to numeric format")
+        print("  e.g., '00NfzFc8_6066938804' -> '6066938804'")
         sys.exit(1)
 
     input_path = sys.argv[1]
