@@ -1,5 +1,6 @@
 import sys
 import json
+import os
 from datetime import timedelta
 from pathlib import Path
 from typing import Union, List, Dict, Any, Tuple, Optional
@@ -55,7 +56,7 @@ class ViTVideoAgeDetector:
         "70+": 75.0,
     }
 
-    def __init__(self, config=None, model_name: str = "buffalo_l", ctx_id: int = -1, det_size: Tuple[int, int] = (640, 640)):
+    def __init__(self, config=None, model_name: str = "buffalo_l", ctx_id: int = -1, det_size: Tuple[int, int] = (480, 480)):
         if _INSIGHTFACE_IMPORT_ERROR is not None:
             raise RuntimeError(f"Failed to import InsightFace: {_INSIGHTFACE_IMPORT_ERROR}")
 
@@ -78,7 +79,7 @@ class ViTVideoAgeDetector:
             print("⚠️ ONNX Runtime not available, using CPU providers")
 
         # Face detector
-        self.app = FaceAnalysis(name=model_name, providers=providers)
+        self.app = FaceAnalysis(name=model_name, providers=providers, allowed_modules=['detection'])
         self.app.prepare(ctx_id=ctx_id, det_size=det_size)
 
         # ViT age classifier - move to GPU if available
@@ -145,28 +146,216 @@ class ViTVideoAgeDetector:
         age_value = self.classify_age_band_to_numeric(pred_label)
         return age_value, pred_label, conf
 
+    def analyze_frame_batch(self, frames: List[np.ndarray]) -> List[List[Dict[str, Any]]]:
+        """
+        Analyze multiple frames in a single batch with PARALLEL face detection.
+
+        OPTIMIZATION STRATEGY:
+        1. Detect faces in parallel across all frames (CPU-bound, parallelized with ThreadPool)
+        2. Collect all faces from all frames
+        3. Run ViT age classification on ALL faces in ONE GPU batch
+
+        Args:
+            frames: List of numpy arrays (frames to process)
+
+        Returns:
+            List of face detection results (one list per frame)
+        """
+        if not frames:
+            return []
+
+        import time
+        batch_start = time.time()
+        from concurrent.futures import ThreadPoolExecutor
+
+        # Step 1: PARALLEL face detection across all frames using ThreadPool
+        # Note: We use ThreadPool instead of Ray here because:
+        #   - Face detection is CPU-bound (InsightFace ONNX on CPU)
+        #   - ThreadPool has lower overhead for small tasks
+        #   - We're already inside a Ray task, so nested Ray calls would add overhead
+        #   - ThreadPool allows better CPU utilization for I/O-bound operations
+
+        def detect_faces_in_frame(frame_data):
+            """Detect faces in a single frame (runs in parallel thread)."""
+            frame_idx, frame = frame_data
+
+            # InsightFace face detection (CPU-bound)
+            faces = self.app.get(frame)
+
+            frame_faces = []
+            face_images = []
+
+            for face in faces:
+                bbox = getattr(face, "bbox", None)
+                if bbox is None:
+                    continue
+
+                try:
+                    # Crop face from frame
+                    pil_face = self._crop_face(frame, np.asarray(bbox))
+                    face_images.append(pil_face)
+                    frame_faces.append(face)
+                except:
+                    continue
+
+            return frame_idx, frame_faces, face_images
+
+        # Use ThreadPool to parallelize face detection across frames
+        # num_workers: 4-8 threads work well for CPU-bound face detection
+        num_workers = min(8, len(frames), os.cpu_count() or 4)
+
+        detection_start = time.time()
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            # Map each frame to a thread for parallel processing
+            detection_results = list(executor.map(detect_faces_in_frame, enumerate(frames)))
+        detection_time = time.time() - detection_start
+
+        # Step 2: Collect ALL faces from ALL frames
+        collection_start = time.time()
+        all_face_images = []
+        all_frame_faces = [[] for _ in frames]
+        face_to_frame_mapping = []  # Track (frame_idx, local_face_idx) for each face
+
+        for frame_idx, frame_faces, face_images in detection_results:
+            all_frame_faces[frame_idx] = frame_faces
+
+            for local_idx, face_img in enumerate(face_images):
+                all_face_images.append(face_img)
+                face_to_frame_mapping.append((frame_idx, local_idx))
+
+        collection_time = time.time() - collection_start
+
+        # Step 3: Process ALL faces from ALL frames in ONE GPU batch
+        if not all_face_images:
+            # No faces detected in any frame
+            print(f"⏱️ BATCH TIMING: detection={detection_time:.3f}s | collection={collection_time:.3f}s | total={time.time()-batch_start:.3f}s | frames={len(frames)} | faces=0")
+            return [[] for _ in frames]
+
+        try:
+            # Batch process ALL face images at once on GPU
+            preprocessing_start = time.time()
+            inputs = self.processor(all_face_images, return_tensors='pt', padding=True)
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            preprocessing_time = time.time() - preprocessing_start
+
+            gpu_inference_start = time.time()
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+                proba = outputs.logits.softmax(dim=1)
+                pred_ids = proba.argmax(dim=1)  # Shape: [total_faces_across_all_frames]
+                confs = proba.max(dim=1).values
+            gpu_inference_time = time.time() - gpu_inference_start
+
+            # Step 4: Distribute results back to respective frames
+            postprocessing_start = time.time()
+            results_per_frame = [[] for _ in frames]
+
+            for face_idx, (frame_idx, local_face_idx) in enumerate(face_to_frame_mapping):
+                pred_id = int(pred_ids[face_idx].item())
+                pred_label = self.model.config.id2label[pred_id]
+                age_value = self.classify_age_band_to_numeric(pred_label)
+
+                face_obj = all_frame_faces[frame_idx][local_face_idx]
+
+                face_result = {
+                    "age": age_value,
+                    "age_classification": self.classify_age_group(age_value),
+                    "gender_label": None,
+                    "gender_scores": None,
+                    "bbox": [int(face_obj.bbox[0]), int(face_obj.bbox[1]),
+                            int(face_obj.bbox[2]), int(face_obj.bbox[3])],
+                    "age_band": pred_label,
+                    "age_confidence": float(confs[face_idx].item()),
+                }
+
+                results_per_frame[frame_idx].append(face_result)
+
+            postprocessing_time = time.time() - postprocessing_start
+            total_time = time.time() - batch_start
+
+            print(f"⏱️ BATCH TIMING: detection={detection_time:.3f}s ({detection_time/total_time*100:.1f}%) | "
+                  f"collection={collection_time:.3f}s ({collection_time/total_time*100:.1f}%) | "
+                  f"preprocess={preprocessing_time:.3f}s ({preprocessing_time/total_time*100:.1f}%) | "
+                  f"gpu_inference={gpu_inference_time:.3f}s ({gpu_inference_time/total_time*100:.1f}%) | "
+                  f"postprocess={postprocessing_time:.3f}s ({postprocessing_time/total_time*100:.1f}%) | "
+                  f"total={total_time:.3f}s | frames={len(frames)} | faces={len(all_face_images)} | workers={num_workers}")
+
+        except Exception as e:
+            print(f"⚠️ Batch processing failed: {e}, falling back to per-frame")
+            # Fallback: process each frame individually
+            results_per_frame = [self.analyze_frame(frame) for frame in frames]
+
+        return results_per_frame
+
     def analyze_frame(self, frame: np.ndarray) -> List[Dict[str, Any]]:
         faces = self.app.get(frame)
         faces_out: List[Dict[str, Any]] = []
 
+        face_images = []
+        valid_faces = []
         for f in faces:
             bbox = getattr(f, "bbox", None)
             if bbox is None:
                 continue
-            pil_face = self._crop_face(frame, np.asarray(bbox))
-            age_value, age_band, conf = self._predict_age_for_crop(pil_face)
+            try:
+                pil_face = self._crop_face(frame, np.asarray(bbox))
+                face_images.append(pil_face)
+                valid_faces.append(f)
+            except Exception as e:
+                # Skip invalid face crops
+                continue
+        if not face_images:
+            return []
 
-            faces_out.append({
-                "age": age_value,
-                "age_classification": self.classify_age_group(age_value),
-                "gender_label": None,
-                "gender_scores": None,
-                "bbox": [int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])],
-                "age_band": age_band,
-                "age_confidence": conf,
-                # Optional: could include age_band/conf if needed later
-            })
+        # OPTIMIZATION : Batch process ALL faces with ViT in ONE forward pass
+        try:
+            # Processor can handle list of images - adds padding automatically
+            inputs = self.processor(face_images, return_tensors='pt', padding=True)
 
+            # Single transfer to GPU for all faces
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+                proba = outputs.logits.softmax(dim=1)
+                pred_ids = proba.argmax(dim=1)  # Shape: [num_faces]
+                confs = proba.max(dim=1).values  # Shape: [num_faces]
+
+            # Build results for all faces
+            for i, f in enumerate(valid_faces):
+                pred_id = int(pred_ids[i].item())
+                pred_label = self.model.config.id2label[pred_id]
+                age_value = self.classify_age_band_to_numeric(pred_label)
+
+                faces_out.append({
+                    "age": age_value,
+                    "age_classification": self.classify_age_group(age_value),
+                    "gender_label": None,
+                    "gender_scores": None,
+                    "bbox": [int(f.bbox[0]), int(f.bbox[1]), int(f.bbox[2]), int(f.bbox[3])],
+                    "age_band": pred_label,
+                    "age_confidence": float(confs[i].item()),
+                })
+
+        except Exception as e:
+            # Fallback to per-face processing if batch fails
+            print(f"⚠️ Batch processing failed, falling back to per-face: {e}")
+            for f in valid_faces:
+                try:
+                    pil_face = self._crop_face(frame, np.asarray(f.bbox))
+                    age_value, age_band, conf = self._predict_age_for_crop(pil_face)
+
+                    faces_out.append({
+                        "age": age_value,
+                        "age_classification": self.classify_age_group(age_value),
+                        "gender_label": None,
+                        "gender_scores": None,
+                        "bbox": [int(f.bbox[0]), int(f.bbox[1]), int(f.bbox[2]), int(f.bbox[3])],
+                        "age_band": age_band,
+                        "age_confidence": conf,
+                    })
+                except:
+                    continue
         return faces_out
 
     def _draw_overlays(self, frame: np.ndarray, faces: List[Dict[str, Any]]) -> np.ndarray:
@@ -212,6 +401,8 @@ class ViTVideoAgeDetector:
         return annotated
 
     def process_video(self, video_path: Union[str, Path], output_dir: Optional[Union[str, Path]] = None):
+        import time
+        total_start = time.time()
         video_path = Path(video_path)
         if not video_path.exists():
             raise FileNotFoundError(f"Video path not found: {video_path}")
@@ -230,6 +421,7 @@ class ViTVideoAgeDetector:
         
         json_path = base_out / "predictions.json"
 
+        
         print(f"Processing video: {video_path}")
 
         cap = cv2.VideoCapture(str(video_path))
@@ -239,59 +431,69 @@ class ViTVideoAgeDetector:
         self.processed_frames = 0
         self.frames_json = []
 
+        FRAME_BATCH_SIZE = 32  # Process 16 frames at once (adjust based on GPU memory)
+        video_read_time = 0
+        batch_process_time = 0
         try:
             frame_num = 0
+            frames_batch = []
+            frames_metadata_batch = []
+
             while True:
+                read_start = time.time()
                 ret, frame = cap.read()
+                video_read_time += time.time() - read_start
+
                 if not ret:
+                    # Process remaining frames in batch
+                    if frames_batch:
+                        batch_start = time.time()
+                        self._process_and_save_batch(
+                            frames_batch, frames_metadata_batch,
+                            frames_out, fps
+                        )
+                        batch_process_time += time.time() - batch_start
                     break
 
+                # Collect frames for batch processing
                 if frame_num % self.config.FRAME_INTERVAL == 0:
                     timestamp = str(timedelta(seconds=int(frame_num / fps)))
-                    
-                    # Only create frame path if frames are being saved
+
                     frame_path = None
                     if frames_out is not None:
                         frame_filename = f"frame_{frame_num:06d}.jpg"
                         frame_path = frames_out / frame_filename
 
-                    try:
-                        faces = self.analyze_frame(frame)
-                        num_faces = len(faces)
-                        should_save = self.config.SAVE_FRAMES and (num_faces > 0 if self.config.SAVE_ONLY_DETECTIONS else True)
-                        if should_save and frame_path is not None:
-                            to_save = self._draw_overlays(frame, faces) if num_faces > 0 else frame
-                            cv2.imwrite(str(frame_path), to_save)
-                        frame_record = {
-                            "frame_num": frame_num,
-                            "timestamp": timestamp,
-                            "frame_path": str(frame_path) if should_save and frame_path is not None else "",
-                            "num_faces": num_faces,
-                            "faces": faces,
-                            "error": "",
-                        }
-                    except Exception as e:
-                        if self.config.SAVE_FRAMES and not self.config.SAVE_ONLY_DETECTIONS and frame_path is not None:
-                            cv2.imwrite(str(frame_path), frame)
-                        frame_record = {
-                            "frame_num": frame_num,
-                            "timestamp": timestamp,
-                            "frame_path": str(frame_path) if self.config.SAVE_FRAMES and not self.config.SAVE_ONLY_DETECTIONS and frame_path is not None else "",
-                            "num_faces": 0,
-                            "faces": [],
-                            "error": str(e),
-                        }
+                    # Add to batch
+                    frames_batch.append(frame.copy())
+                    frames_metadata_batch.append({
+                        'frame_num': frame_num,
+                        'timestamp': timestamp,
+                        'frame_path': frame_path,
+                    })
 
-                    if self.config.WRITE_JSON:
-                        self.frames_json.append(frame_record)
-                    self.processed_frames += 1
-
-                    if self.processed_frames % 50 == 0:
-                        print(f"Processed {self.processed_frames} sampled frames (last={frame_num})")
+                    # Process batch when full
+                    if len(frames_batch) >= FRAME_BATCH_SIZE:
+                        batch_start = time.time()
+                        self._process_and_save_batch(
+                            frames_batch, frames_metadata_batch,
+                            frames_out, fps
+                        )
+                        batch_process_time += time.time() - batch_start
+                        frames_batch = []
+                        frames_metadata_batch = []
 
                 frame_num += 1
+
         finally:
             cap.release()
+            total_time = time.time() - total_start
+            print(f"📊 VIDEO PROCESSING BREAKDOWN:")
+            print(f"   ⏱️  Total time: {total_time:.3f}s")
+            print(f"   📹 Video reading: {video_read_time:.3f}s ({video_read_time/total_time*100:.1f}%)")
+            print(f"   🔄 Batch processing: {batch_process_time:.3f}s ({batch_process_time/total_time*100:.1f}%)")
+            print(f"   ⚙️  Other overhead: {total_time - video_read_time - batch_process_time:.3f}s ({(total_time - video_read_time - batch_process_time)/total_time*100:.1f}%)")
+            print(f"   📊 Total frames read: {frame_num}, Frames processed: {len(self.frames_json)}")
 
         # Save results
         if self.config.WRITE_JSON:
@@ -312,18 +514,63 @@ class ViTVideoAgeDetector:
             "total_frames": len(self.frames_json),
         }
 
+    def _process_and_save_batch(self, frames_batch: List[np.ndarray],
+                           metadata_batch: List[Dict],
+                           frames_out: Optional[Path],
+                           fps: float):
+        """
+        Process a batch of frames and save results.
+        """
+        # Process all frames in batch
+        batch_results = self.analyze_frame_batch(frames_batch)
+
+        # Save results for each frame
+        for i, (frame, metadata, faces) in enumerate(zip(frames_batch, metadata_batch, batch_results)):
+            frame_num = metadata['frame_num']
+            timestamp = metadata['timestamp']
+            frame_path = metadata['frame_path']
+            num_faces = len(faces)
+
+            # Save frame if needed
+            should_save = self.config.SAVE_FRAMES and (
+                num_faces > 0 if self.config.SAVE_ONLY_DETECTIONS else True
+            )
+
+            if should_save and frame_path is not None:
+                to_save = self._draw_overlays(frame, faces) if num_faces > 0 else frame
+                cv2.imwrite(str(frame_path), to_save)
+
+            # Build frame record
+            frame_record = {
+                "frame_num": frame_num,
+                "timestamp": timestamp,
+                "frame_path": str(frame_path) if should_save and frame_path is not None else "",
+                "num_faces": num_faces,
+                "faces": faces,
+                "error": "",
+            }
+
+            if self.config.WRITE_JSON:
+                self.frames_json.append(frame_record)
+
+            self.processed_frames += 1
+
+        # Progress logging
+        if self.processed_frames % 50 == 0:
+            print(f"Processed {self.processed_frames} sampled frames (batch size: {len(frames_batch)})")
+
     def get_processing_summary(self):
-        age_counts = {"minor": 0, "adult": 0, "senior": 0, "unknown": 0}
-        for frame in self.frames_json:
-            for face in frame.get("faces", []):
-                age_class = face.get("age_classification", "unknown")
-                age_counts[age_class] += 1
-        return {
-            "processed_frames": self.processed_frames,
-            "total_faces_detected": sum(len(frame.get("faces", [])) for frame in self.frames_json),
-            "frames_with_errors": sum(1 for frame in self.frames_json if frame.get("error")),
-            "age_classifications": age_counts,
-        }
+            age_counts = {"minor": 0, "adult": 0, "senior": 0, "unknown": 0}
+            for frame in self.frames_json:
+                for face in frame.get("faces", []):
+                    age_class = face.get("age_classification", "unknown")
+                    age_counts[age_class] += 1
+            return {
+                "processed_frames": self.processed_frames,
+                "total_faces_detected": sum(len(frame.get("faces", [])) for frame in self.frames_json),
+                "frames_with_errors": sum(1 for frame in self.frames_json if frame.get("error")),
+                "age_classifications": age_counts,
+            }
 
 
 def main():

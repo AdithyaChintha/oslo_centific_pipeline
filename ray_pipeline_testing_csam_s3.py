@@ -69,8 +69,9 @@ from utils.chunk_id_extractor import extract_chunk_id_from_path, extract_sequenc
 from ray_jobs.nsfw_det_final import process_video_chunks_for_nsfw
 from ray_jobs.motion_energy import compute_motion_energy
 from ray_jobs.face_age_detector_optimized import process_video_chunks_for_face_detection_optimized as process_video_chunks_for_face_detection
+from ray_jobs.face_detection_serve_manager import FaceDetectionServeManager
 from ray_jobs.labelstudio_tasks import (assign_views_to_labelstudio_positions, generate_multiview_4view_labelstudio_task,
-    generate_consolidated_shard_labelstudio_task, 
+    generate_consolidated_shard_labelstudio_task,
     import_consolidated_tasks_to_labelstudio,
     update_labelstudio_tasks_with_video_domain_and_activity, create_labelstudio_task_for_s3_mode)
    
@@ -1626,6 +1627,21 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
     from utils.pipeline_timer import PipelineTimer
     timer = PipelineTimer()
 
+    # =============================================================================
+    # INITIALIZE RAY SERVE FOR FACE DETECTION
+    # =============================================================================
+    logger.info("Initializing Ray Serve for Face Detection")
+
+    face_service = FaceDetectionServeManager(num_replicas=2)
+    try:
+        face_service.start()
+        logger.info("Face Detection Service started successfully")
+        logger.info("Models loaded once - will serve all videos")
+    except Exception as e:
+        logger.error(f"Failed to start Face Detection Service: {e}")
+        logger.warning("Falling back to standard Ray tasks (slower)")
+        face_service = None
+
     try:
         while True:
             cycle += 1
@@ -1782,7 +1798,8 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                             timer=timer,
                             video_name=video_id,
                             session_id=video_id,
-                            video_id=video_id
+                            video_id=video_id,
+                            face_service=face_service
                         )
                         nsfw_detected = results.get('nsfw', {}).get('detected', False)
                         minors_detected = results.get('face', {}).get('minors_detected', False)
@@ -1970,7 +1987,13 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
 
     except KeyboardInterrupt:
         logger.info("S3 polling stopped by user")
-        tracker.save()    
+        tracker.save()
+    finally:
+        # Cleanup Ray Serve
+        if face_service and face_service.is_running:
+            logger.info("Shutting down Ray Serve")
+            face_service.stop()
+            logger.info("Face Detection Service stopped")    
 
 def read_session_metadata(blob_client, container_name: str, session_path: str) -> dict:
     """
@@ -5219,7 +5242,7 @@ def process_time_aligned_shard(
     }
 
 def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
-                                         output_dir, shard_offset_sec, shard_index=0, total_shard_count=None, view_name="view", multi_chunk_process = False, timer = None, video_name = None, session_id = None, video_id = None):
+                                         output_dir, shard_offset_sec, shard_index=0, total_shard_count=None, view_name="view", multi_chunk_process = False, timer = None, video_name = None, session_id = None, video_id = None, face_service=None):
     """
     Run single shard through all 7 AI models
     """
@@ -5310,8 +5333,31 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
     #     timing_id=f"{base_timing_id}.motion_energy")
     
     update_tracking(chunk_id, "model_processing.face_detection.front", "processing")
-    face_ref  = process_video_chunks_for_face_detection.remote([video_shard_path], config=None, frame_interval=30, save_frames=False, chunk_duration_sec=60, enable_timing=enable_timing,
-        timing_id=f"{base_timing_id}.face_detection")
+
+    # Use Ray Serve if available, otherwise fall back to Ray tasks
+    if face_service and face_service.is_running:
+        # Ray Serve path (models already loaded)
+        face_ref = face_service.handle.remote({
+            "video_path": video_shard_path,
+            "output_dir": face_output_dir,
+            "frame_interval": 30,
+            "save_frames": False,
+            "chunk_offset_seconds": shard_offset_sec,
+            "batch_size": 8,
+            "enable_timing": enable_timing,
+            "timing_id": f"{base_timing_id}.face_detection"
+        })
+    else:
+        # Fallback to Ray tasks (loads models each time)
+        face_ref = process_video_chunks_for_face_detection.remote(
+            [video_shard_path],
+            config=None,
+            frame_interval=30,
+            save_frames=False,
+            chunk_duration_sec=60,
+            enable_timing=enable_timing,
+            timing_id=f"{base_timing_id}.face_detection"
+        )
     
     # Only run clap detection for first and last shards
     # clap_ref = None
@@ -5338,7 +5384,16 @@ def process_single_shard_through_pipeline(video_shard_path, audio_shard_path,
         # (audio_res, nsfw_res, motion_res, face_res, clap_res, lighting_res, signal_quality_res) = ray.get(
         #     [audio_ref, nsfw_ref, motion_ref, face_ref, clap_ref, lighting_ref, signal_quality_ref]
         # )
-    nsfw_res, face_res = ray.get([nsfw_ref, face_ref])
+
+    # Handle both Ray Serve (DeploymentResponse) and Ray tasks (ObjectRef)
+    if face_service and face_service.is_running:
+        # Convert DeploymentResponse to ObjectRef for parallel execution
+        face_ref_obj = face_ref._to_object_ref_sync()
+        # Wait for both in parallel
+        nsfw_res, face_res = ray.get([nsfw_ref, face_ref_obj])
+    else:
+        # Ray tasks return ObjectRef - can get both together
+        nsfw_res, face_res = ray.get([nsfw_ref, face_ref])
         # Update tracking for completed models
         # update_tracking(chunk_id, "model_processing.audio_diarization", "completed", results_path=audio_output_dir)
         # update_tracking(chunk_id, "model_processing.scene_detection.front", "completed", results_path=scene_output_dir)
