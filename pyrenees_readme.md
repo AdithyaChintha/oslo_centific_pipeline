@@ -100,12 +100,32 @@ polling:
 state_tracking:
   state_file: "s3_video_state.json"
 
-# Label Studio Integration
+# Label Studio Integration (Excel Export - NEW)
 labelstudio:
   auto_create_tasks: true
-  url: "http://localhost:8080"
-  api_key: "your_api_key"
-  project_id: 1
+  export_mode: "csv"  # Options: "api", "csv", "both"
+
+  # Excel Export Configuration (NEW)
+  csv_export:
+    enabled: true
+    local_output_dir: "./csv_files/batch_1/labelstudio_csv_prod"
+    azure_upload: true
+    azure_blob_prefix: "batch_1/csv_files_prod/"
+    filename_format: "labelstudio_tasks_cycle_{cycle}_{timestamp}.xlsx"  # Excel format
+    per_cycle_file: true  # One Excel file per polling cycle
+
+  # Primary Label Studio project
+  primary:
+    api_url: "http://20.55.226.129:8082/api/projects/"
+    api_key: "your_api_key"
+    project_id: 1
+
+  # Secondary Label Studio project (optional)
+  secondary:
+    enabled: true
+    api_url: "http://20.55.226.129:8081/api/projects/"
+    api_key: "your_api_key"
+    project_id: 1
 ```
 
 
@@ -345,16 +365,128 @@ Metadata includes:
 - Has movement flag
 - Confidence scores
 
-### Label Studio Auto-Import
+### Excel Export for Label Studio (NEW)
 
-To automatically import tasks to Label Studio:
+The pipeline now supports exporting task data to **Excel files (.xlsx)** instead of or in addition to API calls:
+
+#### Export Modes
+
+1. **CSV Mode** (Excel Export Only):
+```yaml
+labelstudio:
+  export_mode: "csv"
+  csv_export:
+    enabled: true
+    local_output_dir: "./csv_files/batch_1/labelstudio_csv_prod"
+    azure_upload: true
+```
+
+2. **API Mode** (Traditional Label Studio API):
+```yaml
+labelstudio:
+  export_mode: "api"
+  primary:
+    api_url: "http://20.55.226.129:8082/api/projects/"
+    api_key: "your_api_key"
+    project_id: 1
+```
+
+3. **Both Mode** (Excel + API):
+```yaml
+labelstudio:
+  export_mode: "both"
+  csv_export:
+    enabled: true
+  primary:
+    api_url: "..."
+```
+
+#### Excel File Structure
+
+Files are created per polling cycle:
+- `labelstudio_tasks_cycle_1_20251003_183233.xlsx` - First 500 videos
+- `labelstudio_tasks_cycle_2_20251003_190000.xlsx` - Next 500 videos
+- etc.
+
+**Columns include:**
+- `video`, `filename`, `azure_url`
+- `s3_key`, `source_s3_key`, `bucket`
+- `source_video_id`, `clip_id`
+- `start_ms`, `end_ms`, `duration_ms`
+- `nsfw_detection_status`, `minor_detection_status`
+- `nsfw_segments`, `minor_segments` (JSON)
+- `movement_metadata` (JSON)
+- `Movement1` - `Movement5` (if available)
+
+#### Multi-Project Support
+
+Send tasks to **two Label Studio projects** simultaneously:
 
 ```yaml
 labelstudio:
-  auto_create_tasks: true
-  url: "http://localhost:8080"
-  api_key: "your_api_key"
-  project_id: 1
+  primary:
+    api_url: "http://20.55.226.129:8082/api/projects/"
+    api_key: "primary_key"
+    project_id: 1
+
+  secondary:
+    enabled: true
+    api_url: "http://20.55.226.129:8081/api/projects/"
+    api_key: "secondary_key"
+    project_id: 1
+```
+
+#### Azure Blob Upload
+
+Excel files are automatically uploaded to Azure:
+
+```yaml
+csv_export:
+  azure_upload: true
+  azure_blob_prefix: "batch_1/csv_files_prod/"
+```
+
+Files appear in blob storage:
+```
+batch_1/csv_files_prod/labelstudio_tasks_cycle_1_20251003_183233.xlsx
+batch_1/csv_files_prod/labelstudio_tasks_cycle_2_20251003_190000.xlsx
+```
+
+### Post-Processing: Excel to JSONL Conversion
+
+Convert Excel files to JSONL format with numeric video IDs:
+
+```bash
+python pyrenees_post_consolidation_from_xlsx.py data.xlsx
+# Output: Troveo_Delivery1_10032025_100.jsonl
+```
+
+**Key Features:**
+- Converts to JSONL format (one JSON object per line)
+- Extracts numeric video IDs: `"00NfzFc8_6066938804"` → `"6066938804"`
+- Auto-generated filename: `Troveo_Delivery1_MMDDYYYY_NumTasks.jsonl`
+- Supports batch processing of multiple files
+
+**Usage Examples:**
+
+```bash
+# Single Excel file
+python pyrenees_post_consolidation_from_xlsx.py labelstudio_tasks.xlsx
+# Output: Troveo_Delivery1_10032025_25.jsonl
+
+# Folder with multiple files
+python pyrenees_post_consolidation_from_xlsx.py ./csv_files/batch_1/
+# Output: Troveo_Delivery1_10032025_1500.jsonl
+
+# Custom output name
+python pyrenees_post_consolidation_from_xlsx.py data.xlsx custom_output.jsonl
+```
+
+**JSONL Output Format:**
+
+```jsonl
+{"source_s3_key": "s3://bucket/video.mp4", "source_video_id": "6066938804", "clip_id": "1112-1120.mov", "start_ms": 1112000, "end_ms": 1120000, "duration_ms": 8000, "movement_type_1": "shake", "confidence_1": 1.0, "has_movement": "Yes"}
+{"source_s3_key": "s3://bucket/video.mp4", "source_video_id": "542721916", "clip_id": "668-676.mov", "start_ms": 668000, "end_ms": 676000, "duration_ms": 8000, "movement_type_1": null, "confidence_1": null, "has_movement": "No"}
 ```
 
 
