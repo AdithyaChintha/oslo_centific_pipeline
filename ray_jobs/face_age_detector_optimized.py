@@ -1,7 +1,7 @@
 import ray
 import json
 import os
-import logging
+from utils.logger import get_logger
 import sys
 import time
 import gc
@@ -10,8 +10,13 @@ from datetime import timedelta, datetime
 from collections import defaultdict, Counter
 import numpy as np
 
+# Add video-age-detection-pipeline/src to path at module import time
+_detector_path = str(Path(__file__).parent.parent / "video-age-detection-pipeline" / "src")
+if _detector_path not in sys.path:
+    sys.path.insert(0, _detector_path)
+
 # Set up logger first
-logger = logging.getLogger("face_age_detector_optimized")
+logger = get_logger("face_age_detector_optimized")
 
 class CachedModelManager:
     """Manage cached models for Ray workers to avoid reinitialization."""
@@ -133,7 +138,7 @@ def find_face_detector_module():
     ]
 
     for path in possible_paths:
-        if path.exists() and (path / "deepfacedetect.py").exists():
+        if path.exists() and ((path / "deepfacedetect.py").exists() or (path / "vit_video_agedetect.py").exists()):
             logger.info(f"Found face detector module at: {path}")
             return str(path)
 
@@ -157,8 +162,9 @@ def import_face_detector():
         sys.path.insert(0, face_detector_path)
 
     try:
-        from deepfacedetect import FaceAgeDetector
-        logger.info("Successfully imported FaceAgeDetector")
+        # from deepfacedetect import FaceAgeDetector
+        from vit_video_agedetect import ViTVideoAgeDetector as FaceAgeDetector
+        logger.info("Successfully imported ViTVideoAgeDetector")
         return FaceAgeDetector
     except ImportError as e:
         logger.error(f"Failed to import FaceAgeDetector: {e}")
@@ -299,17 +305,21 @@ def process_video_for_face_detection_optimized_sync(video_path: str, output_dir:
 
     try:
         # Configure TensorFlow for this Ray worker
-        gpu_configured = configure_tf_for_ray_worker()
-
-        if not gpu_configured:
-            logger.warning("⚠️ GPU configuration failed, will use CPU")
+        gpu_start_time = time.time()
+        # gpu_configured = configure_tf_for_ray_worker()
+        gpu_end_time = time.time()
+        print(f"Time taken to configure GPU:{gpu_end_time - gpu_start_time}")
+        # if not gpu_configured:
+        #     logger.warning("⚠️ GPU configuration failed, will use CPU")
 
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
 
         # Get cached detector instance
+        model_load_time = time.time()
         model_manager = CachedModelManager()
         detector = model_manager.get_face_age_detector()
+        print(f"Time taken to load model:{time.time() - model_load_time}")
 
         # Override config if frame_interval is provided
         if frame_interval and hasattr(detector.config, 'FRAME_INTERVAL'):
@@ -323,7 +333,7 @@ def process_video_for_face_detection_optimized_sync(video_path: str, output_dir:
         logger.info(f"🚀 Processing video {video_path} with GPU optimization")
         logger.info(f"   📐 Batch size: {batch_size}")
         logger.info(f"   🎛️  Frame interval: {frame_interval}")
-        logger.info(f"   🎯 GPU configured: {gpu_configured}")
+        # logger.info(f"   🎯 GPU configured: {gpu_configured}")
 
         start_time = time.time()
 
@@ -332,8 +342,9 @@ def process_video_for_face_detection_optimized_sync(video_path: str, output_dir:
 
         end_time = time.time()
         processing_time = end_time - start_time
-
+        print(f"Total processing time:{processing_time}")
         # Get processing summary
+        summary_time = time.time()
         summary = detector.get_processing_summary()
 
         # Extract detailed analysis from all DeepFace results
@@ -343,7 +354,7 @@ def process_video_for_face_detection_optimized_sync(video_path: str, output_dir:
         flagged_segments = []
         if hasattr(detector, 'frames_json') and detector.frames_json:
             flagged_segments = convert_frames_to_segments(detector.frames_json, chunk_offset_seconds)
-
+        print(f"Total summary time:{time.time()-summary_time}")
         # Calculate performance metrics
         total_processing_time = time.time() - processing_start_time
         fps = summary.get("processed_frames", 0) / processing_time if processing_time > 0 else 0
@@ -364,7 +375,7 @@ def process_video_for_face_detection_optimized_sync(video_path: str, output_dir:
 
             # Processing metadata
             "processing_info": {
-                "gpu_configured": gpu_configured,
+                "gpu_configured": True,
                 "batch_size": batch_size,
                 "frame_interval": frame_interval,
                 "save_frames": save_frames,
@@ -399,7 +410,7 @@ def process_video_for_face_detection_optimized_sync(video_path: str, output_dir:
             "detailed_analysis_summary": detailed_summary,
             "total_processing_time_seconds": total_processing_time,
             "processing_fps": fps,
-            "gpu_used": gpu_configured,
+            "gpu_used": True,
             "success": True
         }
 

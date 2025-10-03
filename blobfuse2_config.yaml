@@ -13,7 +13,7 @@ libfuse:
 
 azstorage:
   type: block
-  account-name: oslotestvideo
-  account-key: zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==
-  container: instavideo
+  account-name: pyrenees
+  account-key: 5Cb0dUA/ehCjlGmRWlIxuvG+eQ1308taRqt9EZp1tpk32UZxMUJa+1+PbwHw8YnwsnN9Syhi4EFf+AStZwrw6w==
+  container: ingestvideo
   auth-type: accountKey

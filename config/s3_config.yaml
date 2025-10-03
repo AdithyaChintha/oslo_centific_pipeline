@@ -3,33 +3,54 @@ s3:
   aws_secret_access_key: "${AWS_SECRET_ACCESS_KEY}"
   region: "us-west-2"
   bucket_name: "troveo-videodb-shared"
-  input_prefix: "outputs/batch_1"
+  input_prefix: "outputs/batch_1_tier_1"
   output_prefix: "results/"
   presigned_url_expiry_days: 365
   source_video_prefix: "transcoding_profile_id=5"
   movement_metadata:
     enabled: true  # Set to false to disable movement metadata lookup
-    s3_key: "outputs/batch_1/batch_1_metadata_samples.parquet"  # Path to parquet file in S3
+    s3_key: "outputs/batch_1_tier_1/batch_1_tier_1_metadata.parquet"  # Path to parquet file in S3
     cache_locally: true  # Whether to cache downloaded parquet file
 
 
 state_tracking:
   enabled: true
-  state_file: "s3_state.json"
+  state_file: "s3_state_prod_batch_1.json"
   max_retry_attempts: 3
 
 polling:
   enabled: true
   interval_minutes: 5
-  max_videos_per_cycle: 1
+  max_videos_per_cycle: 10
 
 processing:
-  temp_dir: "./temp_downloads"
-  output_dir: "./output"
+  temp_dir: "/tmp/pyrenees_downloads"
+  output_dir: "./pyrenees_output/batch1/"
   cleanup_after_processing: true
 
 labelstudio:
-  api_url: "https://annotations-stg.oneforma2.com/api/projects/"
-  api_key: "1af6610f3fa81575f5215067c8455a26682b92ae"
-  project_id: 6001
   auto_create_tasks: true
+  export_mode: "csv"  # Options: "api", "csv", "both"
+  csv_export:
+    enabled: true
+    local_output_dir: "./csv_files/batch_1/labelstudio_csv_prod"
+    azure_upload: true
+    azure_blob_prefix: "batch_1/csv_files_prod/"
+    filename_format: "labelstudio_tasks_cycle_{cycle}_{timestamp}.csv"
+    per_cycle_file: true  # One CSV file per polling cycle
+  # Primary Label Studio project
+  primary:
+  
+    api_url: "http://20.55.226.129:8082/api/projects/"
+    api_key: "f33c1e1ea29e6a3891b705c263b488e469cfe0ed"
+    project_id: 1
+
+  # Secondary Label Studio project (optional - set enabled: false to disable)
+  secondary:
+    enabled: true
+    api_url: "http://20.55.226.129:8081/api/projects/"
+    api_key: "85367c27739d01803fa94da1f450b1c50a655615"
+    project_id: 1
+
+# 8081: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoicmVmcmVzaCIsImV4cCI6ODA2NjcwMjQ4OSwiaWF0IjoxNzU5NTAyNDg5LCJqdGkiOiI5MTcwNWEyYmY4NmI0NTQxOTRiYjAwODc5NmIzMTIzOSIsInVzZXJfaWQiOiI5In0.bgx1YJSGPSVBvUF-5auhRnL_IU4VkGKzL2M6FrnXW6k
+# 8082: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoicmVmcmVzaCIsImV4cCI6ODA2NjcwMjYyNSwiaWF0IjoxNzU5NTAyNjI1LCJqdGkiOiIwODk4NThkYWYzZTg0OWE0YjhmODZmNmI4NmQwNzJiOCIsInVzZXJfaWQiOiI0In0.1prhBRSKqvAGGuH0ntiUwXqYMvco-uZXCrhuOwQU3a0

@@ -2,8 +2,11 @@ import os
 import json
 import ray
 from glob import glob
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any, Union, Optional
 from datetime import datetime
+import pandas as pd
+import csv
+
 
 # It's better to handle the SDK import gracefully
 try:
@@ -1357,12 +1360,15 @@ def create_labelstudio_task_for_s3_mode(
 ) -> int:
     """
     Create Label Studio task for Azure video with comprehensive clip metadata.
+    Supports sending tasks to multiple Label Studio projects (primary + optional secondary).
 
     Args:
         filename: Display filename (e.g., "video_name_1000-1008.mov")
         azure_video_url: Azure SAS URL for video streaming
         results: Processing results from process_single_shard_through_pipeline
-        config: Configuration dictionary
+        config: Configuration dictionary with labelstudio config supporting:
+                - Legacy format: single project with api_url, api_key, project_id
+                - New format: primary/secondary projects with individual configs
         s3_key: Full S3 key path (e.g., "input-videos/video_name/1000-1008.mov")
         source_s3_key: Full S3 key path to original source video
                       (e.g., "input-videos/9360653015/00eEzUmL_9360653015.mp4")
@@ -1375,7 +1381,8 @@ def create_labelstudio_task_for_s3_mode(
         movement_loader: MovementMetadataLoader instance for looking up movement data
 
     Returns:
-        Label Studio task ID (int)
+        Primary Label Studio task ID (int). If multiple projects are configured,
+        tasks are created in all enabled projects but only primary ID is returned.
     """
     import requests
     import random
@@ -1487,33 +1494,295 @@ def create_labelstudio_task_for_s3_mode(
         "predictions": predictions
     }
 
-    # Send to Label Studio
+    # Send to Label Studio projects
     labelstudio_config = config['labelstudio']
-
-    # Build URL - handle both 'server_url' and 'api_url' formats
-    if 'server_url' in labelstudio_config:
-        url = f"{labelstudio_config['server_url']}/api/projects/{labelstudio_config['project_id']}/tasks/"
-    else:
-        # api_url format includes base path
-        base_url = labelstudio_config['api_url'].rstrip('/')
-        url = f"{base_url}/{labelstudio_config['project_id']}/tasks/"
-
-    # Handle both 'api_token' and 'api_key' naming
-    api_token = labelstudio_config.get('api_token') or labelstudio_config.get('api_key')
-
-    headers = {
-        "Authorization": f"Token {api_token}",
-        "Content-Type": "application/json"
-    }
 
     logger.info(f"Label Studio task metadata: filename={filename}, "
                f"source_video_id={source_video_id}, clip_id={clip_id}, "
                f"duration={duration_ms}ms")
 
-    response = requests.post(url, json=task_data, headers=headers)
-    response.raise_for_status()
-    
-    task_id = response.json()["id"]
-    logger.info(f"Created Label Studio task: ID={task_id}")
+    # Helper function to send task to a project
+    def send_to_project(project_config, project_name=""):
+        # Build URL - handle both 'server_url' and 'api_url' formats
+        if 'server_url' in project_config:
+            url = f"{project_config['server_url']}/api/projects/{project_config['project_id']}/tasks/"
+        else:
+            # api_url format includes base path
+            base_url = project_config['api_url'].rstrip('/')
+            url = f"{base_url}/{project_config['project_id']}/tasks/"
 
-    return task_id
+        # Handle both 'api_token' and 'api_key' naming
+        api_token = project_config.get('api_token') or project_config.get('api_key')
+
+        headers = {
+            "Authorization": f"Token {api_token}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.post(url, json=task_data, headers=headers)
+        response.raise_for_status()
+
+        task_id = response.json()["id"]
+        logger.info(f"Created Label Studio task in {project_name}: ID={task_id}, Project={project_config['project_id']}")
+        return task_id
+
+    task_ids = []
+
+    # Check if using new multi-project config format
+    if 'primary' in labelstudio_config:
+        # New format with primary/secondary projects
+
+        # Send to primary project
+        try:
+            primary_id = send_to_project(labelstudio_config['primary'], "PRIMARY project")
+            task_ids.append(primary_id)
+        except Exception as e:
+            logger.error(f"Failed to create task in PRIMARY project: {e}")
+            raise
+
+        # Send to secondary project if enabled
+        if labelstudio_config.get('secondary', {}).get('enabled', False):
+            try:
+                secondary_id = send_to_project(labelstudio_config['secondary'], "SECONDARY project")
+                task_ids.append(secondary_id)
+            except Exception as e:
+                logger.warning(f"Failed to create task in SECONDARY project: {e}")
+                # Don't raise - secondary is optional
+    else:
+        # Legacy format - single project
+        try:
+            task_id = send_to_project(labelstudio_config, "Label Studio")
+            task_ids.append(task_id)
+        except Exception as e:
+            logger.error(f"Failed to create Label Studio task: {e}")
+            raise
+
+    # Return primary task ID for backward compatibility
+    return task_ids[0] if task_ids else None
+
+
+def export_labelstudio_task_to_csv(
+    filename: str,
+    azure_video_url: str,
+    results: dict,
+    config: dict,
+    csv_output_dir: str,
+    cycle_number: int = None,
+    cycle_start_time: str = None,
+    s3_key: str = None,
+    source_s3_key: str = None,
+    source_video_id: str = None,
+    clip_id: str = None,
+    start_ms: int = None,
+    end_ms: int = None,
+    duration_ms: int = None,
+    bucket: str = None,
+    movement_loader = None
+) -> str:
+    """
+    Export Label Studio task data to Excel file.
+
+    Creates or appends to an Excel file with all Label Studio task fields.
+    One Excel file per polling cycle (e.g., 1-500, 501-1000, etc.)
+
+    Args:
+        (same as create_labelstudio_task_for_s3_mode)
+        csv_output_dir: Directory to save Excel file
+        cycle_number: Current polling cycle number (e.g., 1, 2, 3)
+        cycle_start_time: Timestamp when cycle started (ISO format)
+
+    Returns:
+        Path to Excel file
+    """
+    # Extract predictions (same logic as create_labelstudio_task_for_s3_mode)
+    nsfw_segments = []
+    minor_segments = []
+
+    nsfw_data = results.get('nsfw', {})
+    if nsfw_data.get('success') and nsfw_data.get('total_nsfw_detections', 0) > 0:
+        for seg in nsfw_data.get('flagged_segments', []) or []:
+            s = float(seg.get('start_time', 0))
+            e = float(seg.get('end_time', 0))
+            if e > s:
+                nsfw_segments.append({
+                    'start': s,
+                    'end': e,
+                    'labels': ['nsfw'],
+                    'score': 0.8
+                })
+
+    face_data = results.get('face', {})
+    if face_data.get('success'):
+        for seg in face_data.get('flagged_segments', []) or []:
+            desc = str(seg.get('description', '')).lower()
+            ftype = str(seg.get('flag_type', '')).lower()
+            if 'minor' in desc or 'minor' in ftype:
+                s = float(seg.get('start_time', 0))
+                e = float(seg.get('end_time', 0))
+                if e > s:
+                    minor_segments.append({
+                        'start': s,
+                        'end': e,
+                        'labels': ['minor'],
+                        'score': 0.8
+                    })
+
+    # Model status
+    model_status = {}
+    if nsfw_data.get('success'):
+        nsfw_count = nsfw_data.get('total_nsfw_detections', 0)
+        model_status['nsfw_detection'] = True if nsfw_count > 0 else None
+    else:
+        model_status['nsfw_detection'] = None
+
+    if face_data.get('success'):
+        potential_minors = 0
+        for seg in face_data.get('flagged_segments', []) or []:
+            potential_minors += seg.get('metadata', {}).get('potential_minors', 0)
+        model_status['minor_detection'] = potential_minors if potential_minors > 0 else None
+    else:
+        model_status['minor_detection'] = None
+
+    # Format S3 URIs
+    s3_uri = f"s3://{bucket}/{s3_key}" if bucket and s3_key else None
+    source_s3_uri = f"s3://{bucket}/{source_s3_key}" if bucket and source_s3_key else None
+
+    # Get movement metadata
+    movement_metadata = None
+    has_movement_metadata = False
+    if movement_loader and movement_loader.is_loaded() and s3_uri:
+        movement_metadata = movement_loader.get_movement_metadata(s3_uri)
+        has_movement_metadata = movement_metadata is not None
+
+    # Generate unique task ID
+    task_id = f"task_{datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')}"
+
+    # Create row data
+    row_data = {
+        # Video information
+        'video': azure_video_url,
+        'filename': filename,
+        'azure_url': azure_video_url,
+
+        # S3 information
+        's3_key': s3_uri or '',
+        'source_s3_key': source_s3_uri or '',
+        'bucket': bucket or '',
+
+        # Clip information
+        'source_video_id': source_video_id or '',
+        'clip_id': clip_id or '',
+        'start_ms': start_ms if start_ms is not None else '',
+        'end_ms': end_ms if end_ms is not None else '',
+        'duration_ms': duration_ms if duration_ms is not None else '',
+
+        # Model status
+        'nsfw_detection_status': model_status.get('nsfw_detection', ''),
+        'minor_detection_status': model_status.get('minor_detection', ''),
+
+        # NSFW predictions
+        'nsfw_segments_count': len(nsfw_segments),
+        'nsfw_segments': json.dumps(nsfw_segments) if nsfw_segments else '',
+
+        # Minor predictions
+        'minor_segments_count': len(minor_segments),
+        'minor_segments': json.dumps(minor_segments) if minor_segments else '',
+
+        # Movement metadata
+        'movement_metadata': json.dumps(movement_metadata) if movement_metadata else '',
+        'has_movement_metadata': has_movement_metadata,
+
+        # Processing information
+        'processing_timestamp': datetime.utcnow().isoformat() + 'Z',
+        'pipeline_mode': 's3',
+        'task_id': task_id
+    }
+
+    # Ensure output directory exists
+    os.makedirs(csv_output_dir, exist_ok=True)
+
+    # Get Excel filename from config
+    csv_config = config.get('labelstudio', {}).get('csv_export', {})
+    filename_format = csv_config.get('filename_format', 'labelstudio_tasks_cycle_{cycle}_{timestamp}.xlsx')
+    # Replace .csv extension with .xlsx if present
+    filename_format = filename_format.replace('.csv', '.xlsx')
+    per_cycle_file = csv_config.get('per_cycle_file', True)
+
+    # Generate Excel filename based on cycle
+    if per_cycle_file and cycle_number is not None:
+        # One Excel file per cycle
+        # Use cycle_start_time if provided, otherwise use current time
+        timestamp = cycle_start_time if cycle_start_time else datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        excel_filename = filename_format.replace('{cycle}', str(cycle_number)).replace('{timestamp}', timestamp)
+    else:
+        # Fallback: single file or timestamp-based
+        timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        excel_filename = f'labelstudio_tasks_{timestamp}.xlsx'
+
+    excel_path = os.path.join(csv_output_dir, excel_filename)
+
+    # Check if file exists - if so, read existing data and append
+    if os.path.isfile(excel_path):
+        # Read existing Excel file
+        existing_df = pd.read_excel(excel_path)
+        # Append new row
+        new_df = pd.DataFrame([row_data])
+        combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+    else:
+        # Create new DataFrame with just this row
+        combined_df = pd.DataFrame([row_data])
+
+    # Write to Excel
+    combined_df.to_excel(excel_path, index=False, engine='openpyxl')
+
+    logger.info(f"Exported Label Studio task to Excel: {excel_path}")
+    logger.info(f"Task metadata: filename={filename}, source_video_id={source_video_id}, "
+               f"clip_id={clip_id}, nsfw_segments={len(nsfw_segments)}, "
+               f"minor_segments={len(minor_segments)}")
+
+    return excel_path
+
+
+def upload_csv_to_azure_blob(csv_path: str, config: dict, azure_blob_client=None, azure_container=None) -> Optional[str]:
+    """
+    Upload Excel file to Azure Blob Storage.
+
+    Args:
+        csv_path: Local path to Excel file (kept as csv_path for backward compatibility)
+        config: Configuration dictionary
+        azure_blob_client: Azure blob client (optional)
+        azure_container: Azure container name (optional)
+
+    Returns:
+        Azure blob URL or None if upload failed
+    """
+    csv_config = config.get('labelstudio', {}).get('csv_export', {})
+
+    if not csv_config.get('azure_upload', False):
+        logger.info("Azure upload disabled in config, skipping Excel upload")
+        return None
+
+    if not azure_blob_client or not azure_container:
+        logger.warning("Azure blob client or container not provided, skipping Excel upload")
+        return None
+
+    try:
+        # Get blob prefix from config
+        blob_prefix = csv_config.get('azure_blob_prefix', 'labelstudio_exports/')
+        file_filename = os.path.basename(csv_path)
+        blob_name = f"{blob_prefix}{file_filename}"
+
+        # Upload file
+        with open(csv_path, 'rb') as data:
+            blob_client = azure_blob_client.get_blob_client(container=azure_container, blob=blob_name)
+            blob_client.upload_blob(data, overwrite=True)
+
+        logger.info(f"Uploaded Excel to Azure: {blob_name}")
+
+        # Generate blob URL
+        blob_url = f"https://{azure_blob_client.account_name}.blob.core.windows.net/{azure_container}/{blob_name}"
+        return blob_url
+
+    except Exception as e:
+        logger.error(f"Failed to upload Excel to Azure: {e}")
+        return None
