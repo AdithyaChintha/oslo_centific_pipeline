@@ -1,3 +1,4 @@
+input_file: "video_lists/server_1_videos.txt"
 s3:
   aws_access_key_id: "${AWS_ACCESS_KEY_ID}"
   aws_secret_access_key: "${AWS_SECRET_ACCESS_KEY}"
@@ -15,7 +16,7 @@ s3:
 
 state_tracking:
   enabled: true
-  state_file: "s3_state_prod_batch_1.json"
+  state_file: "s3_state_prod_batch_1_server1.json"
   max_retry_attempts: 3
 
 polling:
@@ -33,10 +34,10 @@ labelstudio:
   export_mode: "csv"  # Options: "api", "csv", "both"
   csv_export:
     enabled: true
-    local_output_dir: "./csv_files/batch_1/labelstudio_csv_prod"
+    local_output_dir: "./csv_files/batch_1/labelstudio_csv_prod_server_1"
     azure_upload: true
     azure_blob_prefix: "batch_1/csv_files_prod/"
-    filename_format: "labelstudio_tasks_cycle_{cycle}_{timestamp}.csv"
+    filename_format: "labelstudio_tasks_server_1_cycle_{cycle}_{timestamp}.csv"
     per_cycle_file: true  # One CSV file per polling cycle
   # Primary Label Studio project
   primary:

@@ -63,6 +63,12 @@ class PipelineTimer:
         with self.lock:
             return self.timings.copy()
 
+    def reset(self):
+        """Clear all timing data"""
+        with self.lock:
+            self.timings.clear()
+            self.active_timers.clear()
+
 
 
 def generate_hierarchical_timing_structure(raw_timing_data: Dict, session_id: str,
