@@ -2082,6 +2082,10 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                         logger.warning(f"Failed to export timing data: {e}")
                         logger.warning(traceback.format_exc())
 
+                    # Reset timer for next video
+                    timer.reset()
+                    logger.debug(f"Timer reset for next video")
+
                     # Cleanup after CSV export and upload
                     if s3_config['processing'].get('cleanup_after_processing', True):
                         if os.path.exists(local_video_path):
