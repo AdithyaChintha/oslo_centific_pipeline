@@ -1,13 +1,20 @@
-# Byte-compiled / optimized / DLL files
+# Documentation files created during testing
+tests.md
+TEST_COVERAGE_SUMMARY.md
+pyrenees_readme.md
+README_downloader.md
+simple_readme.md
+
+# Test documentation files
+tests/mangesh.md
+tests/README_TESTS.md
+tests/TEST_SUMMARY.md
+
+# Python
 __pycache__/
-*.py[codz]
+*.py[cod]
 *$py.class
-
-# C extensions
 *.so
-*.wav
-
-# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -21,458 +28,80 @@ parts/
 sdist/
 var/
 wheels/
-share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 MANIFEST
 
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
 
-# Models
-yolov8n.pt
-nsfw_model/
-*.onnx
-*.pt
-*.pth
-*.h5
-*.pb
-*.tflite
-
-# Testing ray_pipeline
-ray_test_scene_det2.py
-ray_testing_scene_detection_alone.py
-ray_pipeline_age_detect.py
-
-# Intermediate outputs
-test_outputs/
-outputs/
-test_files/
-
-# models
-models/
-
-# shard videos for now 
-outputs/simplified_unified_pipeline_output/video_shards/
-minimal_ray_scene_detection_result.json
-minimal_scene_detection_result.json
-
-# Old codes 
-ray_jobs/face_age_detector_old.py
-ray_jobs/nsfw_det_new.py
-ray_jobs/nsfw_det_old.py
-ray_jobs/scene_detection_old.py
-ray_jobs/scene_detection.py
-
-# Unit test / coverage reports
+# Testing
+.pytest_cache/
+.coverage
 htmlcov/
 .tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
 *.cover
-*.py.cover
 .hypothesis/
-.pytest_cache/
-cover/
-
-# Translations
-*.mo
-*.pot
-
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-
-# Flask stuff:
-instance/
-.webassets-cache
-
-# Scrapy stuff:
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-
-# PyBuilder
-.pybuilder/
-target/
 
 # Jupyter Notebook
 .ipynb_checkpoints
 
-# IPython
-profile_default/
-ipython_config.py
-
 # pyenv
-#   For a library or package, you might want to ignore these files since the code is
-#   intended to run in multiple environments; otherwise, check them in:
-# .python-version
+.python-version
 
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-#Pipfile.lock
+# Logs
+*.log
 
-# UV
-#   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#uv.lock
+# Database
+*.db
+*.sqlite
+*.sqlite3
 
-# poetry
-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
-#poetry.lock
-#poetry.toml
+# OS
+Thumbs.db
+.DS_Store
 
-# pdm
-#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
-#   pdm recommends including project-wide configuration in pdm.toml, but excluding .pdm-python.
-#   https://pdm-project.org/en/latest/usage/project/#working-with-version-control
-#pdm.lock
-#pdm.toml
-.pdm-python
-.pdm-build/
-
-# pixi
-#   Similar to Pipfile.lock, it is generally recommended to include pixi.lock in version control.
-#pixi.lock
-#   Pixi creates a virtual environment in the .pixi directory, just like venv module creates one
-#   in the .venv directory. It is recommended not to include this directory in version control.
-.pixi
-
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
-__pypackages__/
-
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
-
-# Environments
-.env
-.envrc
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# pytype static type analyzer
-.pytype/
-
-# Cython debug symbols
-cython_debug/
-
-# PyCharm
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
-
-# Abstra
-# Abstra is an AI-powered process automation framework.
-# Ignore directories containing user credentials, local state, and settings.
-# Learn more at https://abstra.io/docs
-.abstra/
-
-# Visual Studio Code
-#  Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
-#  that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#  and can be added to the global gitignore or merged into this file. However, if you prefer, 
-#  you could uncomment the following to ignore the entire vscode folder
-# .vscode/
-
-# Ruff stuff:
-.ruff_cache/
-
-# PyPI configuration file
-.pypirc
-
-# Cursor
-#  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
-#  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
-#  refer to https://docs.cursor.com/context/ignore-files
-.cursorignore
-.cursorindexingignore
-
-# Marimo
-marimo/_static/
-marimo/_lsp/
-__marimo__/
-# Ignore all .jpg files
-*.jpg
-*.mp4
-*.insv
-# Optionally ignore only inside outputs/
-
-
-
-
-# Ignore __pycache__ and compiled Python files
-__pycache__/
-*.pyc
-
-# 360° Home Activity Motion Analysis Pipeline
-# .gitignore file
-
-# ============================================================================
-# INPUT FILES - Exclude all video files and input data
-# ============================================================================
-input/
-inputs/
-videos/
+# Project specific
 *.mp4
 *.avi
 *.mov
 *.mkv
 *.insv
-*.3gp
-*.webm
-*.flv
-
-# ============================================================================
-# LOGS - Exclude all log files and directories
-# ============================================================================
-logs/
-log/
-*.log
-*.log.*
-
-# ============================================================================
-# TEMPORARY FILES
-# ============================================================================
-# Temporary files
-*.tmp
-*.temp
+*.wav
+*.mp3
+output/
 temp/
-tmp/
-.tmp/
-
-# OS generated files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-desktop.ini
-
-# ============================================================================
-# OUTPUT FILES - KEEP ANALYSIS RESULTS BUT EXCLUDE LARGE FILES
-# ============================================================================
-
-# Keep JSON results and summary reports
-!output/**/*.json
-!output/**/*.txt
-
-# But exclude large video files in output
-output/**/*.mp4
-output/**/*.avi
-output/**/*.mov
-output/**/*.mkv
-output/**/*.insv
-
-# Exclude temporary processing files
-output/**/temp_*
-output/**/tmp_*
-output/**/*.tmp
-
-# ============================================================================
-# IDE AND EDITOR FILES
-# ============================================================================
-
-# VSCode
-*.code-workspace
-
-# PyCharm
-*.iws
-*.iml
-*.ipr
-
-# Sublime Text
-*.sublime-project
-*.sublime-workspace
-
-# Vim
-*.swp
-*.swo
-*~
-
-# Emacs
-*~
-\#*\#
-/.emacs.desktop
-/.emacs.desktop.lock
-*.elc
-auto-save-list
-tramp
-.\#*
-
-# ============================================================================
-# SYSTEM FILES
-# ============================================================================
-
-# Windows
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-$RECYCLE.BIN/
-*.cab
-*.msi
-*.msm
-*.msp
-*.lnk
-
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-Icon?
-._*
-.DocumentRevisions-V100
-.fseventsd
-.Spotlight-V100
-.TemporaryItems
-.Trashes
-.VolumeIcon.icns
-.com.apple.timemachine.donotpresent
-.AppleDB
-.AppleDesktop
-Network Trash Folder
-Temporary Items
-.apdisk
-
-# Linux
-*~
-.fuse_hidden*
-.directory
-.Trash-*
-.nfs*
-
-# ============================================================================
-# DEVELOPMENT AND TESTING
-# ============================================================================
-
-# Testing files
-test_videos/
-sample_videos/
-debug_output/
-
-# Jupyter notebooks (optional - uncomment if you don't want to track)
-# *.ipynb
-
-# Configuration overrides (keep main config.py, exclude local overrides)
-config_local.py
-config_dev.py
-config_test.py
-local_config.py
-
-# ============================================================================
-# DOCUMENTATION BUILD FILES
-# ============================================================================
-
-# Sphinx documentation
-docs/_build/
-
-# ============================================================================
-# PACKAGE MANAGER
-# ============================================================================
-
-# npm (if using any JavaScript tools)
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# ============================================================================
-# CUSTOM PROJECT SPECIFIC
-# ============================================================================
-
-# Model files (if you add ML models later)
-*.pkl
-*.model
-*.weights
-*.h5
-
-# Large data files
-*.csv
+cache/
+downloads/
+results/
+annotations/
 *.xlsx
-*.parquet
+*.xls
 
-# Backup files
-*.bak
-*.backup
-*_backup.*
+# State and tracking files
+state/
+*.state.json
+processed_sessions.json
 
-# Archive files
-*.zip
-*.tar.gz
-*.rar
-*.7z
+# Model files
+*.pth
+*.onnx
+*.pkl
+models/
 
-# ============================================================================
-# KEEP THESE FILES (explicitly tracked even if in excluded directories)
-# ============================================================================
-
-# Keep important project files
-!README.md
-!requirements.txt
-!setup.py
-!LICENSE
-!.gitignore
-
-# Keep configuration templates
-!config_template.py
-!example_config.py
-
-# Keep documentation
-!docs/**/*.md
-!docs/**/*.rst
-
-# Keep test structure (but not test videos)
-!tests/*.py
-!tests/fixtures/*.json
-!tests/fixtures/*.txt
+# Azure/AWS credentials
+.env
+credentials.json
+config.json
