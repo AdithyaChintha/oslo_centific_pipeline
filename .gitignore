@@ -476,10 +476,3 @@ yarn-error.log*
 !tests/*.py
 !tests/fixtures/*.json
 !tests/fixtures/*.txt
-
-# Documentation files created during testing
-tests.md
-TEST_COVERAGE_SUMMARY.md
-pyrenees_readme.md
-README_downloader.md
-simple_readme.md
