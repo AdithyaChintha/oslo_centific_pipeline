@@ -68,6 +68,7 @@ export AWS_SECRET_ACCESS_KEY="your_aws_secret_key"
 Modify `config/s3_config.yaml` if any changes are needed:
 
 ```yaml
+input_file: "video_lists/server_1_videos.txt" # for splitting processing between two servers. NOTE: Using input file will diable s3 polling in pipeline, we will only process files present in the input file, check section 5 for creating input files
 s3:
   # AWS Credentials (optional if using env vars)
   aws_access_key_id: "your_key"
@@ -144,6 +145,171 @@ blob_upload:
   timeout_seconds: 300
   retry_attempts: 3
 ```
+### 5. Input File Mode (Multi-Server Processing)
+
+The pipeline supports two modes of operation:
+1. **Polling Mode** (default): Continuously discovers new videos from S3
+2. **Input File Mode**: Processes a pre-defined list of videos from a file
+
+#### When to Use Input File Mode
+
+- Processing videos across multiple servers in parallel
+- Processing a specific subset of videos
+- Resuming failed batches
+- Avoiding S3 discovery overhead for large batches
+
+#### How Input File Mode Works
+
+When `input_file` is specified in `s3_config.yaml`:
+
+1. **S3 polling is disabled** - The pipeline will NOT discover new videos from S3
+2. **Videos are loaded from file** - Only videos listed in the input file are processed
+3. **State tracking still works** - Already-completed videos are skipped based on state file
+4. **Cycles continue** - Pipeline processes `max_videos_per_cycle` videos per cycle until all are done
+
+#### Input File Format
+
+The input file is a tab-separated text file with three columns:
+
+```
+s3_key	etag	size
+outputs/batch_1_tier_1/clips/video_001.mov	"abc123def456"	2048576
+outputs/batch_1_tier_1/clips/video_002.mov	"def789ghi012"	3145728
+```
+
+**Columns:**
+1. `s3_key` - Full S3 path to the video clip
+2. `etag` - S3 ETag for deduplication
+3. `size` - File size in bytes
+
+#### Generating Input Files for Multi-Server Processing
+
+**Step 1: Generate split files**
+
+Change all the required parameters in `s3_config.yaml` specifically related to the input S3 path and state path for the batch you are processing, then run:
+
+```bash
+python split_videos_for_servers.py \
+  --servers 2 \
+  --config config/s3_config.yaml \
+  --output-dir video_lists_batch_2
+```
+
+**What this does:**
+- Discovers all videos from S3 bucket (based on `input_prefix` in config)
+- Loads existing state file to check what's already processed
+- Excludes completed and failed videos
+- Splits remaining videos evenly across the specified number of servers
+
+**Output files:**
+- `video_lists_batch_2/server_1_videos.txt` - First half of unprocessed videos
+- `video_lists_batch_2/server_2_videos.txt` - Second half of unprocessed videos
+
+**Step 2: Configure each server**
+
+Create separate config files for each server:
+
+**Server 1** - `config/s3_config_server1.yaml`:
+```yaml
+input_file: "video_lists_batch_2/server_1_videos.txt"
+
+state_tracking:
+  state_file: "s3_state_batch_2_server1.json"
+
+labelstudio:
+  csv_export:
+    local_output_dir: "./csv_files/batch_2/server_1"
+    filename_format: "labelstudio_tasks_server_1_cycle_{cycle}_{timestamp}.xlsx"
+```
+
+**Server 2** - `config/s3_config_server2.yaml`:
+```yaml
+input_file: "video_lists_batch_2/server_2_videos.txt"
+
+state_tracking:
+  state_file: "s3_state_batch_2_server2.json"
+
+labelstudio:
+  csv_export:
+    local_output_dir: "./csv_files/batch_2/server_2"
+    filename_format: "labelstudio_tasks_server_2_cycle_{cycle}_{timestamp}.xlsx"
+```
+
+**Step 3: Run on both servers**
+
+```bash
+# Server 1
+python ray_pipeline_testing_csam_s3.py --mode s3 --s3-config config/s3_config_server1.yaml > logs/server1.log 2>&1
+
+# Server 2
+python ray_pipeline_testing_csam_s3.py --mode s3 --s3-config config/s3_config_server2.yaml > logs/server2.log 2>&1
+```
+
+#### Key Differences: Polling Mode vs Input File Mode
+
+| Feature | Polling Mode | Input File Mode |
+|---------|-------------|-----------------|
+| **Video Discovery** | Continuous S3 polling | One-time load from file |
+| **New Videos** | Automatically detected | Not detected (fixed list) |
+| **State Tracking** | Tracks all discovered videos | Tracks only input file videos |
+| **Multi-Server** | Requires coordination | Independent servers |
+| **Use Case** | Real-time processing | Batch processing |
+| **Completion** | Runs indefinitely | Exits when input file complete |
+
+#### State File Behavior with Input Files
+
+1. **On startup**: Pipeline loads all videos from input file
+2. **Filtering**: Videos already marked "completed" or "failed" in state are skipped
+3. **Processing**: Only unprocessed videos are queued (respects `max_videos_per_cycle`)
+4. **Completion**: Pipeline exits when all input file videos are processed
+
+**Example workflow:**
+- Input file has 22,681 videos
+- State file shows 5,000 already completed
+- Pipeline will process the remaining 17,681 videos
+- With `max_videos_per_cycle: 500`, it will take ~36 cycles
+
+#### Monitoring Multi-Server Progress
+
+Check progress on each server using the helper script:
+
+```bash
+# Server 1 progress
+python check_progress.py \
+  --input-file video_lists_batch_2/server_1_videos.txt \
+  --state-file pyrenees_output/batch2/s3_state_batch_2_server1.json
+
+# Server 2 progress
+python check_progress.py \
+  --input-file video_lists_batch_2/server_2_videos.txt \
+  --state-file pyrenees_output/batch2/s3_state_batch_2_server2.json
+```
+
+**Output:**
+```
+======================================================================
+Processing Progress Check
+======================================================================
+📊 Total videos in input file: 22,681
+──────────────────────────────────────────────────────────────────────
+Status Breakdown:
+  ✅ Completed:   15,000
+  ❌ Failed:      0
+  ⏳ Processing:  0
+  📋 Discovered:  50
+──────────────────────────────────────────────────────────────────────
+  🎯 Remaining:   7,681
+──────────────────────────────────────────────────────────────────────
+📈 Progress: 15,000 / 22,681 (66.13%)
+```
+
+#### Important Notes
+
+- **No overlap**: The split script ensures each video appears in only ONE server's input file
+- **Separate state files**: Each server maintains its own state to avoid conflicts
+- **Separate outputs**: Each server writes to its own CSV/Excel output directory
+- **Independent operation**: Servers can run at different speeds without coordination
+- **Failure handling**: Failed videos are marked in state and won't be retried (excluded from splits)
 
 ## Running the Pipeline
 
