@@ -41,7 +41,7 @@ from ray_jobs.mov_to_mp4 import convert_mov_to_mp4_task
 # CONFIGURATION
 # ==================================================
 # Get input file from environment variable or use default
-DEFAULT_INPUT_FILE = os.environ.get('INPUT_FILE', "../video_lists/server_1_videos.txt")
+DEFAULT_INPUT_FILE = os.environ.get('INPUT_FILE', "../video_lists/failed_list_server2_updated.txt")
 
 
 # ==================================================
