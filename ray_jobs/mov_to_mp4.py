@@ -78,7 +78,6 @@ def convert_mov_to_mp4_task(
             ffmpeg_cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
             timeout=3600  # 1 hour timeout
         )
 
@@ -87,10 +86,11 @@ def convert_mov_to_mp4_task(
 
         # Check if conversion was successful
         if result.returncode != 0:
-            logger.error(f"FFmpeg conversion failed: {result.stderr}")
+            error_msg = result.stderr.decode('utf-8', errors='ignore') if isinstance(result.stderr, bytes) else result.stderr
+            logger.error(f"FFmpeg conversion failed: {error_msg}")
             return {
                 'success': False,
-                'error': f"FFmpeg error: {result.stderr[:500]}",
+                'error': f"FFmpeg error: {error_msg[:500]}",
                 'returncode': result.returncode
             }
 
