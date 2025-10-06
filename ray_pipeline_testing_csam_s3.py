@@ -1280,6 +1280,57 @@ def consolidate_dual_view_outputs(all_results, local_outputs_dir, conv_time, loc
                 consolidated_data["consolidated_annotation_summary"]["annotation_workload_reduction"])
     return consolidated_data
 
+def load_videos_from_file(input_file: str, s3_client, bucket: str) -> list:
+    """
+    Load video list from file instead of S3 discovery.
+
+    File format (tab-separated):
+        s3_key    etag    size
+
+    Args:
+        input_file: Path to input file
+        s3_client: S3 client
+        bucket: S3 bucket name
+
+    Returns:
+        List of video dictionaries compatible with discover_videos_in_s3()
+    """
+    import os
+
+    logger.info(f"Loading videos from input file: {input_file}")
+
+    if not os.path.exists(input_file):
+        raise FileNotFoundError(f"Input file not found: {input_file}")
+
+    videos = []
+    with open(input_file, 'r') as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+
+            parts = line.split('\t')
+            if len(parts) != 3:
+                logger.warning(f"Line {line_num}: Invalid format, skipping: {line}")
+                continue
+
+            s3_key, etag, size = parts
+
+            # Extract filename from S3 key
+            filename = os.path.basename(s3_key)
+
+            video = {
+                'key': s3_key,
+                'filename': filename,
+                'etag': etag.strip('"'),  # Remove quotes if present
+                'size': int(size),
+                'last_modified': None  # Not needed for processing
+            }
+            videos.append(video)
+
+    logger.info(f"Loaded {len(videos)} videos from {input_file}")
+    return videos
+
 def pipeline_main_multichunks_sequential_sessions(session_paths: list, output_base_dir: str, azure_config: dict, pipeline_config: dict):
     """
     Process multiple sessions sequentially - complete one session fully before starting the next.
@@ -1652,9 +1703,14 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
             logger.info(f" S3 POLL CYCLE #{cycle}")
 
             # 1. Discover videos
-            logger.info(f" Discovering videos in s3://{bucket}/{input_prefix}")
-            all_videos = discover_videos_in_s3(s3_client, bucket, input_prefix)
-            logger.info(f" Found {len(all_videos)} videos in S3")
+            input_file = s3_config.get('input_file')
+            if input_file:
+                logger.info(f"Using input file: {input_file}")
+                all_videos = load_videos_from_file(input_file, s3_client, bucket)
+            else:
+                logger.info(f" Discovering videos in s3://{bucket}/{input_prefix}")
+                all_videos = discover_videos_in_s3(s3_client, bucket, input_prefix)
+                logger.info(f" Found {len(all_videos)} videos in S3")
 
             # 2. Filter new videos
             new_videos = []
@@ -1972,13 +2028,6 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                             'nsfw_detected': nsfw_detected,
                             'minors_detected': minors_detected
                         })
-                         # Cleanup
-                        if s3_config['processing'].get('cleanup_after_processing', True):
-                            if os.path.exists(local_video_path):
-                                os.remove(local_video_path)
-                            if os.path.exists(output_dir):
-                                import shutil
-                                shutil.rmtree(output_dir)
 
                         logger.info(f"Successfully processed: {filename}")
 
@@ -2032,6 +2081,20 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                         import traceback
                         logger.warning(f"Failed to export timing data: {e}")
                         logger.warning(traceback.format_exc())
+
+                    # Reset timer for next video
+                    timer.reset()
+                    logger.debug(f"Timer reset for next video")
+
+                    # Cleanup after CSV export and upload
+                    if s3_config['processing'].get('cleanup_after_processing', True):
+                        if os.path.exists(local_video_path):
+                            os.remove(local_video_path)
+                            logger.info(f"Deleted downloaded video: {local_video_path}")
+                        if os.path.exists(output_dir):
+                            import shutil
+                            shutil.rmtree(output_dir)
+                            logger.info(f"Deleted output directory: {output_dir}")
                 
                 # Print summary
                 tracker.print_summary()
