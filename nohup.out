@@ -1,0 +1,154 @@
+📋 Pipeline logs will be saved to: pipeline_logs/csam_pipeline_20251007_183601.log
+📋 Pipeline logs will be saved to: pipeline_logs/csam_pipeline_20251007_183601.log
+📋 Pipeline logs will be saved to: pipeline_logs/csam_pipeline_20251007_183601.log
+📋 Pipeline logs will be saved to: pipeline_logs/csam_pipeline_20251007_183601.log
+📋 Pipeline logs will be saved to: pipeline_logs/csam_pipeline_20251007_183601.log
+2025-10-07 18:36:03.392248: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-10-07 18:36:03.433935: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI AVX512_BF16 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2025-10-07 18:36:04.324580: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+INFO 10-07 18:36:05 [__init__.py:216] Automatically detected platform cuda.
+📋 Pipeline logs will be saved to: pipeline_logs/csam_pipeline_20251007_183607.log
+📋 Pipeline logs will be saved to: pipeline_logs/csam_pipeline_20251007_183607.log
+📋 Pipeline logs will be saved to: pipeline_logs/csam_pipeline_20251007_183607.log
+[GPU] CuPy available - GPU acceleration enabled
+📋 Pipeline logs will be saved to: pipeline_logs/csam_pipeline_20251007_183607.log
+📋 Pipeline logs will be saved to: pipeline_logs/csam_pipeline_20251007_183607.log
+📋 Pipeline logs will be saved to: pipeline_logs/csam_pipeline_20251007_183607.log
+📋 Pipeline logs will be saved to: pipeline_logs/csam_pipeline_20251007_183608.log
+📋 Pipeline logs will be saved to: pipeline_logs/csam_pipeline_20251007_183608.log
+📋 Pipeline logs will be saved to: pipeline_logs/csam_pipeline_20251007_183608.log
+📋 Pipeline logs will be saved to: pipeline_logs/csam_pipeline_20251007_183608.log
+📋 Pipeline logs will be saved to: pipeline_logs/csam_pipeline_20251007_183608.log
+2025-10-07 18:36:08 [INFO] BlobUtils: ✅ Pipeline configuration loaded from: config/pipeline_config.yaml
+2025-10-07 18:36:08,171 - INFO - ✅ Pipeline configuration loaded from: config/pipeline_config.yaml
+2025-10-07 18:36:10,108	INFO worker.py:1942 -- Started a local Ray instance. View the dashboard at [1m[32mhttp://127.0.0.1:8266 [39m[22m
+2025-10-07 18:36:10 [INFO] SimplifiedUnifiedPipeline: ✅ Ray initialized successfully
+2025-10-07 18:36:10,686 - INFO - ✅ Ray initialized successfully
+2025-10-07 18:36:10 [INFO] SimplifiedUnifiedPipeline:  Starting S3 MODE: Continuous video discovery and processing
+2025-10-07 18:36:10,686 - INFO -  Starting S3 MODE: Continuous video discovery and processing
+2025-10-07 18:36:10 [INFO] SimplifiedUnifiedPipeline:  S3 Configuration:
+2025-10-07 18:36:10,688 - INFO -  S3 Configuration:
+2025-10-07 18:36:10 [INFO] SimplifiedUnifiedPipeline:    Bucket: troveo-videodb-shared
+2025-10-07 18:36:10,688 - INFO -    Bucket: troveo-videodb-shared
+2025-10-07 18:36:10 [INFO] SimplifiedUnifiedPipeline:    Input Prefix: outputs/batch_2_tier_1
+2025-10-07 18:36:10,688 - INFO -    Input Prefix: outputs/batch_2_tier_1
+2025-10-07 18:36:10 [INFO] SimplifiedUnifiedPipeline:    Poll Interval: 0.5 minutes
+2025-10-07 18:36:10,688 - INFO -    Poll Interval: 0.5 minutes
+2025-10-07 18:36:10 [INFO] SimplifiedUnifiedPipeline: Starting S3 polling mode
+2025-10-07 18:36:10,689 - INFO - Starting S3 polling mode
+2025-10-07 18:36:10 [INFO] S3 utils: S3 client created for region: us-east-1
+2025-10-07 18:36:10,750 - INFO - S3 client created for region: us-east-1
+2025-10-07 18:36:10 [INFO] BlobUtils: 🔍 Raw config keys: ['logging', 'components', 'libfuse', 'azstorage']
+2025-10-07 18:36:10,751 - INFO - 🔍 Raw config keys: ['logging', 'components', 'libfuse', 'azstorage']
+2025-10-07 18:36:10 [INFO] BlobUtils: 🔍 Azstorage config keys: ['type', 'account-name', 'account-key', 'container', 'auth-type']
+2025-10-07 18:36:10,751 - INFO - 🔍 Azstorage config keys: ['type', 'account-name', 'account-key', 'container', 'auth-type']
+2025-10-07 18:36:10 [INFO] BlobUtils: ✅ Azure blob service client created
+2025-10-07 18:36:10,752 - INFO - ✅ Azure blob service client created
+2025-10-07 18:36:10 [INFO] BlobUtils: ✅ Pipeline configuration loaded from: config/pipeline_config.yaml
+2025-10-07 18:36:10,754 - INFO - ✅ Pipeline configuration loaded from: config/pipeline_config.yaml
+2025-10-07 18:36:10 [INFO] SimplifiedUnifiedPipeline: Azure blob client configured for upload
+2025-10-07 18:36:10,754 - INFO - Azure blob client configured for upload
+2025-10-07 18:36:10 [INFO] SimplifiedUnifiedPipeline:  Initializing movement metadata loader: s3://troveo-videodb-shared/outputs/batch_2_tier_1/batch_2_tier_1_metadata.parquet
+2025-10-07 18:36:10,754 - INFO -  Initializing movement metadata loader: s3://troveo-videodb-shared/outputs/batch_2_tier_1/batch_2_tier_1_metadata.parquet
+2025-10-07 18:36:10,754 - INFO - Using cached movement metadata from ./cache/movement_metadata/movement_metadata.parquet
+2025-10-07 18:36:10,827 - INFO - Loaded 98568 movement metadata records
+2025-10-07 18:36:13,468 - INFO -  Built movement metadata lookup with 98568 entries
+2025-10-07 18:36:13 [INFO] SimplifiedUnifiedPipeline:  Movement metadata loaded successfully
+2025-10-07 18:36:13,475 - INFO -  Movement metadata loaded successfully
+2025-10-07 18:36:13 [INFO] S3VideoStateTracker: 📋 Loaded existing state: 37402 videos
+2025-10-07 18:36:13,666 - INFO - 📋 Loaded existing state: 37402 videos
+2025-10-07 18:36:13 [INFO] S3VideoStateTracker: ✅ S3 state tracker initialized: /data/pyrenees_output/batch2/server1/s3_state_prod_batch_2_server1.json
+2025-10-07 18:36:13,667 - INFO - ✅ S3 state tracker initialized: /data/pyrenees_output/batch2/server1/s3_state_prod_batch_2_server1.json
+2025-10-07 18:36:13 [INFO] S3VideoStateTracker:    Total videos tracked: 37402
+2025-10-07 18:36:13,667 - INFO -    Total videos tracked: 37402
+2025-10-07 18:36:13 [INFO] S3VideoStateTracker:    Completed: 36914
+2025-10-07 18:36:13,667 - INFO -    Completed: 36914
+2025-10-07 18:36:13 [INFO] S3VideoStateTracker:    Failed: 0
+2025-10-07 18:36:13,667 - INFO -    Failed: 0
+2025-10-07 18:36:13 [INFO] SimplifiedUnifiedPipeline: Initializing Ray Serve for Face Detection
+2025-10-07 18:36:13,667 - INFO - Initializing Ray Serve for Face Detection
+2025-10-07 18:36:13 [INFO] FaceDetectionServeManager: Starting Face Detection Service...
+2025-10-07 18:36:13,667 - INFO - Starting Face Detection Service...
+2025-10-07 18:36:13 [INFO] FaceDetectionServeManager: Replicas: 2
+2025-10-07 18:36:13,667 - INFO - Replicas: 2
+2025-10-07 18:36:13 [INFO] FaceDetectionServeManager: GPU per replica: 0.2
+2025-10-07 18:36:13,667 - INFO - GPU per replica: 0.2
+INFO 2025-10-07 18:36:13,668 serve 2916591 -- Nothing to shut down. There's no Serve application running on this Ray cluster.
+2025-10-07 18:36:13 [INFO] FaceDetectionServeManager: Cleaned up existing Ray Serve instance
+2025-10-07 18:36:13,668 - INFO - Cleaned up existing Ray Serve instance
+INFO 2025-10-07 18:36:14,751 serve 2916591 -- Started Serve in namespace "serve".
+2025-10-07 18:36:14 [INFO] FaceDetectionServeManager: Ray Serve started successfully on port 9000
+2025-10-07 18:36:14,752 - INFO - Ray Serve started successfully on port 9000
+INFO 2025-10-07 18:36:14,761 serve 2916591 -- Connecting to existing Serve app in namespace "serve". New http options will not be applied.
+WARNING 2025-10-07 18:36:14,761 serve 2916591 -- The new client HTTP config differs from the existing one in the following fields: ['port', 'location']. The new HTTP config is ignored.
+[36m(ProxyActor pid=2917978)[0m INFO 2025-10-07 18:36:14,702 proxy 10.1.0.4 -- Proxy starting on node b89488dceaee59d9316317db8dcebf42a3d9e68eecde3f608391ae1d (HTTP port: 9000).
+[36m(ProxyActor pid=2917978)[0m INFO 2025-10-07 18:36:14,748 proxy 10.1.0.4 -- Got updated endpoints: {}.
+[36m(ServeController pid=2917976)[0m INFO 2025-10-07 18:36:14,854 controller 2917976 -- Deploying new version of Deployment(name='face-detection', app='face-detection') (initial target replicas: 2).
+[36m(ProxyActor pid=2917978)[0m INFO 2025-10-07 18:36:14,857 proxy 10.1.0.4 -- Got updated endpoints: {Deployment(name='face-detection', app='face-detection'): EndpointInfo(route='/face-detection', app_is_cross_language=False)}.
+[36m(ProxyActor pid=2917978)[0m INFO 2025-10-07 18:36:14,863 proxy 10.1.0.4 -- Started <ray.serve._private.router.SharedRouterLongPollClient object at 0x70906872c050>.
+[36m(ServeController pid=2917976)[0m INFO 2025-10-07 18:36:14,958 controller 2917976 -- Adding 2 replicas to Deployment(name='face-detection', app='face-detection').
+[36m(ServeReplica:face-detection:face-detection pid=2917975)[0m WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+[36m(ServeReplica:face-detection:face-detection pid=2917975)[0m I0000 00:00:1759862177.676755 2920825 gpu_device.cc:2020] Created device /job:localhost/replica:0/task:0/device:GPU:0 with 90163 MB memory:  -> device: 0, name: NVIDIA H100 NVL, pci bus id: 0001:00:00.0, compute capability: 9.0
+[36m(ServeReplica:face-detection:face-detection pid=2917982)[0m /home/vision_ai_adm/miniconda3/lib/python3.13/site-packages/transformers/models/vit/feature_extraction_vit.py:30: FutureWarning: The class ViTFeatureExtractor is deprecated and will be removed in version 5 of Transformers. Please use ViTImageProcessor instead.
+[36m(ServeReplica:face-detection:face-detection pid=2917982)[0m   warnings.warn(
+INFO 2025-10-07 18:36:22,885 serve 2916591 -- Application 'face-detection' is ready at http://127.0.0.1:9000/face-detection.
+📋 Pipeline logs will be saved to: pipeline_logs/csam_pipeline_20251007_183614.log
+[36m(ServeController pid=2917976)[0m 📋 Pipeline logs will be saved to: pipeline_logs/csam_pipeline_20251007_183614.log
+[36m(ServeReplica:face-detection:face-detection pid=2917982)[0m 2025-10-07 18:36:17 [INFO] face_age_detector_optimized: ✅ XLA optimization enabled
+[36m(ServeReplica:face-detection:face-detection pid=2917982)[0m 2025-10-07 18:36:17 [INFO] face_age_detector_optimized: ✅ TensorFlow GPU configured for Ray worker on device(s): 0
+[36m(ServeReplica:face-detection:face-detection pid=2917982)[0m 2025-10-07 18:36:17 [INFO] face_age_detector_optimized: Found face detector module at: /home/vision_ai_adm/code/oslo/video_convertbranch/video-age-detection-pipeline/src
+[36m(ServeReplica:face-detection:face-detection pid=2917982)[0m 2025-10-07 18:36:20 [INFO] face_age_detector_optimized: Successfully imported ViTVideoAgeDetector
+[36m(ServeReplica:face-detection:face-detection pid=2917982)[0m ✅ Using GPU providers: ['CUDAExecutionProvider', 'CPUExecutionProvider']
+[36m(ServeReplica:face-detection:face-detection pid=2917975)[0m 📋 Pipeline logs will be saved to: pipeline_logs/csam_pipeline_20251007_183615.log[32m [repeated 2x across cluster] (Ray deduplicates logs by default. Set RAY_DEDUP_LOGS=0 to disable log deduplication, or see https://docs.ray.io/en/master/ray-observability/user-guides/configure-logging.html#log-deduplication for more options.)[0m
+[36m(ServeReplica:face-detection:face-detection pid=2917982)[0m Applied providers: ['CUDAExecutionProvider', 'CPUExecutionProvider'], with options: {'CPUExecutionProvider': {}, 'CUDAExecutionProvider': {'sdpa_kernel': '0', 'use_tf32': '1', 'fuse_conv_bias': '0', 'prefer_nhwc': '0', 'tunable_op_max_tuning_duration_ms': '0', 'enable_skip_layer_norm_strict_mode': '0', 'tunable_op_tuning_enable': '0', 'tunable_op_enable': '0', 'use_ep_level_unified_stream': '0', 'device_id': '0', 'has_user_compute_stream': '0', 'gpu_external_empty_cache': '0', 'cudnn_conv_algo_search': 'EXHAUSTIVE', 'cudnn_conv1d_pad_to_nc1d': '0', 'gpu_mem_limit': '18446744073709551615', 'gpu_external_alloc': '0', 'gpu_external_free': '0', 'arena_extend_strategy': 'kNextPowerOfTwo', 'do_copy_in_default_stream': '1', 'enable_cuda_graph': '0', 'user_compute_stream': '0', 'cudnn_conv_use_max_workspace': '1'}}
+[36m(ServeReplica:face-detection:face-detection pid=2917982)[0m model ignore: /home/vision_ai_adm/.insightface/models/buffalo_l/1k3d68.onnx landmark_3d_68
+[36m(ServeReplica:face-detection:face-detection pid=2917982)[0m model ignore: /home/vision_ai_adm/.insightface/models/buffalo_l/2d106det.onnx landmark_2d_106
+[36m(ServeReplica:face-detection:face-detection pid=2917982)[0m find model: /home/vision_ai_adm/.insightface/models/buffalo_l/det_10g.onnx detection [1, 3, '?', '?'] 127.5 128.0
+[36m(ServeReplica:face-detection:face-detection pid=2917982)[0m model ignore: /home/vision_ai_adm/.insightface/models/buffalo_l/genderage.onnx genderage
+[36m(ServeReplica:face-detection:face-detection pid=2917982)[0m model ignore: /home/vision_ai_adm/.insightface/models/buffalo_l/w600k_r50.onnx recognition
+[36m(ServeReplica:face-detection:face-detection pid=2917982)[0m set det-size: (480, 480)
+[36m(ServeReplica:face-detection:face-detection pid=2917982)[0m ✅ ViT model moved to GPU: NVIDIA H100 NVL
+[36m(ServeReplica:face-detection:face-detection pid=2917982)[0m 2025-10-07 18:36:21 [INFO] face_age_detector_optimized: ✅ FaceAgeDetector model cached on GPU
+2025-10-07 18:36:22 [INFO] FaceDetectionServeManager: Face Detection Service started successfully!
+2025-10-07 18:36:22,885 - INFO - Face Detection Service started successfully!
+2025-10-07 18:36:22 [INFO] FaceDetectionServeManager: Service is now ready to accept requests
+2025-10-07 18:36:22,885 - INFO - Service is now ready to accept requests
+2025-10-07 18:36:22 [INFO] SimplifiedUnifiedPipeline: Face Detection Service started successfully
+2025-10-07 18:36:22,885 - INFO - Face Detection Service started successfully
+2025-10-07 18:36:22 [INFO] SimplifiedUnifiedPipeline: Models loaded once - will serve all videos
+2025-10-07 18:36:22,885 - INFO - Models loaded once - will serve all videos
+2025-10-07 18:36:22 [INFO] SimplifiedUnifiedPipeline:  S3 POLL CYCLE #1
+2025-10-07 18:36:22,885 - INFO -  S3 POLL CYCLE #1
+2025-10-07 18:36:22 [INFO] SimplifiedUnifiedPipeline: Using input file: unprocessed_server_1/server_1_videos.txt
+2025-10-07 18:36:22,885 - INFO - Using input file: unprocessed_server_1/server_1_videos.txt
+2025-10-07 18:36:22 [INFO] SimplifiedUnifiedPipeline: Loading videos from input file: unprocessed_server_1/server_1_videos.txt
+2025-10-07 18:36:22,885 - INFO - Loading videos from input file: unprocessed_server_1/server_1_videos.txt
+2025-10-07 18:36:22 [INFO] SimplifiedUnifiedPipeline: Loaded 49284 videos from unprocessed_server_1/server_1_videos.txt
+2025-10-07 18:36:22,927 - INFO - Loaded 49284 videos from unprocessed_server_1/server_1_videos.txt
+2025-10-07 18:36:22 [INFO] S3VideoStateTracker: 📋 Discovered: outputs/batch_2_tier_1/clips/NkTAfwVP_1407533051/126-132.mov (0.8 MB)
+2025-10-07 18:36:22,961 - INFO - 📋 Discovered: outputs/batch_2_tier_1/clips/NkTAfwVP_1407533051/126-132.mov (0.8 MB)
+2025-10-07 18:36:22 [INFO] S3VideoStateTracker: 📋 Discovered: outputs/batch_2_tier_1/clips/NkTAfwVP_1407533051/1294-1300.mov (1.0 MB)
+2025-10-07 18:36:22,961 - INFO - 📋 Discovered: outputs/batch_2_tier_1/clips/NkTAfwVP_1407533051/1294-1300.mov (1.0 MB)
+2025-10-07 18:36:22 [INFO] S3VideoStateTracker: 📋 Discovered: outputs/batch_2_tier_1/clips/NkTAfwVP_1407533051/208-216.mov (1.0 MB)
+2025-10-07 18:36:22,961 - INFO - 📋 Discovered: outputs/batch_2_tier_1/clips/NkTAfwVP_1407533051/208-216.mov (1.0 MB)
+2025-10-07 18:36:22 [INFO] S3VideoStateTracker: 📋 Discovered: outputs/batch_2_tier_1/clips/NkTAfwVP_1407533051/2536-2542.mov (0.4 MB)
+2025-10-07 18:36:22,961 - INFO - 📋 Discovered: outputs/batch_2_tier_1/clips/NkTAfwVP_1407533051/2536-2542.mov (0.4 MB)
+2025-10-07 18:36:22 [INFO] SimplifiedUnifiedPipeline: Reached max_videos_per_cycle limit: 500
+2025-10-07 18:36:22,961 - INFO - Reached max_videos_per_cycle limit: 500
+2025-10-07 18:36:22 [INFO] SimplifiedUnifiedPipeline: 500 new videos to process
+2025-10-07 18:36:22,961 - INFO - 500 new videos to process
+2025-10-07 18:36:22 [INFO] SimplifiedUnifiedPipeline: Parsed clip metadata: video_id=6DzL9vRR_152916191, clip=224-232.mov, duration=8000ms
+2025-10-07 18:36:22,961 - INFO - Parsed clip metadata: video_id=6DzL9vRR_152916191, clip=224-232.mov, duration=8000ms
+2025-10-07 18:36:22,961 - INFO - Looking for source video: s3://troveo-videodb-shared/transcoding_profile_id=5/152916191/6DzL9vRR_152916191.mp4
+2025-10-07 18:36:23,223 - INFO - ✅ Found source video: transcoding_profile_id=5/152916191/6DzL9vRR_152916191.mp4
+2025-10-07 18:36:23 [INFO] SimplifiedUnifiedPipeline: Source video: s3://troveo-videodb-shared/transcoding_profile_id=5/152916191/6DzL9vRR_152916191.mp4
+2025-10-07 18:36:23,223 - INFO - Source video: s3://troveo-videodb-shared/transcoding_profile_id=5/152916191/6DzL9vRR_152916191.mp4
+2025-10-07 18:36:23 [INFO] SimplifiedUnifiedPipeline: Processing video 1/500:224-232.mov (ID: 6DzL9vRR_152916191_224-232)
+2025-10-07 18:36:23,223 - INFO - Processing video 1/500:224-232.mov (ID: 6DzL9vRR_152916191_224-232)
+2025-10-07 18:36:23 [INFO] SimplifiedUnifiedPipeline: Downloading from s3://troveo-videodb-shared/outputs/batch_2_tier_1/clips/6DzL9vRR_152916191/224-232.mov
+2025-10-07 18:36:23,223 - INFO - Downloading from s3://troveo-videodb-shared/outputs/batch_2_tier_1/clips/6DzL9vRR_152916191/224-232.mov
+2025-10-07 18:36:23 [INFO] S3VideoStateTracker: ⬇️ Downloading: outputs/batch_2_tier_1/clips/6DzL9vRR_152916191/224-232.mov
+2025-10-07 18:36:23,223 - INFO - ⬇️ Downloading: outputs/batch_2_tier_1/clips/6DzL9vRR_152916191/224-232.mov
+2025-10-07 18:36:23 [INFO] S3 utils: Downloading s3://troveo-videodb-shared/outputs/batch_2_tier_1/clips/6DzL9vRR_152916191/224-232.mov to /data/pyrenees/pyrenees_downloads/224-232.mov (attempt 1/3)
+2025-10-07 18:36:23,223 - INFO - Downloading s3://troveo-videodb-shared/outputs/batch_2_tier_1/clips/6DzL9vRR_152916191/224-232.mov to /data/pyrenees/pyrenees_downloads/224-232.mov (attempt 1/3)
