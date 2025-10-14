@@ -1964,24 +1964,24 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                             azure_video_url = None
                         
                         # Create Label Studio task
-                        if s3_config['labelstudio']['auto_create_tasks'] and azure_video_url:
-                            logger.info("Creating Label Studio task...")
-                            with timer.time_operation(f"video.{video_id}.labelstudio_task"):
-                                task_id = create_labelstudio_task_for_s3_mode(
-                                    display_filename,
-                                    azure_video_url,
-                                    results,
-                                    s3_config,
-                                    s3_key=s3_key,
-                                    source_s3_key=source_s3_key,
-                                    source_video_id=source_video_id,
-                                    clip_id=clip_id,
-                                    start_ms=start_ms,
-                                    end_ms=end_ms,
-                                    duration_ms=duration_ms,
-                                    bucket=bucket,
-                                    movement_loader=movement_loader
-                                )
+                        # if s3_config['labelstudio']['auto_create_tasks'] and azure_video_url:
+                        #     logger.info("Creating Label Studio task...")
+                        #     with timer.time_operation(f"video.{video_id}.labelstudio_task"):
+                        #         task_id = create_labelstudio_task_for_s3_mode(
+                        #             display_filename,
+                        #             azure_video_url,
+                        #             results,
+                        #             s3_config,
+                        #             s3_key=s3_key,
+                        #             source_s3_key=source_s3_key,
+                        #             source_video_id=source_video_id,
+                        #             clip_id=clip_id,
+                        #             start_ms=start_ms,
+                        #             end_ms=end_ms,
+                        #             duration_ms=duration_ms,
+                        #             bucket=bucket,
+                        #             movement_loader=movement_loader
+                        #         )
 
                         # Modified code:
                         if s3_config['labelstudio']['auto_create_tasks'] and azure_video_url:
