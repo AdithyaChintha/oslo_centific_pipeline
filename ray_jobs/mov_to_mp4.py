@@ -53,8 +53,8 @@ def convert_mov_to_mp4_task(
         os.makedirs(os.path.dirname(output_mp4_path), exist_ok=True)
 
         # FFmpeg command with optimized settings
-        # - copy video codec if already H.264, otherwise re-encode
-        # - copy audio codec if already AAC, otherwise re-encode
+        # - Re-encode video to H.264
+        # - Copy audio without re-encoding to preserve multi-channel layouts (5.1, 9.1.6, etc.)
         # - fast encoding preset for speed
         # - preserve metadata
         ffmpeg_cmd = [
@@ -63,8 +63,7 @@ def convert_mov_to_mp4_task(
             '-c:v', 'libx264',           # Video codec: H.264
             '-preset', 'fast',            # Encoding speed vs quality
             '-crf', '23',                 # Quality (18-28 recommended, 23 is default)
-            '-c:a', 'aac',               # Audio codec: AAC
-            '-b:a', '128k',              # Audio bitrate
+            '-c:a', 'copy',              # Copy audio as-is (preserves multi-channel without re-encoding)
             '-movflags', '+faststart',   # Enable streaming (moov atom at start)
             '-y',                         # Overwrite output file
             output_mp4_path
@@ -78,7 +77,6 @@ def convert_mov_to_mp4_task(
             ffmpeg_cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
             timeout=3600  # 1 hour timeout
         )
 
@@ -87,10 +85,11 @@ def convert_mov_to_mp4_task(
 
         # Check if conversion was successful
         if result.returncode != 0:
-            logger.error(f"FFmpeg conversion failed: {result.stderr}")
+            error_msg = result.stderr.decode('utf-8', errors='ignore') if isinstance(result.stderr, bytes) else result.stderr
+            logger.error(f"FFmpeg conversion failed: {error_msg}")
             return {
                 'success': False,
-                'error': f"FFmpeg error: {result.stderr[:500]}",
+                'error': f"FFmpeg error: {error_msg[:500]}",
                 'returncode': result.returncode
             }
 
