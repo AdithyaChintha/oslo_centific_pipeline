@@ -1669,6 +1669,7 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
         s3_config['processing']['output_dir'],
         s3_config['state_tracking']['state_file']
     )
+    process_failed_videos_again=s3_config['state_tracking']['process_failed_videos_again']
     tracker = S3VideoStateTracker(state_file, s3_config)
     
     # Get polling settings
@@ -1718,7 +1719,7 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                 s3_key = video['key']  # Use full S3 key as unique identifier
                 etag = video['etag']
 
-                if not tracker.is_video_processed(s3_key, etag):
+                if not tracker.is_video_processed(s3_key, etag, process_failed_videos_again):
                     new_videos.append(video)
                     tracker.mark_discovered(s3_key, video)
                     

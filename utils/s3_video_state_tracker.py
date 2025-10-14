@@ -94,7 +94,7 @@ class S3VideoStateTracker:
             "last_updated": None
         }
 
-    def is_video_processed(self, filename: str, etag: str) -> bool:
+    def is_video_processed(self, filename: str, etag: str, process_failed_videos_again) -> bool:
         """
         Check if video already processed.
 
@@ -128,8 +128,13 @@ class S3VideoStateTracker:
                 logger.debug(f"✅ Already processed: {filename}")
                 return True
             elif status == 'failed':
-                logger.debug(f"❌ Previously failed: {filename} (retry_count: {video_data.get('retry_count', 0)})")
-                return False
+                if process_failed_videos_again:
+                    logger.debug(f"❌ Previously failed: {filename} (retry_count: {video_data.get('retry_count', 0)})")
+                    return False
+                else:
+                    logger.debug(f"❌ Previously failed: {filename}")
+                    return True
+                
             elif status in ['processing', 'downloading', 'downloaded']:
                 # In-progress videos - consider as not processed
                 logger.debug(f"🔄 In progress: {filename} (status: {status})")

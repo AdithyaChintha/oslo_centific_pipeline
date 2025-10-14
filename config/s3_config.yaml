@@ -18,6 +18,7 @@ state_tracking:
   enabled: true
   state_file: "s3_state_prod_batch_1_server1.json"
   max_retry_attempts: 3
+  process_failed_videos_again: false
 
 polling:
   enabled: true
