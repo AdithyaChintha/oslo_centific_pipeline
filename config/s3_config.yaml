@@ -1,22 +1,22 @@
-input_file: "video_lists/server_1_videos.txt"
+input_file: "video_lists_batch_2/server_2_videos.txt"
 s3:
   aws_access_key_id: "${AWS_ACCESS_KEY_ID}"
   aws_secret_access_key: "${AWS_SECRET_ACCESS_KEY}"
   region: "us-west-2"
   bucket_name: "troveo-videodb-shared"
-  input_prefix: "outputs/batch_1_tier_1"
+  input_prefix: "outputs/batch_2_tier_1"
   output_prefix: "results/"
   presigned_url_expiry_days: 365
   source_video_prefix: "transcoding_profile_id=5"
   movement_metadata:
     enabled: true  # Set to false to disable movement metadata lookup
-    s3_key: "outputs/batch_1_tier_1/batch_1_tier_1_metadata.parquet"  # Path to parquet file in S3
-    cache_locally: true  # Whether to cache downloaded parquet file
+    s3_key: "outputs/batch_2_tier_1/batch_2_tier_1_metadata.parquet"  # Path to parquet file in S3
+    cache_locally: false  # Whether to cache downloaded parquet file
 
 
 state_tracking:
   enabled: true
-  state_file: "s3_state_prod_batch_1_server1.json"
+  state_file: "s3_state_prod_batch_2_server2.json"
   max_retry_attempts: 3
   process_failed_videos_again: false
 
@@ -35,10 +35,10 @@ labelstudio:
   export_mode: "csv"  # Options: "api", "csv", "both"
   csv_export:
     enabled: true
-    local_output_dir: "./csv_files/batch_1/labelstudio_csv_prod_server_1"
+    local_output_dir: "./csv_files/batch_2/labelstudio_csv_prod_server_2"
     azure_upload: true
-    azure_blob_prefix: "batch_1/csv_files_prod/"
-    filename_format: "labelstudio_tasks_server_1_cycle_{cycle}_{timestamp}.csv"
+    azure_blob_prefix: "batch_2/csv_files_prod_server_2/"
+    filename_format: "labelstudio_tasks_server_2_cycle_{cycle}_{timestamp}.csv"
     per_cycle_file: true  # One CSV file per polling cycle
   # Primary Label Studio project
   primary:
