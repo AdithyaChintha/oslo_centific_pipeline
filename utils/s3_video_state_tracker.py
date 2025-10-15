@@ -98,11 +98,12 @@ class S3VideoStateTracker:
         """
         Check if video already processed.
 
-        NOTE: ETag checking is DISABLED - only checks by filename and status.
+        
+        etag: it is being used now 
 
         Args:
             filename: Video filename
-            etag: S3 ETag for video (not used, kept for compatibility)
+            etag: it is being used now 
 
         Returns:
             True if video already processed (by filename only)
@@ -115,13 +116,14 @@ class S3VideoStateTracker:
             video_data = self.state['videos'][filename]
 
             # DISABLED: ETag checking commented out to avoid reprocessing issues
+            #enabled now
             # Check ETag match (if ETag changed, video changed)
-            # stored_etag = video_data.get('s3_etag')
-            # if stored_etag != etag:
-            #     logger.info(f"🔄 Video changed (ETag mismatch): {filename}")
-            #     logger.debug(f"   Old ETag: {stored_etag}")
-            #     logger.debug(f"   New ETag: {etag}")
-            #     return False
+            stored_etag = video_data.get('s3_etag')
+            if stored_etag != etag:
+                logger.info(f"🔄 Video changed (ETag mismatch): {filename}")
+                logger.debug(f"   Old ETag: {stored_etag}")
+                logger.debug(f"   New ETag: {etag}")
+                return False
 
             # Check completion status (only check by status, ignore ETag)
             status = video_data.get('status')
