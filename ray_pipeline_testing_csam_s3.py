@@ -1984,6 +1984,7 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                         #         )
 
                         # Modified code:
+                        task_id = None
                         if s3_config['labelstudio']['auto_create_tasks'] and azure_video_url:
                             export_mode = s3_config['labelstudio'].get('export_mode', 'api')
 
