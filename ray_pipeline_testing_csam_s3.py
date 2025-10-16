@@ -706,7 +706,8 @@ def integrated_blob_polling_and_pipeline_task(
                             azure_output_prefix=f"{output_prefix}/{timestamped_video_name}",
                             azure_account_name=account_name,
                             azure_account_key=account_key,
-                            pipeline_config=pipeline_config
+                            pipeline_config=pipeline_config,
+                            face_service=None
                         )
                         
                         # Check if pipeline actually succeeded
@@ -1331,7 +1332,7 @@ def load_videos_from_file(input_file: str, s3_client, bucket: str) -> list:
     logger.info(f"Loaded {len(videos)} videos from {input_file}")
     return videos
 
-def pipeline_main_multichunks_sequential_sessions(session_paths: list, output_base_dir: str, azure_config: dict, pipeline_config: dict):
+def pipeline_main_multichunks_sequential_sessions(session_paths: list, output_base_dir: str, azure_config: dict, pipeline_config: dict, face_service=None):
     """
     Process multiple sessions sequentially - complete one session fully before starting the next.
     
@@ -1390,7 +1391,8 @@ def pipeline_main_multichunks_sequential_sessions(session_paths: list, output_ba
                 output_base_dir=output_base_dir,
                 azure_config=azure_config,
                 pipeline_config=pipeline_config,
-                is_walkthrough=is_walkthrough
+                is_walkthrough=is_walkthrough,
+                face_service=face_service
             )
             
             # Track results
@@ -1498,12 +1500,26 @@ def pipeline_main_with_blob_polling(base_prefix: str, output_base_dir: str, azur
         pipeline_config: Pipeline configuration
         polling_interval_minutes: How long to wait between polling attempts (default: 5 minutes)
     """
-    #TODO: Need to integrate ray serve face detection to oslo pipeline
     logger.info("🔄 Starting blob polling mode - Base: %s, Interval: %d minutes, Output: %s", base_prefix, polling_interval_minutes, output_base_dir)
     
     # Initialize blob client
     blob_client = create_azure_blob_client(azure_config)
     container_name = azure_config.get('container')
+    
+    # =============================================================================
+    # INITIALIZE RAY SERVE FOR FACE DETECTION (BLOB POLLING)
+    # =============================================================================
+    logger.info("Initializing Ray Serve for Face Detection (blob_polling)")
+
+    face_service = FaceDetectionServeManager(num_replicas=2)
+    try:
+        face_service.start()
+        logger.info("Face Detection Service started successfully (blob_polling)")
+        logger.info("Models loaded once - will serve all sessions")
+    except Exception as e:
+        logger.error(f"Failed to start Face Detection Service: {e}")
+        logger.warning("Falling back to standard Ray tasks (slower)")
+        face_service = None
     
     # Track all processed sessions to avoid reprocessing
     # Create persistent tracking file
@@ -1511,64 +1527,75 @@ def pipeline_main_with_blob_polling(base_prefix: str, output_base_dir: str, azur
     all_processed_sessions = load_processed_sessions_tracking(tracking_file)
     polling_cycle = 0
     
-    while True:
-        polling_cycle += 1
-        logger.info("🔍 Polling cycle #%d - Searching sessions under: %s", polling_cycle, base_prefix)
-        
-        try:
-            # Discover all sessions in the directory
-            all_sessions = discover_multiple_sessions(blob_client, container_name, base_prefix)
+    try:
+        while True:
+            polling_cycle += 1
+            logger.info("🔍 Polling cycle #%d - Searching sessions under: %s", polling_cycle, base_prefix)
             
-            # Filter out already processed sessions
-            new_sessions = []
-            for session_info in all_sessions:
-                session_id = session_info["session_id"]
-                if session_id not in all_processed_sessions:
-                    new_sessions.append(session_info)
-                    all_processed_sessions.add(session_id)
+            try:
+                # Discover all sessions in the directory
+                all_sessions = discover_multiple_sessions(blob_client, container_name, base_prefix)
+                
+                # Filter out already processed sessions
+                new_sessions = []
+                for session_info in all_sessions:
+                    session_id = session_info["session_id"]
+                    if session_id not in all_processed_sessions:
+                        new_sessions.append(session_info)
+                        all_processed_sessions.add(session_id)
+                    else:
+                        logger.info(f"⏭️  Session {session_id} already processed - skipping")
+                
+                if new_sessions:
+                    logger.info("=" * 100)
+                    logger.info("🎉 Found %d new sessions:", len(new_sessions))
+                    for i, session in enumerate(new_sessions, 1):
+                        walkthrough_status = "🔄 WALKTHROUGH" if session["is_walkthrough"] else "📹 NORMAL"
+                        logger.info("   %d. %s - %s", i, session['session_id'], walkthrough_status)
+                    logger.info("=" * 100)
+                    
+                    # Process the new sessions
+                    logger.info("🚀 Starting processing of new sessions...")
+                    processing_result = pipeline_main_multichunks_sequential_sessions(
+                        new_sessions, 
+                        output_base_dir, 
+                        azure_config, 
+                        pipeline_config,
+                        face_service=face_service
+                    )
+                    
+                    logger.info("✅ Session processing completed - Total: %d, Completed: %d, Failed: %d, Skipped: %d",
+                               processing_result['total_sessions'],
+                               processing_result['completed_sessions'],
+                               processing_result['failed_sessions'],
+                               processing_result['skipped_sessions'])
+                    
+                    # Save updated tracking data
+                    save_processed_sessions_tracking(tracking_file, all_processed_sessions)
                 else:
-                    logger.info(f"⏭️  Session {session_id} already processed - skipping")
+                    logger.info("😴 No new sessions found - Total: %d, Already processed: %d",
+                               len(all_sessions), len(all_processed_sessions))
+                
+            except Exception as e:
+                logger.error(f"❌ Error during polling cycle #{polling_cycle}: {e}")
+                logger.error(f"❌ Will retry in {polling_interval_minutes} minutes...")
             
-            if new_sessions:
-                logger.info("=" * 100)
-                logger.info("🎉 Found %d new sessions:", len(new_sessions))
-                for i, session in enumerate(new_sessions, 1):
-                    walkthrough_status = "🔄 WALKTHROUGH" if session["is_walkthrough"] else "📹 NORMAL"
-                    logger.info("   %d. %s - %s", i, session['session_id'], walkthrough_status)
-                logger.info("=" * 100)
-                
-                # Process the new sessions
-                logger.info("🚀 Starting processing of new sessions...")
-                processing_result = pipeline_main_multichunks_sequential_sessions(
-                    new_sessions, 
-                    output_base_dir, 
-                    azure_config, 
-                    pipeline_config
-                )
-                
-                logger.info("✅ Session processing completed - Total: %d, Completed: %d, Failed: %d, Skipped: %d",
-                           processing_result['total_sessions'],
-                           processing_result['completed_sessions'],
-                           processing_result['failed_sessions'],
-                           processing_result['skipped_sessions'])
-                
-                # Save updated tracking data
-                save_processed_sessions_tracking(tracking_file, all_processed_sessions)
-            else:
-                logger.info("😴 No new sessions found - Total: %d, Already processed: %d",
-                           len(all_sessions), len(all_processed_sessions))
+            # Wait before next polling cycle
+            logger.info("=" * 100)
+            logger.info("⏰ Waiting %d minutes for next poll - Next poll at: %s", polling_interval_minutes, (datetime.now() + timedelta(minutes=polling_interval_minutes)).strftime('%Y-%m-%d %H:%M:%S'))
+            logger.info("=" * 100)
             
-        except Exception as e:
-            logger.error(f"❌ Error during polling cycle #{polling_cycle}: {e}")
-            logger.error(f"❌ Will retry in {polling_interval_minutes} minutes...")
-        
-        # Wait before next polling cycle
-        logger.info("=" * 100)
-        logger.info("⏰ Waiting %d minutes for next poll - Next poll at: %s", polling_interval_minutes, (datetime.now() + timedelta(minutes=polling_interval_minutes)).strftime('%Y-%m-%d %H:%M:%S'))
-        logger.info("=" * 100)
-        
-        # Sleep for the polling interval
-        time.sleep(polling_interval_minutes * 60)
+            # Sleep for the polling interval
+            time.sleep(polling_interval_minutes * 60)
+    
+    except KeyboardInterrupt:
+        logger.info("Blob polling stopped by user")
+    finally:
+        # Cleanup Ray Serve for blob_polling
+        if face_service and face_service.is_running:
+            logger.info("Shutting down Ray Serve (blob_polling)")
+            face_service.stop()
+            logger.info("Face Detection Service stopped (blob_polling)")
 
 # =============================================================================
 # AZURE UTILITY FUNCTIONS FOR S3 PIPELINE
@@ -1669,6 +1696,7 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
         s3_config['processing']['output_dir'],
         s3_config['state_tracking']['state_file']
     )
+    process_failed_videos_again=s3_config['state_tracking']['process_failed_videos_again']
     tracker = S3VideoStateTracker(state_file, s3_config)
     
     # Get polling settings
@@ -1718,7 +1746,7 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                 s3_key = video['key']  # Use full S3 key as unique identifier
                 etag = video['etag']
 
-                if not tracker.is_video_processed(s3_key, etag):
+                if not tracker.is_video_processed(s3_key, etag, process_failed_videos_again):
                     new_videos.append(video)
                     tracker.mark_discovered(s3_key, video)
                     
@@ -1936,26 +1964,27 @@ def pipeline_s3_mode(config: dict, s3_config: dict):
                             azure_video_url = None
                         
                         # Create Label Studio task
-                        if s3_config['labelstudio']['auto_create_tasks'] and azure_video_url:
-                            logger.info("Creating Label Studio task...")
-                            with timer.time_operation(f"video.{video_id}.labelstudio_task"):
-                                task_id = create_labelstudio_task_for_s3_mode(
-                                    display_filename,
-                                    azure_video_url,
-                                    results,
-                                    s3_config,
-                                    s3_key=s3_key,
-                                    source_s3_key=source_s3_key,
-                                    source_video_id=source_video_id,
-                                    clip_id=clip_id,
-                                    start_ms=start_ms,
-                                    end_ms=end_ms,
-                                    duration_ms=duration_ms,
-                                    bucket=bucket,
-                                    movement_loader=movement_loader
-                                )
+                        # if s3_config['labelstudio']['auto_create_tasks'] and azure_video_url:
+                        #     logger.info("Creating Label Studio task...")
+                        #     with timer.time_operation(f"video.{video_id}.labelstudio_task"):
+                        #         task_id = create_labelstudio_task_for_s3_mode(
+                        #             display_filename,
+                        #             azure_video_url,
+                        #             results,
+                        #             s3_config,
+                        #             s3_key=s3_key,
+                        #             source_s3_key=source_s3_key,
+                        #             source_video_id=source_video_id,
+                        #             clip_id=clip_id,
+                        #             start_ms=start_ms,
+                        #             end_ms=end_ms,
+                        #             duration_ms=duration_ms,
+                        #             bucket=bucket,
+                        #             movement_loader=movement_loader
+                        #         )
 
                         # Modified code:
+                        task_id = None
                         if s3_config['labelstudio']['auto_create_tasks'] and azure_video_url:
                             export_mode = s3_config['labelstudio'].get('export_mode', 'api')
 
@@ -2280,7 +2309,7 @@ def discover_multiple_sessions(blob_client, container_name: str, base_prefix: st
     
     return session_info_list
 
-def process_single_session(session_path: str, session_id: str, output_base_dir: str, azure_config: dict, pipeline_config: dict, is_walkthrough: bool = False):
+def process_single_session(session_path: str, session_id: str, output_base_dir: str, azure_config: dict, pipeline_config: dict, is_walkthrough: bool = False, face_service=None):
     """
     Process a single session through the complete pipeline.
     """
@@ -2330,7 +2359,8 @@ def process_single_session(session_path: str, session_id: str, output_base_dir: 
             account_key=azure_config.get('account-key'),
             local_download_dir=pipeline_config['local_storage']['temp_download_dir'],
             timer=timer,
-            input_blob_prefix=pipeline_config['azure_storage']['input_blob_prefix']
+            input_blob_prefix=pipeline_config['azure_storage']['input_blob_prefix'],
+            face_service=face_service
         )
         
         processing_time = time.time() - start_time
@@ -2403,7 +2433,7 @@ def extract_video_name_from_path(video_path: str) -> str:
     name = os.path.splitext(filename)[0]
     return name
 
-def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_output_prefix: str=None, blob_client:str = None, container_name:str = None, account_name: str = None, account_key: str = None, local_download_dir: str = None, timer=None, input_blob_prefix = None):
+def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_output_prefix: str=None, blob_client:str = None, container_name:str = None, account_name: str = None, account_key: str = None, local_download_dir: str = None, timer=None, input_blob_prefix = None, face_service=None):
     
     try:
         if not ray.is_initialized():
@@ -2917,7 +2947,7 @@ def pipeline_main_multichunks(download_results: dict, output_dir: str, azure_out
 
 def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str, 
                  process_dual_views: bool = None, process_unwarped_views: bool = True,
-                 azure_blob_client=None, azure_container=None, azure_output_prefix=None, azure_account_name: str = None, azure_account_key: str = None, pipeline_config = None):
+                 azure_blob_client=None, azure_container=None, azure_output_prefix=None, azure_account_name: str = None, azure_account_key: str = None, pipeline_config = None, face_service=None):
     """
     Unified Ray pipeline for video analysis with optional dual-view processing for INSV files
     """
@@ -3115,7 +3145,8 @@ def pipeline_main(input_video_path: str, input_audio_path: str, output_dir: str,
                 audio_url=audio_url,
                 total_shard_count=min_shards,
                 video_name=video_name,
-                multi_chunk_process=False
+                multi_chunk_process=False,
+                face_service=face_service
             )
             
             label_studio_tasks.append(shard_results['label_studio_task'])
@@ -4884,7 +4915,8 @@ def process_time_aligned_shard_multiview(
     session_metadata=None,
     timer = None,
     session_id = None,
-    video_id = None
+    video_id = None,
+    face_service=None
 ):
     """
     Process one time-aligned shard across multiple views (4+).
@@ -4950,7 +4982,7 @@ def process_time_aligned_shard_multiview(
         try:
             # Process each view through the full pipeline
             view_result = process_single_shard_through_pipeline(
-                view_shard_path, audio_shard_path, view_output_dir, shard_offset_sec, shard_index, total_shard_count, view_name, multi_chunk_process, timer = timer, video_name = video_name, session_id = session_id, video_id = video_id
+                view_shard_path, audio_shard_path, view_output_dir, shard_offset_sec, shard_index, total_shard_count, view_name, multi_chunk_process, timer = timer, video_name = video_name, session_id = session_id, video_id = video_id, face_service=face_service
             )
             view_results[view_name] = view_result
             logger.info(f"✅ Successfully processed {view_name} for shard {shard_index+1}")
@@ -5164,7 +5196,8 @@ def process_time_aligned_shard(
     view2_azure_url,           # may be None/"" for single-view
     audio_url,
     total_shard_count=None,    # Add total shard count for first/last identification
-    video_name=None            # Video name for shard_info
+    video_name=None,           # Video name for shard_info
+    face_service=None
 ):
     """
     Process one time-aligned shard. If `view2_shard_path` is None, this behaves as single-view,
@@ -5205,7 +5238,7 @@ def process_time_aligned_shard(
     logger.info(f"Processing view 1 of shard {shard_index+1}")
     view1_output_dir = os.path.join(shard_output_dir, "view_1")
     view1_results = process_single_shard_through_pipeline(
-        view1_shard_path, audio_shard_path, view1_output_dir, shard_offset_sec, shard_index, total_shard_count, "view_1", multi_chunk_process
+        view1_shard_path, audio_shard_path, view1_output_dir, shard_offset_sec, shard_index, total_shard_count, "view_1", multi_chunk_process, face_service=face_service
     )
 
     # --- View 2 (optional) ---
@@ -5213,7 +5246,7 @@ def process_time_aligned_shard(
         logger.info(f"Processing view 2 of shard {shard_index+1}")
         view2_output_dir = os.path.join(shard_output_dir, "view_2")
         view2_results = process_single_shard_through_pipeline(
-            view2_shard_path, audio_shard_path, view2_output_dir, shard_offset_sec, shard_index, total_shard_count, "view_2", multi_chunk_process
+            view2_shard_path, audio_shard_path, view2_output_dir, shard_offset_sec, shard_index, total_shard_count, "view_2", multi_chunk_process, face_service=face_service
         )
     else:
         logger.info(f"No view 2 for shard {shard_index+1} — running single-view consolidation")
@@ -6985,12 +7018,13 @@ if __name__ == "__main__":
                 output_dir=args.output_dir,
                 process_dual_views=args.dual_views,
                 process_unwarped_views=args.unwarped_views,
-            azure_blob_client=azure_blob_client,
-            azure_container=azure_container,
+                azure_blob_client=azure_blob_client,
+                azure_container=azure_container,
                 azure_output_prefix=f"{output_prefix}/{os.path.splitext(os.path.basename(args.input_video))[0]}",
-            azure_account_name=azure_account_name,
-            azure_account_key=azure_account_key
-        )
+                azure_account_name=azure_account_name,
+                azure_account_key=azure_account_key,
+                face_service=None
+            )
         
             print(f"\n✅ Standalone Pipeline completed!")
             print(f"📁 Results saved to: {args.output_dir}")
