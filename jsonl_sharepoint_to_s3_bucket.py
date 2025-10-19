@@ -39,8 +39,25 @@ except ImportError as e:
     print("Install required packages: pip install boto3")
     sys.exit(1)
 
-# SharePoint operations using requests (same pattern as other SharePoint scripts)
-import requests
+# SharePoint operations using shared utilities
+try:
+    from utils.sharepoint_utils import (
+        SharePointAuthenticator, 
+        SharePointFileManager, 
+        SharePointConfig,
+        load_sharepoint_config,
+        create_sharepoint_manager
+    )
+except ImportError:
+    # Fallback for direct execution
+    sys.path.append('/home/vision_ai_adm/code/oslo/video_convertbranch')
+    from utils.sharepoint_utils import (
+        SharePointAuthenticator, 
+        SharePointFileManager, 
+        SharePointConfig,
+        load_sharepoint_config,
+        create_sharepoint_manager
+    )
 
 # Configure logging
 logging.basicConfig(
@@ -52,305 +69,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-
-class SharePointAuthenticator:
-    """Handles Microsoft Graph API authentication for SharePoint access."""
-    
-    def __init__(self, tenant_id: str, client_id: str, client_secret: str, timeout_seconds: int = 30):
-        """
-        Initialize authenticator with credentials.
-        
-        Args:
-            tenant_id: Azure AD tenant ID
-            client_id: Azure AD app client ID  
-            client_secret: Azure AD app client secret
-            timeout_seconds: Request timeout in seconds
-        """
-        self.tenant_id = tenant_id
-        self.client_id = client_id
-        self.client_secret = client_secret
-        self.timeout_seconds = timeout_seconds
-        self.access_token = None
-        self.token_expires_at = None
-    
-    def get_access_token(self) -> Optional[str]:
-        """
-        Get a valid access token for Microsoft Graph API.
-        Uses OAuth2 Client Credentials Flow for server-to-server authentication.
-        
-        Returns:
-            Valid access token string or None if authentication failed
-        """
-        # Check if we have a valid cached token
-        if (self.access_token and self.token_expires_at and 
-            datetime.now() < self.token_expires_at - timedelta(minutes=5)):
-            logger.debug("Using cached access token")
-            return self.access_token
-        
-        logger.info("Requesting new access token from Microsoft Graph API")
-        
-        # OAuth2 Client Credentials Flow endpoint
-        token_url = f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/token"
-        
-        # Prepare authentication request
-        headers = {
-            'Content-Type': 'application/x-www-form-urlencoded'
-        }
-        
-        data = {
-            'client_id': self.client_id,
-            'client_secret': self.client_secret,
-            'scope': 'https://graph.microsoft.com/.default',
-            'grant_type': 'client_credentials'
-        }
-        
-        try:
-            # Request access token
-            response = requests.post(
-                token_url,
-                headers=headers,
-                data=data,
-                timeout=self.timeout_seconds
-            )
-            response.raise_for_status()
-            
-            # Parse response
-            token_data = response.json()
-            self.access_token = token_data.get('access_token')
-            expires_in = token_data.get('expires_in', 3600)  # Default 1 hour
-            
-            # Calculate expiration time
-            self.token_expires_at = datetime.now() + timedelta(seconds=expires_in)
-            
-            logger.info("Successfully obtained access token")
-            return self.access_token
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to get access token: {e}")
-            return None
-        except (KeyError, ValueError) as e:
-            logger.error(f"Invalid token response format: {e}")
-            return None
-
-class SharePointFileManager:
-    """Handles SharePoint file operations via Microsoft Graph API."""
-    
-    def __init__(self, authenticator: SharePointAuthenticator, site_id: str, drive_id: str, 
-                 timeout: int = 30, max_retries: int = 3, retry_delay: int = 5):
-        """
-        Initialize file manager with authenticator and site details.
-        
-        Args:
-            authenticator: SharePoint authenticator instance
-            site_id: SharePoint site ID
-            drive_id: SharePoint drive ID
-            timeout: Request timeout in seconds
-            max_retries: Maximum retry attempts
-            retry_delay: Delay between retries in seconds
-        """
-        self.authenticator = authenticator
-        self.site_id = site_id
-        self.drive_id = drive_id
-        self.timeout = timeout
-        self.max_retries = max_retries
-        self.retry_delay = retry_delay
-        
-        # Create base API URLs
-        self.base_api_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive"
-        self.drive_api_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}"
-    
-    def _make_authenticated_request(self, method: str, url: str, **kwargs) -> Optional[requests.Response]:
-        """
-        Make an authenticated request to Microsoft Graph API with retry logic.
-        
-        Args:
-            method: HTTP method (GET, POST, PUT, etc.)
-            url: Full API URL
-            **kwargs: Additional arguments passed to requests
-            
-        Returns:
-            Response object or None if all retries failed
-        """
-        token = self.authenticator.get_access_token()
-        if not token:
-            logger.error("Cannot make request: no valid access token")
-            return None
-        
-        headers = kwargs.get('headers', {})
-        headers['Authorization'] = f'Bearer {token}'
-        kwargs['headers'] = headers
-        
-        # Add default timeout
-        kwargs.setdefault('timeout', self.timeout)
-        
-        # Retry logic
-        for attempt in range(self.max_retries):
-            try:
-                logger.debug(f"Making {method} request to {url} (attempt {attempt + 1})")
-                response = requests.request(method, url, **kwargs)
-                
-                # Check for authentication errors
-                if response.status_code == 401:
-                    logger.warning("Access token expired, refreshing...")
-                    self.authenticator.access_token = None  # Force token refresh
-                    token = self.authenticator.get_access_token()
-                    if token:
-                        headers['Authorization'] = f'Bearer {token}'
-                        kwargs['headers'] = headers
-                        continue
-                
-                response.raise_for_status()
-                return response
-                
-            except requests.exceptions.RequestException as e:
-                logger.warning(f"Request attempt {attempt + 1} failed: {e}")
-                if attempt < self.max_retries - 1:
-                    logger.info(f"Retrying in {self.retry_delay} seconds...")
-                    time.sleep(self.retry_delay)
-        
-        logger.error(f"All {self.max_retries} attempts failed for {method} {url}")
-        return None
-    
-    def get_folder_id(self, folder_path: str) -> Optional[str]:
-        """
-        Get SharePoint folder ID by path for use in file operations.
-        
-        Args:
-            folder_path: SharePoint folder path (e.g., "/Team/Projects/Folder")
-            
-        Returns:
-            Folder ID string or None if folder not found
-        """
-        logger.info(f"Looking up folder ID for: {folder_path}")
-        
-        # URL encode the folder path
-        import urllib.parse
-        encoded_path = urllib.parse.quote(folder_path)
-        
-        # Use drive API with path
-        url = f"{self.drive_api_url}/root:/{encoded_path}"
-        
-        response = self._make_authenticated_request('GET', url)
-        if not response:
-            logger.error(f"Failed to get folder info for: {folder_path}")
-            return None
-        
-        try:
-            folder_info = response.json()
-            folder_id = folder_info.get('id')
-            
-            if folder_id:
-                logger.info(f"Found folder ID: {folder_id}")
-                return folder_id
-            else:
-                logger.error(f"No folder ID in response for: {folder_path}")
-                return None
-                
-        except (ValueError, KeyError) as e:
-            logger.error(f"Invalid folder response format: {e}")
-            return None
-    
-    def list_files_in_folder(self, folder_id: str) -> List[Dict]:
-        """
-        List all files in a SharePoint folder.
-        
-        Args:
-            folder_id: SharePoint folder ID
-            
-        Returns:
-            List of file information dictionaries
-        """
-        logger.info(f"Listing files in folder: {folder_id}")
-        
-        url = f"{self.drive_api_url}/items/{folder_id}/children"
-        
-        response = self._make_authenticated_request('GET', url)
-        if not response:
-            logger.error(f"Failed to list files in folder: {folder_id}")
-            return []
-        
-        try:
-            folder_contents = response.json()
-            files = []
-            
-            for item in folder_contents.get('value', []):
-                # Only include files, not folders
-                if 'file' in item:
-                    file_info = {
-                        'id': item.get('id'),
-                        'name': item.get('name'),
-                        'size': item.get('size', 0),
-                        'modified': item.get('lastModifiedDateTime'),
-                        'download_url': item.get('@microsoft.graph.downloadUrl')
-                    }
-                    files.append(file_info)
-            
-            logger.info(f"Found {len(files)} files in folder")
-            return files
-            
-        except (ValueError, KeyError) as e:
-            logger.error(f"Invalid folder contents response: {e}")
-            return []
-    
-    def download_file(self, download_url: str, local_path: str) -> bool:
-        """
-        Download a file from SharePoint using direct download URL.
-        
-        Args:
-            download_url: Direct download URL from SharePoint
-            local_path: Local path where file should be saved
-            
-        Returns:
-            True if download successful, False otherwise
-        """
-        try:
-            # Download file content
-            response = requests.get(download_url, timeout=self.timeout)
-            response.raise_for_status()
-            
-            # Ensure parent directory exists
-            os.makedirs(os.path.dirname(local_path), exist_ok=True)
-            
-            # Write file content
-            with open(local_path, 'wb') as f:
-                f.write(response.content)
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to download file: {e}")
-            return False
-    
-    def download_file_by_id(self, file_id: str, local_path: str) -> bool:
-        """
-        Download a file from SharePoint using file ID.
-        
-        Args:
-            file_id: SharePoint file ID
-            local_path: Local path where file should be saved
-            
-        Returns:
-            True if download successful, False otherwise
-        """
-        url = f"{self.drive_api_url}/items/{file_id}/content"
-        
-        response = self._make_authenticated_request('GET', url)
-        if not response:
-            return False
-        
-        try:
-            # Ensure parent directory exists
-            os.makedirs(os.path.dirname(local_path), exist_ok=True)
-            
-            # Write file content
-            with open(local_path, 'wb') as f:
-                f.write(response.content)
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to download file by ID: {e}")
-            return False
 
 @dataclass
 class JSONLTransferConfig:
@@ -467,7 +185,7 @@ class JSONLSharePointToS3Processor:
     
     def _initialize_sharepoint_client(self) -> Tuple[SharePointAuthenticator, SharePointFileManager]:
         """
-        Initialize SharePoint authentication and file manager.
+        Initialize SharePoint authentication and file manager using shared utilities.
         
         Returns:
             Tuple[SharePointAuthenticator, SharePointFileManager]: Initialized SharePoint clients
@@ -478,25 +196,25 @@ class JSONLSharePointToS3Processor:
         logger.info("🔑 Initializing SharePoint authentication...")
         
         try:
-            authenticator = SharePointAuthenticator(
+            # Create SharePoint config from our config
+            sharepoint_config = SharePointConfig(
                 tenant_id=self.config.tenant_id,
                 client_id=self.config.client_id,
-                client_secret=self.config.client_secret
+                client_secret=self.config.client_secret,
+                site_id=self.config.site_id,
+                drive_id=self.config.drive_id,
+                timeout_seconds=self.config.timeout_seconds,
+                retry_attempts=self.config.retry_attempts,
+                retry_delay_seconds=self.config.retry_delay_seconds
             )
+            
+            # Create authenticator and file manager using shared utilities
+            authenticator, file_manager = create_sharepoint_manager(sharepoint_config)
             
             # Test authentication
             token = authenticator.get_access_token()
             if not token:
                 raise Exception("Failed to obtain SharePoint access token")
-            
-            file_manager = SharePointFileManager(
-                authenticator=authenticator,
-                site_id=self.config.site_id,
-                drive_id=self.config.drive_id,
-                timeout=self.config.timeout_seconds,
-                max_retries=self.config.retry_attempts,
-                retry_delay=self.config.retry_delay_seconds
-            )
             
             logger.info("✅ SharePoint authentication successful")
             return authenticator, file_manager
@@ -587,7 +305,7 @@ class JSONLSharePointToS3Processor:
     
     def _get_sharepoint_jsonl_files(self, folder_id: str) -> List[Dict]:
         """
-        Get list of JSONL files from SharePoint folder.
+        Get list of JSONL files from SharePoint folder using shared utilities.
         
         Args:
             folder_id: SharePoint folder ID to scan
@@ -598,13 +316,8 @@ class JSONLSharePointToS3Processor:
         logger.info(f"📂 Scanning SharePoint folder for JSONL files...")
         
         try:
-            all_files = self.file_manager.list_files_in_folder(folder_id)
-            
-            # Filter for JSONL files only
-            jsonl_files = [
-                file for file in all_files 
-                if file['name'].lower().endswith('.jsonl')
-            ]
+            # Use shared utilities with file extension filtering
+            jsonl_files = self.file_manager.list_files_in_folder(folder_id, file_extensions=['.jsonl'])
             
             logger.info(f"📄 Found {len(jsonl_files)} JSONL files in SharePoint folder")
             return jsonl_files

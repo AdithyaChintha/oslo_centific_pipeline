@@ -18,7 +18,7 @@ sharepoint:
   
   # ✅ WORKING automation folders (Input & Output exist, need to create Delivery)
   input_folder_path: "/Team Optimization_Delivery/Projects/Pyrenees/Annotation Excel Directory/csv_files/Input/batch3_tier1_208572/batch 10"
-  output_folder_path: "/Team Optimization_Delivery/Projects/Pyrenees/Annotation Excel Directory/csv_files/Output/10.15_Delivery2_75K"
+  output_folder_path: "/Team Optimization_Delivery/Projects/Pyrenees/Annotation Excel Directory/csv_files/Output/10.17_Delivery2_85K"
   delivery_folder_path: "/Team Optimization_Delivery/Projects/Pyrenees/Delivery Files"
   
   # ✅ JSONL source folder for SharePoint to S3 transfer
