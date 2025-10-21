@@ -1,0 +1,78 @@
+# SharePoint Configuration - UPDATED with your SharePoint URL info
+# Remaining placeholders marked with ⚠️ STILL NEEDED
+
+# Azure AD App Registration Credentials (⚠️ STILL NEED FROM IT ADMIN)
+azure_ad:
+  tenant_id: "9b415834-803a-4da0-afdc-fe6b1d52d649"           # ⚠️ ASK IT: Tenant ID for digitaltechedge.sharepoint.com
+  client_id: "cf36a429-766a-47eb-9b49-66b04a227ead"           # ⚠️ ASK IT: App registration client ID
+  client_secret: "jnf8Q~3H41HHHfLvwBh0seXNvos80e5~GhMhLapI"   # ⚠️ ASK IT: App registration secret
+
+# SharePoint Site Configuration (✅ UPDATED from your URL)
+sharepoint:
+  # ✅ Your SharePoint site details (extracted from URL)
+  site_url: "https://digitaltechedge.sharepoint.com/sites/DGS_GenAI"
+  site_id: "digitaltechedge.sharepoint.com,08303265-ce6a-4100-bf57-c975289ba121,8c7e3257-88ed-4273-8756-a24a1b6a50cb"  # ✅ COMPLEX SITE ID FROM IT
+  
+  # ✅ Folder paths WORKING (verified with drive ID access)
+  base_path: "/Team Optimization_Delivery/Projects/Pyrenees/Annotation Excel Directory"
+  
+  # ✅ WORKING automation folders (Input & Output exist, need to create Delivery)
+  input_folder_path: "/Team Optimization_Delivery/Projects/Pyrenees/Annotation Excel Directory/csv_files/Input/batch3_tier1_208572/batch 10"
+  output_folder_path: "/Team Optimization_Delivery/Projects/Pyrenees/Annotation Excel Directory/csv_files/Output/10.17_Delivery2_85K"
+  delivery_folder_path: "/Team Optimization_Delivery/Projects/Pyrenees/Delivery Files"
+  
+  # ✅ JSONL source folder for SharePoint to S3 transfer
+  jsonl_source_folder_path: "/Team Optimization_Delivery/Projects/Pyrenees/Delivery Files"
+  
+  # ✅ Drive ID for direct access (more reliable than generic site drive)
+  drive_id: "b!ZTIwCGrOAEG_V8l1KJuhIVcyfoztiHNCh1aiShtqUMsot3IMa6YoTpInir_jRM0o"
+
+# S3 Configuration (for JSONL SharePoint to S3 transfer)
+s3:
+  # ✅ Using environment variables for security (same pattern as existing s3_config.yaml)
+  aws_access_key_id: "${AWS_ACCESS_KEY_ID}"
+  aws_secret_access_key: "${AWS_SECRET_ACCESS_KEY}"
+  region: "us-west-2"
+  bucket_name: "troveo-videodb-shared"
+  
+  # ✅ S3 target path for JSONL files transferred from SharePoint
+  jsonl_target_prefix: "sharepoint_delivery/jsonl_files"
+
+# Local Configuration
+local_paths:
+  # Source directory for Excel files to upload
+  excel_source_dir: "/home/vision_ai_adm/code/oslo/video_convertbranch/csv_files/batch_3"
+  
+  # Where to download annotated files from SharePoint
+  download_dir: "/home/vision_ai_adm/code/oslo/video_convertbranch/sharepoint_downloads"
+  
+  # Where to save converted JSONL files  
+  jsonl_output_dir: "/home/vision_ai_adm/code/oslo/video_convertbranch/jsonl_outputs"
+  
+  # State tracking files
+  upload_state_file: "/home/vision_ai_adm/code/oslo/video_convertbranch/sharepoint_xlsx_files.json"
+  download_state_file: "/home/vision_ai_adm/code/oslo/video_convertbranch/download_state.json"
+  
+  # JSONL transfer paths (SharePoint to S3)
+  jsonl_temp_download_dir: "/home/vision_ai_adm/code/oslo/video_convertbranch/jsonl_temp_downloads"
+  jsonl_transfer_state_file: "/home/vision_ai_adm/code/oslo/video_convertbranch/jsonl_transfer_state.json"
+
+# Processing Configuration
+processing:
+  # Skip the newest N files (they might still be in progress)
+  skip_newest_files: 1
+  
+  # File patterns to include
+  file_patterns:
+    - "*.xlsx"
+    - "*.xls"
+    - "*.csv"
+  
+  # Maximum files to process per run (to avoid overwhelming SharePoint)
+  max_files_per_run: 50
+
+# API Configuration  
+api:
+  timeout_seconds: 300
+  retry_attempts: 3
+  retry_delay_seconds: 5
