@@ -14,36 +14,36 @@ import yaml
 import requests
 from datetime import datetime
 
-def load_config(config_path="config/sharepoint_config.yaml"):
+def load_config(config_path="config/tar_transfer_config.yaml"):
     """Load and validate configuration."""
     if not os.path.exists(config_path):
         print(f"❌ Configuration file not found: {config_path}")
         return None
-    
+
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
-    
+
     try:
         azure_ad = config['azure_ad']
         sharepoint = config['sharepoint']
-        
+
         # Check for placeholder values
         placeholders = []
         if "YOUR_" in azure_ad.get('tenant_id', ''):
             placeholders.append('tenant_id')
         if "YOUR_" in azure_ad.get('client_id', ''):
-            placeholders.append('client_id') 
+            placeholders.append('client_id')
         if "YOUR_" in azure_ad.get('client_secret', ''):
             placeholders.append('client_secret')
         if "YOUR_" in sharepoint.get('site_id', ''):
             placeholders.append('site_id')
-            
+
         if placeholders:
             print(f"❌ Please fill out these configuration values: {', '.join(placeholders)}")
             return None
-            
+
         return config
-        
+
     except KeyError as e:
         print(f"❌ Missing configuration section: {e}")
         return None
@@ -137,46 +137,44 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description="Test SharePoint connection")
-    parser.add_argument('--config', default='config/sharepoint_config.yaml', help='Configuration file path')
+    parser.add_argument('--config', default='config/tar_transfer_config.yaml', help='Configuration file path')
     args = parser.parse_args()
-    
+
     print("=" * 50)
-    print("SharePoint Connection Test")
+    print("SharePoint Connection Test (TAR Transfer)")
     print("=" * 50)
-    
+
     # Load configuration
     config = load_config(args.config)
     if not config:
         sys.exit(1)
-    
+
     # Test authentication
     token = get_access_token(config)
     if not token:
         sys.exit(1)
-    
+
     # Test site access
     if not test_site_access(config, token):
         sys.exit(1)
-    
+
     # Test folder access
     sharepoint_config = config['sharepoint']
     folders_to_test = [
-        (sharepoint_config.get('input_folder_path', '/Input'), 'Input'),
-        (sharepoint_config.get('output_folder_path', '/Output'), 'Output'),
-        (sharepoint_config.get('delivery_folder_path', '/Delivery'), 'Delivery')
+        (sharepoint_config.get('tar_source_folder_path', '/Uploads'), 'TAR Source')
     ]
-    
+
     all_folders_ok = True
     for folder_path, folder_name in folders_to_test:
         if not test_folder_access(config, token, folder_path, folder_name):
             all_folders_ok = False
-    
+
     print("=" * 50)
     if all_folders_ok:
         print("🎉 All tests passed! SharePoint configuration is working correctly.")
         print("\nNext steps:")
-        print("1. Test upload: python sharepoint_excel_uploader.py --dry-run")
-        print("2. Test download: python sharepoint_output_processor.py --dry-run")
+        print("1. Run TAR transfer script to download TAR files from SharePoint")
+        print("2. Upload TAR files to Azure Blob Storage")
     else:
         print("⚠️  Some tests failed. Please check folder paths and permissions.")
     print("=" * 50)
