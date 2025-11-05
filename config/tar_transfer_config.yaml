@@ -1,0 +1,52 @@
+# Azure AD App Registration Credentials (⚠️ STILL NEED FROM IT ADMIN)
+azure_ad:
+  tenant_id: "9b415834-803a-4da0-afdc-fe6b1d52d649"           # ⚠️ ASK IT: Tenant ID for digitaltechedge.sharepoint.com
+  client_id: "cf36a429-766a-47eb-9b49-66b04a227ead"           # ⚠️ ASK IT: App registration client ID
+  client_secret: "jnf8Q~3H41HHHfLvwBh0seXNvos80e5~GhMhLapI"   # ⚠️ ASK IT: App registration secret
+
+# SharePoint Site Configuration (✅ UPDATED from your URL)
+sharepoint:
+  # ✅ Your SharePoint site details (extracted from URL)
+  site_url: "https://digitaltechedge.sharepoint.com/sites/Oslo Humus Moderators"
+  site_id: "digitaltechedge.sharepoint.com,38fe5936-7c38-45ec-9bd5-b0051fed3610,65326b1d-1ff4-4a70-a464-f1d3a39186aa"  # ✅ COMPLEX SITE ID FROM IT
+
+  # ✅ TAR source folder for SharePoint to Azure Blob transfer
+  tar_source_folder_path: "/Uploads"  # ⚠️ UPDATE: Specify the SharePoint folder containing TAR files
+
+  # ✅ Drive ID for direct access (more reliable than generic site drive)
+  drive_id: "b!Nln-ODh87EWb1bAFH-02EB1rMmX0H3BKpGTx06ORhqpuRZrKdUe9RrHjIH-Pdeog"
+
+# Azure Blob Storage Configuration (for TAR file uploads)
+azure_blob:
+  # ✅ Using environment variable for security (recommended)
+  connection_string: "${AZURE_STORAGE_CONNECTION_STRING}"
+
+  # Alternative: Use account name and key directly
+  # account_name: "your_storage_account_name"
+  # account_key: "${AZURE_STORAGE_ACCOUNT_KEY}"
+
+  # ✅ Container and target path for TAR files
+  container_name: "tar-files"  # ⚠️ UPDATE: Your Azure Blob container name
+  target_prefix: "tar_files/"  # Target folder prefix within the container
+
+# Local Configuration
+local_paths:
+  # Temporary directory for downloading TAR files from SharePoint before uploading to Azure
+  temp_download_dir: "/home/vision_ai_adm/code/oslo/video_convertbranch/tar_temp_downloads"
+
+  # State tracking file to avoid re-processing already transferred files
+  transfer_state_file: "/home/vision_ai_adm/code/oslo/video_convertbranch/tar_transfer_state.json"
+
+# Processing Configuration
+processing:
+  # Maximum files to process per run (to avoid overwhelming systems)
+  max_files_per_run: 50
+
+  # Clean up local temporary files after successful upload to Azure Blob
+  cleanup_after_upload: true
+
+# API Configuration
+api:
+  timeout_seconds: 300
+  retry_attempts: 3
+  retry_delay_seconds: 5
