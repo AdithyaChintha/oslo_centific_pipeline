@@ -18,24 +18,23 @@ sharepoint:
 
 # Azure Blob Storage Configuration (for TAR file uploads)
 azure_blob:
-  # ✅ Using environment variable for security (recommended)
-  connection_string: "${AZURE_STORAGE_CONNECTION_STRING}"
+  connection_string: "${BLOB_CONNECTION_STRING}"
 
   # Alternative: Use account name and key directly
   # account_name: "your_storage_account_name"
   # account_key: "${AZURE_STORAGE_ACCOUNT_KEY}"
 
   # ✅ Container and target path for TAR files
-  container_name: "tar-files"  # ⚠️ UPDATE: Your Azure Blob container name
-  target_prefix: "tar_files/"  # Target folder prefix within the container
+  container_name: "instavideo"  # ⚠️ UPDATE: Your Azure Blob container name
+  target_prefix: "oslo_stage_2_tar_files/"  # Target folder prefix within the container
 
 # Local Configuration
 local_paths:
   # Temporary directory for downloading TAR files from SharePoint before uploading to Azure
-  temp_download_dir: "/home/vision_ai_adm/code/oslo/video_convertbranch/tar_temp_downloads"
+  temp_download_dir: "/data/oslo/tar_temp_downloads"
 
   # State tracking file to avoid re-processing already transferred files
-  transfer_state_file: "/home/vision_ai_adm/code/oslo/video_convertbranch/tar_transfer_state.json"
+  transfer_state_file: "/data/oslo/tar_temp_downloads/tar_transfer_state.json"
 
 # Processing Configuration
 processing:

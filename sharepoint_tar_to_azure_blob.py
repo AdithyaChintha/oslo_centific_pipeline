@@ -8,12 +8,22 @@ Key Features:
 - Downloads TAR files from configured SharePoint folder
 - Uploads downloaded TAR files to Azure Blob Storage
 - Tracks processed files to avoid duplicates
-- Uses shared SharePoint and Azure Blob utilities
+- Uses single unified configuration file (tar_transfer_config.yaml)
 - Provides detailed logging and progress tracking
-- All paths configured via tar_transfer_config.yaml
+- All settings (SharePoint, Azure, paths) in one config file
 
 Usage:
     python sharepoint_tar_to_azure_blob.py [--config CONFIG_FILE] [--dry-run]
+
+Examples:
+    # Run with default config
+    python sharepoint_tar_to_azure_blob.py
+
+    # Run with custom config
+    python sharepoint_tar_to_azure_blob.py --config custom_config.yaml
+
+    # Dry run (show what would be transferred)
+    python sharepoint_tar_to_azure_blob.py --dry-run
 
 Author: Auto-generated for TAR file transfer automation
 """
@@ -30,16 +40,14 @@ import logging
 # Import shared SharePoint utilities
 try:
     from utils.sharepoint_utils import (
-        SharePointConfig, SharePointAuthenticator, SharePointFileManager,
-        load_sharepoint_config, create_sharepoint_manager
+        SharePointAuthenticator, SharePointFileManager
     )
     from utils.azure_blob_utils import download_blob, list_blobs
 except ImportError:
     # Fallback for direct execution
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))
     from utils.sharepoint_utils import (
-        SharePointConfig, SharePointAuthenticator, SharePointFileManager,
-        load_sharepoint_config, create_sharepoint_manager
+        SharePointAuthenticator, SharePointFileManager
     )
     from utils.azure_blob_utils import download_blob, list_blobs
 
@@ -109,26 +117,40 @@ class TarTransferConfig:
 class TarTransferManager:
     """Main manager class that orchestrates TAR file transfer from SharePoint to Azure Blob."""
 
-    def __init__(self, sharepoint_config_path: str = "config/sharepoint_config.yaml",
-                 transfer_config_path: str = "config/tar_transfer_config.yaml"):
+    def __init__(self, transfer_config_path: str = "config/tar_transfer_config.yaml"):
         """
         Initialize transfer manager with configuration.
 
         Args:
-            sharepoint_config_path: Path to SharePoint YAML configuration file
-            transfer_config_path: Path to transfer-specific YAML configuration file
+            transfer_config_path: Path to transfer configuration YAML file (contains all settings)
         """
-        # Load SharePoint configuration
-        self.sp_config = load_sharepoint_config(sharepoint_config_path)
-
-        # Create SharePoint authenticator and file manager
-        self.authenticator, self.file_manager = create_sharepoint_manager(self.sp_config)
-
-        # Load transfer-specific configuration
+        # Load transfer configuration (contains everything we need)
         import yaml
         with open(transfer_config_path, 'r') as f:
             transfer_config_dict = yaml.safe_load(f)
         self.transfer_config = TarTransferConfig(transfer_config_dict)
+
+        # Extract SharePoint connection details from tar_transfer_config
+        azure_ad = transfer_config_dict['azure_ad']
+        sharepoint_config = transfer_config_dict['sharepoint']
+
+        # Create SharePoint authenticator directly from tar_transfer_config
+        self.authenticator = SharePointAuthenticator(
+            tenant_id=azure_ad['tenant_id'],
+            client_id=azure_ad['client_id'],
+            client_secret=azure_ad['client_secret'],
+            timeout_seconds=transfer_config_dict.get('api', {}).get('timeout_seconds', 300)
+        )
+
+        # Create SharePoint file manager directly from tar_transfer_config
+        self.file_manager = SharePointFileManager(
+            authenticator=self.authenticator,
+            site_id=sharepoint_config['site_id'],
+            drive_id=sharepoint_config['drive_id'],
+            timeout=transfer_config_dict.get('api', {}).get('timeout_seconds', 300),
+            max_retries=transfer_config_dict.get('api', {}).get('retry_attempts', 3),
+            retry_delay=transfer_config_dict.get('api', {}).get('retry_delay_seconds', 5)
+        )
 
         # Initialize Azure Blob client
         self.blob_service_client = BlobServiceClient.from_connection_string(
@@ -228,9 +250,147 @@ class TarTransferManager:
             logger.error(f"Failed to download: {filename}")
             return None
 
+    def _copy_url_to_azure_blob(self, download_url: str, blob_name: str, file_size: int = 0) -> bool:
+        """
+        Copy file directly from SharePoint URL to Azure Blob Storage (server-to-server).
+        This is the most efficient method as Azure copies directly without client download.
+
+        Args:
+            download_url: SharePoint direct download URL
+            blob_name: Target blob name in Azure
+            file_size: File size for logging (optional)
+
+        Returns:
+            True if copy successful, False otherwise
+        """
+        try:
+            # Add prefix if configured
+            if self.transfer_config.azure_target_prefix:
+                full_blob_name = os.path.join(self.transfer_config.azure_target_prefix, blob_name)
+            else:
+                full_blob_name = blob_name
+
+            # Get blob client
+            blob_client = self.container_client.get_blob_client(full_blob_name)
+
+            # Check if blob already exists
+            if blob_client.exists():
+                logger.warning(f"Blob already exists: {blob_name} (skipping)")
+                return True
+
+            logger.info(f"Starting server-to-server copy: {blob_name} ({file_size:,} bytes)")
+
+            # Start async copy from URL
+            copy_props = blob_client.start_copy_from_url(download_url)
+            copy_id = copy_props['copy_id']
+            copy_status = copy_props['copy_status']
+
+            logger.info(f"Copy initiated (ID: {copy_id}), status: {copy_status}")
+
+            # Poll for completion (for large files this can take time)
+            max_wait_time = 3600  # 1 hour max wait
+            poll_interval = 5  # Check every 5 seconds
+            elapsed_time = 0
+
+            while copy_status == 'pending':
+                if elapsed_time >= max_wait_time:
+                    logger.error(f"Copy timeout after {max_wait_time}s for {blob_name}")
+                    return False
+
+                time.sleep(poll_interval)
+                elapsed_time += poll_interval
+
+                # Get current copy status
+                props = blob_client.get_blob_properties()
+                copy_status = props.copy.status
+
+                if elapsed_time % 30 == 0:  # Log every 30 seconds
+                    logger.info(f"Copy in progress: {blob_name} (elapsed: {elapsed_time}s)")
+
+            # Check final status
+            if copy_status == 'success':
+                logger.info(f"✅ Server-to-server copy completed: {blob_name}")
+                return True
+            else:
+                logger.error(f"Copy failed with status: {copy_status}")
+                return False
+
+        except Exception as e:
+            logger.warning(f"Server-to-server copy failed for {blob_name}: {e}")
+            return False
+
+    def _stream_transfer_to_azure_blob(self, download_url: str, blob_name: str, file_size: int = 0) -> bool:
+        """
+        Stream file directly from SharePoint to Azure Blob using chunking.
+        Uses minimal memory and supports progress tracking.
+
+        Args:
+            download_url: SharePoint direct download URL
+            blob_name: Target blob name in Azure
+            file_size: File size for progress tracking
+
+        Returns:
+            True if upload successful, False otherwise
+        """
+        try:
+            # Add prefix if configured
+            if self.transfer_config.azure_target_prefix:
+                full_blob_name = os.path.join(self.transfer_config.azure_target_prefix, blob_name)
+            else:
+                full_blob_name = blob_name
+
+            # Get blob client
+            blob_client = self.container_client.get_blob_client(full_blob_name)
+
+            # Check if blob already exists
+            if blob_client.exists():
+                logger.warning(f"Blob already exists: {blob_name} (skipping)")
+                return True
+
+            logger.info(f"Starting streaming transfer: {blob_name} ({file_size:,} bytes)")
+
+            # Stream download with chunking
+            CHUNK_SIZE = 64 * 1024 * 1024  # 64MB chunks
+            response = requests.get(download_url, stream=True, timeout=300)
+            response.raise_for_status()
+
+            # Upload with streaming and progress tracking
+            bytes_transferred = 0
+            last_progress_log = 0
+
+            def chunk_generator():
+                nonlocal bytes_transferred, last_progress_log
+                for chunk in response.iter_content(chunk_size=CHUNK_SIZE):
+                    if chunk:
+                        bytes_transferred += len(chunk)
+
+                        # Log progress every 10%
+                        if file_size > 0:
+                            progress = (bytes_transferred / file_size) * 100
+                            if progress - last_progress_log >= 10:
+                                logger.info(f"Transfer progress: {blob_name} - {progress:.1f}% ({bytes_transferred:,}/{file_size:,} bytes)")
+                                last_progress_log = progress
+
+                        yield chunk
+
+            # Upload blob with concurrent chunk uploads for better performance
+            blob_client.upload_blob(
+                chunk_generator(),
+                overwrite=False,
+                max_concurrency=4  # Upload 4 chunks in parallel
+            )
+
+            logger.info(f"✅ Streaming transfer completed: {blob_name} ({bytes_transferred:,} bytes)")
+            return True
+
+        except Exception as e:
+            logger.error(f"Streaming transfer failed for {blob_name}: {e}")
+            return False
+
     def _upload_to_azure_blob(self, local_path: str, blob_name: str) -> bool:
         """
-        Upload a file to Azure Blob Storage.
+        Upload a file to Azure Blob Storage from local path.
+        This is now only used as a last resort fallback.
 
         Args:
             local_path: Local file path
@@ -240,14 +400,16 @@ class TarTransferManager:
             True if upload successful, False otherwise
         """
         try:
-            logger.info(f"Uploading to Azure Blob: {blob_name}")
+            logger.info(f"Uploading from local file to Azure Blob: {blob_name}")
 
             # Add prefix if configured
             if self.transfer_config.azure_target_prefix:
-                blob_name = os.path.join(self.transfer_config.azure_target_prefix, blob_name)
+                full_blob_name = os.path.join(self.transfer_config.azure_target_prefix, blob_name)
+            else:
+                full_blob_name = blob_name
 
             # Get blob client
-            blob_client = self.container_client.get_blob_client(blob_name)
+            blob_client = self.container_client.get_blob_client(full_blob_name)
 
             # Check if blob already exists
             if blob_client.exists():
@@ -256,10 +418,10 @@ class TarTransferManager:
 
             # Upload file
             file_size = os.path.getsize(local_path)
-            logger.info(f"Uploading {file_size:,} bytes...")
+            logger.info(f"Uploading {file_size:,} bytes from local disk...")
 
             with open(local_path, 'rb') as data:
-                blob_client.upload_blob(data, overwrite=False)
+                blob_client.upload_blob(data, overwrite=False, max_concurrency=4)
 
             logger.info(f"Successfully uploaded to Azure Blob: {blob_name}")
             return True
@@ -342,40 +504,73 @@ class TarTransferManager:
 
             for i, file_info in enumerate(files_to_transfer, 1):
                 filename = file_info['name']
-                logger.info(f"\n[{i}/{len(files_to_transfer)}] Processing: {filename}")
+                file_size = file_info.get('size', 0)
+                download_url = file_info.get('download_url')
+
+                logger.info(f"\n[{i}/{len(files_to_transfer)}] Processing: {filename} ({file_size:,} bytes)")
+
+                if not download_url:
+                    logger.error(f"No download URL for file: {filename}")
+                    failed_transfers.append(filename)
+                    continue
+
+                transfer_success = False
+                transfer_method = "unknown"
 
                 try:
-                    # Step 1: Download from SharePoint
-                    local_path = self._download_from_sharepoint(file_info)
-                    if not local_path:
-                        failed_transfers.append(filename)
-                        continue
+                    # Strategy: Try optimized methods first, fallback to slower methods
 
-                    # Step 2: Upload to Azure Blob
-                    upload_success = self._upload_to_azure_blob(local_path, filename)
+                    # Method 1: Try server-to-server copy (fastest, zero client resources)
+                    logger.info(f"[Method 1/3] Attempting server-to-server copy (Azure Copy from URL)...")
+                    transfer_success = self._copy_url_to_azure_blob(download_url, filename, file_size)
 
-                    if upload_success:
-                        # Update transfer state
+                    if transfer_success:
+                        transfer_method = "server-to-server"
+                        logger.info(f"✅ Server-to-server copy succeeded for: {filename}")
+                    else:
+                        # Method 2: Try streaming transfer (low memory, no disk I/O)
+                        logger.info(f"[Method 2/3] Server-to-server failed, trying streaming transfer...")
+                        transfer_success = self._stream_transfer_to_azure_blob(download_url, filename, file_size)
+
+                        if transfer_success:
+                            transfer_method = "streaming"
+                            logger.info(f"✅ Streaming transfer succeeded for: {filename}")
+                        else:
+                            # Method 3: Last resort - download to disk then upload
+                            logger.info(f"[Method 3/3] Streaming failed, falling back to download+upload...")
+                            local_path = self._download_from_sharepoint(file_info)
+
+                            if local_path:
+                                transfer_success = self._upload_to_azure_blob(local_path, filename)
+
+                                if transfer_success:
+                                    transfer_method = "download+upload"
+                                    logger.info(f"✅ Download+upload succeeded for: {filename}")
+
+                                # Cleanup local file if configured
+                                if self.transfer_config.cleanup_after_upload:
+                                    self._cleanup_local_file(local_path)
+
+                    # Record success
+                    if transfer_success:
                         transfer_state[filename] = {
                             'transferred_at': datetime.now().isoformat(),
-                            'size': file_info['size'],
+                            'size': file_size,
                             'sharepoint_modified': file_info.get('modified'),
-                            'blob_path': os.path.join(self.transfer_config.azure_target_prefix, filename)
+                            'blob_path': os.path.join(self.transfer_config.azure_target_prefix, filename),
+                            'transfer_method': transfer_method
                         }
                         successful_transfers.append(filename)
-
-                        # Step 3: Cleanup local file if configured
-                        if self.transfer_config.cleanup_after_upload:
-                            self._cleanup_local_file(local_path)
-
-                        logger.info(f"✅ Successfully transferred: {filename}")
+                        logger.info(f"✅ Successfully transferred: {filename} (method: {transfer_method})")
                     else:
                         failed_transfers.append(filename)
-                        logger.error(f"❌ Failed to transfer: {filename}")
+                        logger.error(f"❌ All transfer methods failed for: {filename}")
 
                 except Exception as e:
                     failed_transfers.append(filename)
                     logger.error(f"❌ Error processing {filename}: {e}")
+                    import traceback
+                    logger.debug(traceback.format_exc())
 
                 # Small delay between transfers
                 time.sleep(1)
@@ -409,10 +604,8 @@ def main():
     parser = argparse.ArgumentParser(
         description='Transfer TAR files from SharePoint to Azure Blob Storage'
     )
-    parser.add_argument('--sp-config', default='config/sharepoint_config.yaml',
-                       help='Path to SharePoint configuration file')
-    parser.add_argument('--transfer-config', default='config/tar_transfer_config.yaml',
-                       help='Path to transfer configuration file')
+    parser.add_argument('--config', '-c', default='config/tar_transfer_config.yaml',
+                       help='Path to transfer configuration file (contains all settings)')
     parser.add_argument('--dry-run', action='store_true',
                        help='Show what would be transferred without actually transferring')
 
@@ -421,8 +614,7 @@ def main():
     try:
         # Create and run transfer manager
         transfer_manager = TarTransferManager(
-            sharepoint_config_path=args.sp_config,
-            transfer_config_path=args.transfer_config
+            transfer_config_path=args.config
         )
         success = transfer_manager.run_transfer(dry_run=args.dry_run)
 
