@@ -1,0 +1,61 @@
+# TAR Inspection Configuration File
+# This config is used for random TAR sampling, extraction, Azure Blob upload, and CSV reporting
+
+# Azure AD App Registration Credentials (reused from tar_transfer_config.yaml)
+azure_ad:
+  tenant_id: "9b415834-803a-4da0-afdc-fe6b1d52d649"
+  client_id: "cf36a429-766a-47eb-9b49-66b04a227ead"
+  client_secret: "jnf8Q~3H41HHHfLvwBh0seXNvos80e5~GhMhLapI"
+
+# SharePoint Site Configuration (reused from tar_transfer_config.yaml)
+sharepoint:
+  site_url: "https://digitaltechedge.sharepoint.com/sites/Oslo Humus Moderators"
+  site_id: "digitaltechedge.sharepoint.com,38fe5936-7c38-45ec-9bd5-b0051fed3610,65326b1d-1ff4-4a70-a464-f1d3a39186aa"
+
+  # TAR source folder (same as transfer config)
+  tar_source_folder_path: "/Uploads"
+
+  drive_id: "b!Nln-ODh87EWb1bAFH-02EB1rMmX0H3BKpGTx06ORhqpuRZrKdUe9RrHjIH-Pdeog"
+
+# Azure Blob Storage Configuration (reused from tar_transfer_config.yaml)
+azure_blob:
+  connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
+
+  # Container name (same storage account, same container)
+  container_name: "instavideo"
+
+# Inspection-Specific Settings
+inspection:
+  # Target blob prefix for extracted/untarred files
+  # Extracted files will be uploaded to: instavideo/untar_folder_oslo2/<tar_name>/<file_path>
+  untar_blob_prefix: "untar_folder_oslo2/"
+
+  # Sampling ratio: Pick 1 random TAR file per every N files
+  # Example: 10 means pick 1 file from every 10 TAR files
+  sampling_ratio: 10
+
+  # SAS token expiry in days (default: 30 days for team inspection)
+  sas_token_expiry_days: 30
+
+  # Local temporary directory for extracting TAR files
+  temp_extract_dir: "/data/oslo/tar_extractions"
+
+  # Directory where CSV inspection reports will be saved
+  csv_report_dir: "/data/oslo/untar_inspection_reports_"
+
+  # State file to track already-inspected TAR files (avoids re-inspection)
+  inspection_state_file: "/data/oslo/tar_temp_downloads/tar_inspection_state.json"
+
+# Local Paths (reused from tar_transfer_config.yaml)
+local_paths:
+  # Temporary directory for downloading TAR files from SharePoint
+  temp_download_dir: "/data/oslo/tar_temp_downloads_inspection"
+
+  # Transfer state file (used by sharepoint_tar_to_azure_blob.py, not by inspector)
+  transfer_state_file: "/data/oslo/tar_temp_downloads/tar_transfer_state.json"
+
+# API Configuration (reused from tar_transfer_config.yaml)
+api:
+  timeout_seconds: 300
+  retry_attempts: 3
+  retry_delay_seconds: 5
