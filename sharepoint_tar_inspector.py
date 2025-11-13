@@ -91,6 +91,12 @@ class TarInspectionConfig:
         self.untar_blob_prefix = inspection_config.get('untar_blob_prefix', 'untar_folder_oslo2/')
         self.sampling_ratio = inspection_config.get('sampling_ratio', 10)  # 1 per 10 files
         self.sas_token_expiry_days = inspection_config.get('sas_token_expiry_days', 30)
+        self.execution_mode = inspection_config.get('execution_mode', 'random').lower()
+        if self.execution_mode not in ['random', 'list']:
+            raise ValueError(f"Invalid execution_mode: {self.execution_mode}. Must be 'random' or 'list'")
+        self.tar_file_list = inspection_config.get('tar_file_list', [])
+        if self.execution_mode == 'list' and not self.tar_file_list:
+            raise ValueError("execution_mode is 'list' but tar_file_list is empty") 
 
         # Local paths
         self.temp_download_dir = config_dict['local_paths']['temp_download_dir']
@@ -191,7 +197,11 @@ class TarInspectionManager:
         logger.info(f"SharePoint folder: {self.config.sharepoint_tar_folder_path}")
         logger.info(f"Azure container: {self.config.azure_container_name}")
         logger.info(f"Untar blob prefix: {self.config.untar_blob_prefix}")
-        logger.info(f"Sampling ratio: 1 per {self.config.sampling_ratio} files")
+        logger.info(f"Execution mode: {self.config.execution_mode}")
+        if self.config.execution_mode == 'random':
+            logger.info(f"Sampling ratio: 1 per {self.config.sampling_ratio} files")
+        elif self.config.execution_mode == 'list':
+            logger.info(f"Target files: {len(self.config.tar_file_list)} TAR files specified")
 
     def _load_inspection_state(self) -> Dict[str, Dict]:
         """Load inspection state from JSON file."""
@@ -255,6 +265,53 @@ class TarInspectionManager:
         selected_files = random.sample(uninspected_files, min(num_samples, len(uninspected_files)))
 
         logger.info(f"Selected {len(selected_files)} random samples for inspection")
+        return selected_files
+
+    def _select_from_list(self, all_files: List[Dict], already_inspected: set) -> List[Dict]:
+        """
+        Select specific TAR files from the list provided in config.
+
+        Args:
+            all_files: List of all TAR files available in SharePoint
+            already_inspected: Set of already inspected filenames
+
+        Returns:
+            List of selected files matching the tar_file_list from config
+        """
+        # Create a lookup dictionary for fast matching
+        available_files_dict = {f['name']: f for f in all_files}
+
+        selected_files = []
+        missing_files = []
+        already_processed_files = []
+
+        for tar_filename in self.config.tar_file_list:
+            # Check if already inspected
+            if tar_filename in already_inspected:
+                logger.info(f"Skipping (already inspected): {tar_filename}")
+                already_processed_files.append(tar_filename)
+                continue
+
+            # Check if file exists in SharePoint
+            if tar_filename in available_files_dict:
+                selected_files.append(available_files_dict[tar_filename])
+                logger.info(f"Found: {tar_filename}")
+            else:
+                logger.warning(f"NOT FOUND in SharePoint: {tar_filename}")
+                missing_files.append(tar_filename)
+
+        # Summary logging
+        logger.info(f"\nList Mode Selection Summary:")
+        logger.info(f"  Requested files: {len(self.config.tar_file_list)}")
+        logger.info(f"  Found and selected: {len(selected_files)}")
+        logger.info(f"  Already inspected: {len(already_processed_files)}")
+        logger.info(f"  Missing/Not found: {len(missing_files)}")
+
+        if missing_files:
+            logger.warning(f"\nMissing files that will be skipped:")
+            for filename in missing_files:
+                logger.warning(f"{filename}")
+
         return selected_files
 
     def _download_from_sharepoint(self, file_info: Dict) -> Optional[str]:
@@ -590,8 +647,16 @@ class TarInspectionManager:
                 logger.warning("No TAR files found in SharePoint folder")
                 return True
 
-            # Select random samples
-            selected_files = self._select_random_samples(all_tar_files, already_inspected)
+            # Select files based on execution mode
+            if self.config.execution_mode == 'random':
+                logger.info(f"Using RANDOM MODE (1 per {self.config.sampling_ratio} files)")
+                selected_files = self._select_random_samples(all_tar_files, already_inspected)
+            elif self.config.execution_mode == 'list':
+                logger.info(f"Using LIST MODE ({len(self.config.tar_file_list)} files specified)")
+                selected_files = self._select_from_list(all_tar_files, already_inspected)
+            else:
+                logger.error(f"Invalid execution mode: {self.config.execution_mode}")
+                return False
 
             if not selected_files:
                 logger.info("No files to inspect")

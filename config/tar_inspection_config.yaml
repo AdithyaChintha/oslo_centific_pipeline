@@ -26,6 +26,11 @@ azure_blob:
 
 # Inspection-Specific Settings
 inspection:
+  # Execution mode: 'random' or 'list'
+  # - random: Randomly sample TAR files (uses sampling_ratio)
+  # - list: Process specific TAR files (uses tar_file_list)
+  execution_mode: "list"  # Options: "random" | "list"
+
   # Target blob prefix for extracted/untarred files
   # Extracted files will be uploaded to: instavideo/untar_folder_oslo2/<tar_name>/<file_path>
   untar_blob_prefix: "untar_folder_oslo2/"
@@ -34,8 +39,15 @@ inspection:
   # Example: 10 means pick 1 file from every 10 TAR files
   sampling_ratio: 10
 
+  # --- LIST MODE SETTINGS ---
+  # List of specific TAR filenames to process (only used when execution_mode: "list")
+  # Filenames should match exactly as they appear in SharePoint 
+  tar_file_list:
+    - "f8900399-2e31-4ebc-b469-7a30e0db0066.tar"
+    - "4f8f8e72-8152-49ea-9c2c-1f1d5771e334.tar"
+
   # SAS token expiry in days (default: 30 days for team inspection)
-  sas_token_expiry_days: 30
+  sas_token_expiry_days: 365
 
   # Local temporary directory for extracting TAR files
   temp_extract_dir: "/data/oslo/tar_extractions"
