@@ -13,7 +13,7 @@ sharepoint:
   site_id: "digitaltechedge.sharepoint.com,38fe5936-7c38-45ec-9bd5-b0051fed3610,65326b1d-1ff4-4a70-a464-f1d3a39186aa"
 
   # TAR source folder (same as transfer config)
-  tar_source_folder_path: "/Uploads"
+  tar_source_folder_path: "/Uploads/test"
 
   drive_id: "b!Nln-ODh87EWb1bAFH-02EB1rMmX0H3BKpGTx06ORhqpuRZrKdUe9RrHjIH-Pdeog"
 
@@ -33,7 +33,7 @@ inspection:
 
   # Target blob prefix for extracted/untarred files
   # Extracted files will be uploaded to: instavideo/untar_folder_oslo2/<tar_name>/<file_path>
-  untar_blob_prefix: "untar_folder_oslo2/"
+  untar_blob_prefix: "untar_folder_oslo2/testing_erp"
 
   # Sampling ratio: Pick 1 random TAR file per every N files
   # Example: 10 means pick 1 file from every 10 TAR files
@@ -43,9 +43,8 @@ inspection:
   # List of specific TAR filenames to process (only used when execution_mode: "list")
   # Filenames should match exactly as they appear in SharePoint 
   tar_file_list:
-    - "f8900399-2e31-4ebc-b469-7a30e0db0066.tar"
-    - "4f8f8e72-8152-49ea-9c2c-1f1d5771e334.tar"
-
+    - "new_test.tar"
+   
   # SAS token expiry in days (default: 30 days for team inspection)
   sas_token_expiry_days: 365
 

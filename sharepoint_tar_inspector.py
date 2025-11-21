@@ -39,6 +39,7 @@ import time
 import tarfile
 import random
 import shutil
+import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -57,7 +58,7 @@ except ImportError:
     )
 
 # Import Azure Blob Storage SDK
-from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
+from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions, ContentSettings
 from azure.core.exceptions import ResourceExistsError
 
 # Configure logging
@@ -398,9 +399,279 @@ class TarInspectionManager:
         logger.info(f"Found {len(extracted_files)} files in extracted directory")
         return extracted_files
 
+    def _unwarp_dual_fisheye_to_erp(self, input_video_path: str, output_video_path: str) -> bool:
+        """
+        Convert dual-fisheye video to ERP (Equirectangular) view using ffmpeg.
+
+        Args:
+            input_video_path: Path to dual-fisheye video
+            output_video_path: Path for output ERP video
+
+        Returns:
+            True if conversion successful, False otherwise
+        """
+        try:
+            logger.info(f"Converting dual-fisheye to ERP: {os.path.basename(input_video_path)}")
+
+            # First, check if video has multiple streams (dual-lens)
+            probe_cmd = [
+                'ffprobe',
+                '-v', 'error',
+                '-select_streams', 'v',
+                '-show_entries', 'stream=index,width,height',
+                '-of', 'json',
+                input_video_path
+            ]
+
+            probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=10)
+            if probe_result.returncode != 0:
+                logger.error(f"Failed to probe video: {input_video_path}")
+                return False
+
+            streams = json.loads(probe_result.stdout).get('streams', [])
+            num_video_streams = len(streams)
+
+            logger.info(f"Video analysis: {num_video_streams} video stream(s) found")
+            if streams:
+                for i, stream in enumerate(streams):
+                    width = stream.get('width', 'unknown')
+                    height = stream.get('height', 'unknown')
+                    logger.info(f"  Stream {i}: {width}x{height}")
+
+            # Lens FOV for Insta360 (typical 190-200 degrees)
+            LENS_FOV_DEG = 190.0
+            # Target ERP resolution (2:1 aspect ratio)
+            ERP_W, ERP_H = 5760, 2880
+
+            logger.info(f"Target ERP resolution: {ERP_W}x{ERP_H}")
+            logger.info(f"Lens FOV: {LENS_FOV_DEG} degrees")
+
+            # Build ffmpeg command based on number of video streams
+            if num_video_streams >= 2:
+                # Dual-lens: hstack two streams and convert to ERP, then rotate 180 degrees
+                logger.info("🎬 Detected 2 video streams - converting dual-lens to ERP with 180° rotation")
+                filter_complex = (
+                    f"[0:v:0][0:v:1]hstack=inputs=2[dual];"
+                    f"[dual]v360=input=dfisheye:output=equirect:"
+                    f"ih_fov={LENS_FOV_DEG}:iv_fov={LENS_FOV_DEG}:w={ERP_W}:h={ERP_H}[erp];"
+                    f"[erp]hflip,vflip"
+                )
+                logger.debug(f"Filter complex: {filter_complex}")
+                logger.info("  ↻ Applying 180° rotation (hflip + vflip) to correct orientation")
+
+                # FFmpeg command for dual-stream (requires -filter_complex)
+                ffmpeg_cmd = [
+                    'ffmpeg',
+                    '-y',  # Overwrite output
+                    '-i', input_video_path,
+                    '-filter_complex', filter_complex,
+                    '-c:v', 'libx264',
+                    '-crf', '23',
+                    '-preset', 'medium',
+                    '-c:a', 'copy',  # Copy audio stream
+                    '-movflags', '+faststart',
+                    output_video_path
+                ]
+            else:
+                # Single lens fisheye: convert directly to ERP
+                logger.info("🎬 Detected 1 video stream - converting fisheye to ERP")
+                vf_filter = (
+                    f"v360=input=fisheye:output=equirect:"
+                    f"ih_fov={LENS_FOV_DEG}:iv_fov={LENS_FOV_DEG}:w={ERP_W}:h={ERP_H}"
+                )
+                logger.debug(f"Video filter: {vf_filter}")
+
+                # FFmpeg command for single-stream (can use -vf)
+                ffmpeg_cmd = [
+                    'ffmpeg',
+                    '-y',  # Overwrite output
+                    '-i', input_video_path,
+                    '-vf', vf_filter,
+                    '-c:v', 'libx264',
+                    '-crf', '23',
+                    '-preset', 'medium',
+                    '-c:a', 'copy',  # Copy audio stream
+                    '-movflags', '+faststart',
+                    output_video_path
+                ]
+
+            logger.info(f"Running ffmpeg command: {' '.join(ffmpeg_cmd)}")
+
+            # Run ffmpeg conversion
+            result = subprocess.run(
+                ffmpeg_cmd,
+                capture_output=True,
+                text=True,
+                timeout=3600  # 1 hour timeout for large videos
+            )
+
+            if result.returncode != 0:
+                logger.error(f"FFmpeg conversion failed: {result.stderr}")
+                return False
+
+            if os.path.exists(output_video_path):
+                output_size = os.path.getsize(output_video_path)
+                logger.info(f"✅ ERP conversion successful: {os.path.basename(output_video_path)} ({output_size / (1024**2):.2f} MB)")
+                return True
+            else:
+                logger.error(f"Output file not created: {output_video_path}")
+                return False
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"FFmpeg conversion timed out for {input_video_path}")
+            return False
+        except Exception as e:
+            logger.error(f"Error during ERP conversion: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return False
+
+    def _is_dual_fisheye_video(self, video_path: str) -> bool:
+        """
+        Detect if a video is a dual-fisheye video (like Insta360 INSV format).
+
+        Detection criteria:
+        1. Check if video has 2 video streams (dual-lens cameras)
+        2. Check for 2:1 aspect ratio (common for dual-fisheye)
+        3. Check file extension (.insv is Insta360 format)
+
+        Args:
+            video_path: Path to the video file
+
+        Returns:
+            True if the video is detected as dual-fisheye, False otherwise
+        """
+        try:
+            # Check file extension first (quick check)
+            file_ext = os.path.splitext(video_path)[1].lower()
+            logger.debug(f"Checking video: {os.path.basename(video_path)}, extension: {file_ext}")
+
+            if file_ext in ['.insv']:
+                logger.info(f"✅ Dual-fisheye detected (.insv extension): {os.path.basename(video_path)}")
+                return True
+
+            # Only check video files
+            video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.m4v', '.insv']
+            if file_ext not in video_extensions:
+                logger.debug(f"Not a video file: {file_ext}")
+                return False
+
+            # Use ffprobe to get video stream info
+            cmd = [
+                'ffprobe',
+                '-v', 'error',
+                '-select_streams', 'v',
+                '-show_entries', 'stream=index,width,height,codec_name',
+                '-of', 'json',
+                video_path
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+
+            if result.returncode != 0:
+                logger.debug(f"ffprobe failed for {os.path.basename(video_path)}")
+                return False
+
+            data = json.loads(result.stdout)
+            streams = data.get('streams', [])
+
+            logger.debug(f"Found {len(streams)} video stream(s) in {os.path.basename(video_path)}")
+            for i, stream in enumerate(streams):
+                width = stream.get('width', 'unknown')
+                height = stream.get('height', 'unknown')
+                codec = stream.get('codec_name', 'unknown')
+                logger.debug(f"  Stream {i}: {width}x{height}, codec: {codec}")
+
+            # Check 1: Does it have 2 video streams? (dual-lens indicator)
+            if len(streams) >= 2:
+                logger.info(f"✅ Dual-fisheye detected (2+ video streams): {os.path.basename(video_path)}")
+                return True
+
+            # Check 2: Does it have 2:1 aspect ratio? (common for dual-fisheye)
+            if len(streams) == 1:
+                width = streams[0].get('width', 0)
+                height = streams[0].get('height', 0)
+
+                if width > 0 and height > 0:
+                    aspect_ratio = width / height
+                    logger.debug(f"Aspect ratio: {aspect_ratio:.2f} ({width}x{height})")
+
+                    # Check if aspect ratio is close to 2:1 (allowing some tolerance)
+                    # Common dual-fisheye resolutions: 3840x1920, 5760x2880, 7680x3840
+                    if 1.9 <= aspect_ratio <= 2.1:
+                        logger.info(f"✅ Dual-fisheye detected (2:1 aspect ratio): {os.path.basename(video_path)} ({width}x{height})")
+                        return True
+
+            logger.debug(f"Not dual-fisheye: {os.path.basename(video_path)}")
+            return False
+
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError) as e:
+            logger.debug(f"Could not check dual-fisheye for {os.path.basename(video_path)}: {e}")
+            return False
+        except Exception as e:
+            logger.debug(f"Error checking dual-fisheye for {os.path.basename(video_path)}: {e}")
+            return False
+
+    def _get_content_type(self, file_path: str) -> str:
+        """
+        Determine the appropriate content type for a file based on its extension.
+
+        Args:
+            file_path: Path to the file
+
+        Returns:
+            Content type string
+        """
+        extension = os.path.splitext(file_path)[1].lower()
+
+        # Content type mapping for common file types
+        content_type_map = {
+            # Video formats
+            '.mp4': 'video/mp4',
+            '.avi': 'video/x-msvideo',
+            '.mov': 'video/quicktime',
+            '.wmv': 'video/x-ms-wmv',
+            '.flv': 'video/x-flv',
+            '.webm': 'video/webm',
+            '.mkv': 'video/x-matroska',
+            '.m4v': 'video/x-m4v',
+
+            # Audio formats
+            '.wav': 'audio/wav',
+            '.mp3': 'audio/mpeg',
+            '.ogg': 'audio/ogg',
+            '.m4a': 'audio/mp4',
+            '.flac': 'audio/flac',
+            '.aac': 'audio/aac',
+            '.wma': 'audio/x-ms-wma',
+
+            # Text/Document formats
+            '.txt': 'text/plain',
+            '.json': 'application/json',
+            '.xml': 'application/xml',
+            '.csv': 'text/csv',
+            '.html': 'text/html',
+            '.htm': 'text/html',
+            '.md': 'text/markdown',
+
+            # Image formats
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.gif': 'image/gif',
+            '.bmp': 'image/bmp',
+            '.webp': 'image/webp',
+            '.svg': 'image/svg+xml',
+
+            # PDF
+            '.pdf': 'application/pdf',
+        }
+
+        return content_type_map.get(extension, 'application/octet-stream')
+
     def _upload_file_to_blob(self, local_path: str, blob_path: str) -> bool:
         """
-        Upload a single file to Azure Blob Storage.
+        Upload a single file to Azure Blob Storage with appropriate content type.
 
         Args:
             local_path: Local file path
@@ -412,15 +683,33 @@ class TarInspectionManager:
         try:
             blob_client = self.container_client.get_blob_client(blob_path)
 
+            # Determine content type
+            content_type = self._get_content_type(local_path)
+
+            # Set content settings with content type and content disposition
+            content_settings = ContentSettings(
+                content_type=content_type,
+                content_disposition='inline'  # Force browser to display inline
+            )
+
             # Check if already exists
             if blob_client.exists():
-                logger.debug(f"Blob already exists: {blob_path}")
+                # Update the content type for existing blob
+                try:
+                    blob_client.set_http_headers(content_settings=content_settings)
+                    logger.debug(f"Blob already exists, updated content type: {blob_path} (content_type: {content_type})")
+                except Exception as e:
+                    logger.warning(f"Failed to update content type for existing blob {blob_path}: {e}")
                 return True
 
             with open(local_path, 'rb') as data:
-                blob_client.upload_blob(data, overwrite=False)
+                blob_client.upload_blob(
+                    data,
+                    overwrite=False,
+                    content_settings=content_settings
+                )
 
-            logger.debug(f"Uploaded to blob: {blob_path}")
+            logger.debug(f"Uploaded to blob: {blob_path} (content_type: {content_type})")
             return True
 
         except Exception as e:
@@ -473,16 +762,37 @@ class TarInspectionManager:
         """
         Create CSV report with inspection results.
 
+        Sorting: Video files (MP4) appear first, then all other files.
+
         Args:
             report_data: List of dictionaries with report data
             report_path: Path to save CSV report
         """
         try:
+            # Sort report data: video files first, then other files
+            video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.m4v', '.insv']
+
+            def is_video(entry):
+                """Check if file is a video based on extension."""
+                file_type = entry.get('individual_file_type', '').lower()
+                return file_type in video_extensions
+
+            # Separate videos and non-videos
+            video_entries = [entry for entry in report_data if is_video(entry)]
+            non_video_entries = [entry for entry in report_data if not is_video(entry)]
+
+            # Combine: videos first, then others
+            sorted_report_data = video_entries + non_video_entries
+
+            logger.info(f"CSV sorting: {len(video_entries)} video files, {len(non_video_entries)} other files")
+
             fieldnames = [
                 'tar_file_name',
                 'individual_file_name',
                 'individual_file_full_path',
                 'individual_file_type',
+                'is_dual_fisheye',
+                'is_erp_version',
                 'tar_size_gb',
                 'individual_file_size_gb',
                 'sas_token',
@@ -494,10 +804,10 @@ class TarInspectionManager:
             with open(report_path, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
-                writer.writerows(report_data)
+                writer.writerows(sorted_report_data)
 
             logger.info(f"CSV report created: {report_path}")
-            logger.info(f"Report contains {len(report_data)} file entries")
+            logger.info(f"Report contains {len(sorted_report_data)} file entries (videos first, then other files)")
 
         except Exception as e:
             logger.error(f"Failed to create CSV report: {e}")
@@ -563,34 +873,137 @@ class TarInspectionManager:
                     file_info['relative_path']
                 ).replace('\\', '/')  # Ensure forward slashes
 
+                # Check if video is dual-fisheye
+                is_dual_fisheye = False
+                erp_video_path = None
+                erp_created = False
+
+                if file_extension.lower() in ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.m4v', '.insv']:
+                    is_dual_fisheye = self._is_dual_fisheye_video(file_info['path'])
+
+                    if is_dual_fisheye:
+                        logger.info(f"  🎥 DUAL-FISHEYE detected: {file_name}")
+
+                        # Generate ERP video filename: original_name_erpview.mp4
+                        file_name_without_ext = os.path.splitext(file_name)[0]
+                        erp_file_name = f"{file_name_without_ext}_erpview.mp4"
+
+                        # Create ERP video in same directory as original
+                        erp_video_path = os.path.join(os.path.dirname(file_info['path']), erp_file_name)
+
+                        logger.info(f"  🔄 Converting to ERP: {erp_file_name}")
+                        erp_created = self._unwarp_dual_fisheye_to_erp(file_info['path'], erp_video_path)
+
+                        if not erp_created:
+                            logger.warning(f"  ⚠️  Failed to create ERP video for: {file_name}")
+
                 logger.info(f"  [{i}/{len(extracted_files)}] Uploading: {file_info['relative_path']} ({file_size_gb:.4f} GB)")
 
-                # Upload to blob
+                # Upload ORIGINAL file to blob
                 upload_success = self._upload_file_to_blob(file_info['path'], blob_path)
 
                 if not upload_success:
                     logger.warning(f"Failed to upload file: {file_name}")
                     continue
 
-                # Generate SAS token
+                # Generate SAS token for original
                 sas_token = self._generate_sas_token(blob_path)
 
-                # Generate blob URL with SAS
+                # Generate blob URL with SAS for original
                 blob_url = self._get_blob_url_with_sas(blob_path, sas_token)
 
-                # Add to report data
-                report_data.append({
-                    'tar_file_name': tar_filename,
-                    'individual_file_name': file_name,
-                    'individual_file_full_path': file_info['relative_path'],
-                    'individual_file_type': file_extension,
-                    'tar_size_gb': f"{tar_size_gb:.4f}",
-                    'individual_file_size_gb': f"{file_size_gb:.6f}",
-                    'sas_token': sas_token,
-                    'blob_url': blob_url,
-                    'blob_path': blob_path,
-                    'transfer_date': transfer_date
-                })
+                # Add ORIGINAL file to report data ONLY if it's NOT a dual-fisheye video
+                # (If it's dual-fisheye, we'll add the ERP version instead)
+                if not is_dual_fisheye:
+                    report_data.append({
+                        'tar_file_name': tar_filename,
+                        'individual_file_name': file_name,
+                        'individual_file_full_path': file_info['relative_path'],
+                        'individual_file_type': file_extension,
+                        'is_dual_fisheye': 'NO',
+                        'is_erp_version': 'NO',
+                        'tar_size_gb': f"{tar_size_gb:.4f}",
+                        'individual_file_size_gb': f"{file_size_gb:.6f}",
+                        'sas_token': sas_token,
+                        'blob_url': blob_url,
+                        'blob_path': blob_path,
+                        'transfer_date': transfer_date
+                    })
+                else:
+                    logger.info(f"  ℹ️  Skipping original dual-fisheye video from CSV (will add ERP version instead)")
+
+                # If dual-fisheye but ERP creation failed, still add original to CSV
+                if is_dual_fisheye and not erp_created:
+                    logger.warning(f"  ⚠️  ERP conversion failed, adding original video to CSV")
+                    report_data.append({
+                        'tar_file_name': tar_filename,
+                        'individual_file_name': file_name,
+                        'individual_file_full_path': file_info['relative_path'],
+                        'individual_file_type': file_extension,
+                        'is_dual_fisheye': 'YES',
+                        'is_erp_version': 'NO',
+                        'tar_size_gb': f"{tar_size_gb:.4f}",
+                        'individual_file_size_gb': f"{file_size_gb:.6f}",
+                        'sas_token': sas_token,
+                        'blob_url': blob_url,
+                        'blob_path': blob_path,
+                        'transfer_date': transfer_date
+                    })
+
+                # If ERP video was created, upload it too
+                if erp_created and erp_video_path and os.path.exists(erp_video_path):
+                    erp_file_size_bytes = os.path.getsize(erp_video_path)
+                    erp_file_size_gb = erp_file_size_bytes / (1024 ** 3)
+                    erp_file_name = os.path.basename(erp_video_path)
+
+                    # Construct ERP blob path (same folder as original)
+                    erp_relative_path = os.path.join(
+                        os.path.dirname(file_info['relative_path']),
+                        erp_file_name
+                    ).replace('\\', '/')
+
+                    erp_blob_path = os.path.join(
+                        self.config.untar_blob_prefix,
+                        tar_name,
+                        erp_relative_path
+                    ).replace('\\', '/')
+
+                    logger.info(f"  📤 Uploading ERP video: {erp_file_name} ({erp_file_size_gb:.4f} GB)")
+
+                    # Upload ERP video
+                    erp_upload_success = self._upload_file_to_blob(erp_video_path, erp_blob_path)
+
+                    if erp_upload_success:
+                        # Generate SAS token for ERP
+                        erp_sas_token = self._generate_sas_token(erp_blob_path)
+                        erp_blob_url = self._get_blob_url_with_sas(erp_blob_path, erp_sas_token)
+
+                        # Add ERP file to report data
+                        report_data.append({
+                            'tar_file_name': tar_filename,
+                            'individual_file_name': erp_file_name,
+                            'individual_file_full_path': erp_relative_path,
+                            'individual_file_type': '.mp4',
+                            'is_dual_fisheye': 'NO',  # ERP is not dual-fisheye anymore
+                            'is_erp_version': 'YES',
+                            'tar_size_gb': f"{tar_size_gb:.4f}",
+                            'individual_file_size_gb': f"{erp_file_size_gb:.6f}",
+                            'sas_token': erp_sas_token,
+                            'blob_url': erp_blob_url,
+                            'blob_path': erp_blob_path,
+                            'transfer_date': transfer_date
+                        })
+
+                        logger.info(f"  ✅ ERP video uploaded successfully: {erp_file_name}")
+                    else:
+                        logger.warning(f"  ⚠️  Failed to upload ERP video: {erp_file_name}")
+
+                    # Clean up local ERP file after upload
+                    try:
+                        os.remove(erp_video_path)
+                        logger.debug(f"  🗑️  Removed local ERP file: {erp_video_path}")
+                    except Exception as e:
+                        logger.debug(f"Could not remove ERP file {erp_video_path}: {e}")
 
             logger.info(f"✅ Successfully processed {len(report_data)} files from TAR: {tar_filename}")
 
@@ -723,6 +1136,15 @@ class TarInspectionManager:
             logger.info(f"✅ Successful inspections: {len(successful_inspections)}")
             logger.info(f"❌ Failed inspections: {len(failed_inspections)}")
             logger.info(f"📁 Total files processed: {len(all_report_data)}")
+
+            # Count dual-fisheye videos and ERP conversions
+            dual_fisheye_count = sum(1 for item in all_report_data if item.get('is_dual_fisheye') == 'YES')
+            erp_version_count = sum(1 for item in all_report_data if item.get('is_erp_version') == 'YES')
+
+            if dual_fisheye_count > 0:
+                logger.info(f"🎥 Dual-fisheye videos found: {dual_fisheye_count}")
+            if erp_version_count > 0:
+                logger.info(f"🔄 ERP videos created: {erp_version_count}")
 
             if failed_inspections:
                 logger.info("\nFailed TAR files:")
