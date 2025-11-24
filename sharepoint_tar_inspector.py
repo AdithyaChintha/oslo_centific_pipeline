@@ -61,6 +61,9 @@ except ImportError:
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions, ContentSettings
 from azure.core.exceptions import ResourceExistsError
 
+# Import video processing utilities
+from utils.video_processing import downscale_video_to_480p, is_video_already_480p_or_smaller
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -97,7 +100,12 @@ class TarInspectionConfig:
             raise ValueError(f"Invalid execution_mode: {self.execution_mode}. Must be 'random' or 'list'")
         self.tar_file_list = inspection_config.get('tar_file_list', [])
         if self.execution_mode == 'list' and not self.tar_file_list:
-            raise ValueError("execution_mode is 'list' but tar_file_list is empty") 
+            raise ValueError("execution_mode is 'list' but tar_file_list is empty")
+
+        # Video downscaling settings
+        self.enable_video_downscaling = inspection_config.get('enable_video_downscaling', True)
+        self.downscale_target_height = inspection_config.get('downscale_target_height', 480)
+        self.downscale_quality = inspection_config.get('downscale_quality', 'medium') 
 
         # Local paths
         self.temp_download_dir = config_dict['local_paths']['temp_download_dir']
@@ -612,6 +620,61 @@ class TarInspectionManager:
             logger.debug(f"Error checking dual-fisheye for {os.path.basename(video_path)}: {e}")
             return False
 
+    def _downscale_video_if_needed(self, video_path: str) -> Optional[str]:
+        """
+        Downscale video to target resolution if enabled and video is larger than target.
+
+        Args:
+            video_path: Path to the video file
+
+        Returns:
+            Path to the downscaled video if downscaling was performed, None if skipped or failed
+        """
+        if not self.config.enable_video_downscaling:
+            logger.debug(f"Video downscaling disabled in config")
+            return None
+
+        try:
+            # Check if video is already at target resolution or smaller
+            if is_video_already_480p_or_smaller(video_path):
+                logger.debug(f"Video already {self.config.downscale_target_height}p or smaller: {os.path.basename(video_path)}")
+                return None
+
+            # Downscale the video
+            video_name = os.path.basename(video_path)
+            logger.info(f"  📉 Downscaling to {self.config.downscale_target_height}p: {video_name}")
+
+            # Generate output path in same directory
+            video_dir = os.path.dirname(video_path)
+            video_basename = os.path.splitext(video_name)[0]
+            downscaled_path = os.path.join(video_dir, f"{video_basename}_480p.mp4")
+
+            # Perform downscaling
+            result_path = downscale_video_to_480p(
+                input_video_path=video_path,
+                output_video_path=downscaled_path,
+                target_height=self.config.downscale_target_height,
+                quality=self.config.downscale_quality
+            )
+
+            if result_path and os.path.exists(result_path):
+                # Get file sizes for logging
+                original_size = os.path.getsize(video_path) / (1024**2)  # MB
+                downscaled_size = os.path.getsize(result_path) / (1024**2)  # MB
+                reduction_pct = ((original_size - downscaled_size) / original_size) * 100
+
+                logger.info(f"  ✅ Downscaled: {original_size:.1f}MB → {downscaled_size:.1f}MB ({reduction_pct:.1f}% reduction)")
+                return result_path
+            else:
+                logger.warning(f"  ⚠️  Downscaling failed for: {video_name}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error during video downscaling: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return None
+
     def _get_content_type(self, file_path: str) -> str:
         """
         Determine the appropriate content type for a file based on its extension.
@@ -873,22 +936,24 @@ class TarInspectionManager:
                     file_info['relative_path']
                 ).replace('\\', '/')  # Ensure forward slashes
 
-                # Check if video is dual-fisheye
+                # Check if video is dual-fisheye and process accordingly
                 is_dual_fisheye = False
                 erp_video_path = None
                 erp_created = False
+                final_video_path = file_info['path']  # Path to upload (might be downscaled)
+                downscaled_original_path = None
+                downscaled_erp_path = None
 
                 if file_extension.lower() in ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.m4v', '.insv']:
+                    # STEP 1: Check if dual-fisheye
                     is_dual_fisheye = self._is_dual_fisheye_video(file_info['path'])
 
                     if is_dual_fisheye:
                         logger.info(f"  🎥 DUAL-FISHEYE detected: {file_name}")
 
-                        # Generate ERP video filename: original_name_erpview.mp4
+                        # STEP 2: Convert to ERP (high-resolution)
                         file_name_without_ext = os.path.splitext(file_name)[0]
                         erp_file_name = f"{file_name_without_ext}_erpview.mp4"
-
-                        # Create ERP video in same directory as original
                         erp_video_path = os.path.join(os.path.dirname(file_info['path']), erp_file_name)
 
                         logger.info(f"  🔄 Converting to ERP: {erp_file_name}")
@@ -897,53 +962,55 @@ class TarInspectionManager:
                         if not erp_created:
                             logger.warning(f"  ⚠️  Failed to create ERP video for: {file_name}")
 
-                logger.info(f"  [{i}/{len(extracted_files)}] Uploading: {file_info['relative_path']} ({file_size_gb:.4f} GB)")
+                        # STEP 3: Downscale ONLY the ERP video (not the original fisheye)
+                        if self.config.enable_video_downscaling:
+                            # Downscale ERP video if created
+                            if erp_created and erp_video_path:
+                                downscaled_erp_path = self._downscale_video_if_needed(erp_video_path)
+                                if downscaled_erp_path:
+                                    # Replace ERP path with downscaled version
+                                    erp_video_path = downscaled_erp_path
+                    else:
+                        # STEP 2: Normal video - just downscale to 480p
+                        if self.config.enable_video_downscaling:
+                            downscaled_path = self._downscale_video_if_needed(file_info['path'])
+                            if downscaled_path:
+                                final_video_path = downscaled_path
 
-                # Upload ORIGINAL file to blob
-                upload_success = self._upload_file_to_blob(file_info['path'], blob_path)
+                # Skip uploading original dual-fisheye videos (we'll upload ERP version instead)
+                if is_dual_fisheye:
+                    logger.info(f"  ℹ️  Skipping upload of original dual-fisheye video (will upload ERP version instead)")
+                else:
+                    # For non-fisheye videos, upload the final_video_path (which is downscaled if enabled)
+                    logger.info(f"  [{i}/{len(extracted_files)}] Uploading: {file_info['relative_path']} ({file_size_gb:.4f} GB)")
 
-                if not upload_success:
-                    logger.warning(f"Failed to upload file: {file_name}")
-                    continue
+                    upload_success = self._upload_file_to_blob(final_video_path, blob_path)
 
-                # Generate SAS token for original
-                sas_token = self._generate_sas_token(blob_path)
+                    if not upload_success:
+                        logger.warning(f"Failed to upload file: {file_name}")
+                        continue
 
-                # Generate blob URL with SAS for original
-                blob_url = self._get_blob_url_with_sas(blob_path, sas_token)
+                    # Get actual uploaded file size (downscaled version)
+                    uploaded_file_size_bytes = os.path.getsize(final_video_path)
+                    uploaded_file_size_gb = uploaded_file_size_bytes / (1024 ** 3)
+                    uploaded_file_name = os.path.basename(final_video_path)
 
-                # Add ORIGINAL file to report data ONLY if it's NOT a dual-fisheye video
-                # (If it's dual-fisheye, we'll add the ERP version instead)
-                if not is_dual_fisheye:
+                    # Generate SAS token
+                    sas_token = self._generate_sas_token(blob_path)
+
+                    # Generate blob URL with SAS
+                    blob_url = self._get_blob_url_with_sas(blob_path, sas_token)
+
+                    # Add to report data with downscaled file info
                     report_data.append({
                         'tar_file_name': tar_filename,
-                        'individual_file_name': file_name,
+                        'individual_file_name': uploaded_file_name,
                         'individual_file_full_path': file_info['relative_path'],
                         'individual_file_type': file_extension,
                         'is_dual_fisheye': 'NO',
                         'is_erp_version': 'NO',
                         'tar_size_gb': f"{tar_size_gb:.4f}",
-                        'individual_file_size_gb': f"{file_size_gb:.6f}",
-                        'sas_token': sas_token,
-                        'blob_url': blob_url,
-                        'blob_path': blob_path,
-                        'transfer_date': transfer_date
-                    })
-                else:
-                    logger.info(f"  ℹ️  Skipping original dual-fisheye video from CSV (will add ERP version instead)")
-
-                # If dual-fisheye but ERP creation failed, still add original to CSV
-                if is_dual_fisheye and not erp_created:
-                    logger.warning(f"  ⚠️  ERP conversion failed, adding original video to CSV")
-                    report_data.append({
-                        'tar_file_name': tar_filename,
-                        'individual_file_name': file_name,
-                        'individual_file_full_path': file_info['relative_path'],
-                        'individual_file_type': file_extension,
-                        'is_dual_fisheye': 'YES',
-                        'is_erp_version': 'NO',
-                        'tar_size_gb': f"{tar_size_gb:.4f}",
-                        'individual_file_size_gb': f"{file_size_gb:.6f}",
+                        'individual_file_size_gb': f"{uploaded_file_size_gb:.6f}",
                         'sas_token': sas_token,
                         'blob_url': blob_url,
                         'blob_path': blob_path,
