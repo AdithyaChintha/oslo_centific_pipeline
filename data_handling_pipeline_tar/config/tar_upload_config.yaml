@@ -1,0 +1,64 @@
+openai:
+  api_key: ${OPENAI_API_KEY}
+  containers_api: "https://api.openai.com/v1/training_data/containers"
+  submissions_api: "https://api.openai.com/v1/training_data/submissions"
+  purpose: "ingestion"
+
+azure_source:
+  connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
+  container_name: "instavideo"
+  source_prefix: "hydra_plus_tar_files/"          
+  project_id: "oslo_project_2"                  
+  container_sas_env: ""
+
+azure_partner:
+  use_azcopy: true
+  azcopy_path: "/usr/local/bin/azcopy"
+
+deduplication:
+  safety_window_minutes: 0   # 0 = no safety window, process all files
+
+local_paths:
+  manifests_dir: "./local_manifests"
+  watermark_file: "./local_manifests/watermark.json"
+  work_dir: "./work"
+
+submission:
+  auto_submit: true
+  retry_attempts: 3
+  retry_delay_seconds: 60
+
+testing:
+  enabled: true                      # Set to true for testing with test container
+  test_container_id: "test-container"
+  test_container_url: "https://oslotestvideo.blob.core.windows.net/test-container?sv=2023-01-03&st=2025-09-27T23%3A14%3A07Z&se=2026-09-27T23%3A14%3A00Z&sr=c&sp=rcwl&sig=nm1sG6VRoou7u3moJTKXNGI8y0DbIMAjP0qDl6MFLdc%3D"
+
+remote_manifests:
+  enabled: true
+  connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
+  container_name: "submission-summary"
+  prefix: "tar-bulk11"
+
+logging:
+  level: INFO
+  file: "./logs/tar_upload06.log"
+  max_mb: 10
+  backup_count: 5
+
+state_storage:
+  enabled: true
+  connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
+  container_name: "instavideo"
+  prefix: "upload_state_files/production/tar-bulk11"
+
+state_tracking:
+  enabled: true
+  local_dir: "/data/oslo/upload_state/tar-bulk11"
+  backup_enabled: true
+  max_daily_entries: 365
+  compression_enabled: true
+
+# Tar-specific settings
+tar_upload:
+  require_metadata: false              # Don't require metadata for tar files
+  file_extension: ".tar"

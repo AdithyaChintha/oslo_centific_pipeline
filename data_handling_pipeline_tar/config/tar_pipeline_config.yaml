@@ -1,0 +1,196 @@
+# =============================================================================
+# UNIFIED TAR PIPELINE CONFIGURATION
+# =============================================================================
+# This config is used by:
+# - tar_orchestrator.py (Steps 1-5)
+# - tar_file_lister.py
+# - tar_upload_pipeline.py
+# - report_tar_state.py
+# - tar_state_file_comparison.py
+# - sharepoint_tar_inspector.py
+
+# =============================================================================
+# PROJECT SETTINGS
+# =============================================================================
+project_id: "oslo_project_2"
+
+# =============================================================================
+# AZURE SOURCE - Where TAR files are stored
+# =============================================================================
+azure_source:
+  connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
+  container_name: "instavideo"
+  source_prefix: "hydra_plus_tar_files/"
+  project_id: "oslo_project_2"
+  container_sas_env: ""
+
+# =============================================================================
+# AZURE BLOB DESTINATION - For inspector to upload extracted files
+# =============================================================================
+azure_blob:
+  connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
+  container_name: "instavideo"
+
+# =============================================================================
+# OPENAI PARTNER API CONFIGURATION
+# =============================================================================
+openai:
+  api_key: ${OPENAI_API_KEY}
+  containers_api: "https://api.openai.com/v1/training_data/containers"
+  submissions_api: "https://api.openai.com/v1/training_data/submissions"
+  purpose: "ingestion"
+
+azure_partner:
+  use_azcopy: true
+  azcopy_path: "/usr/local/bin/azcopy"
+
+# =============================================================================
+# TESTING MODE - Use test container instead of OpenAI Partner API
+# =============================================================================
+testing:
+  enabled: false                      # Set to true for testing with test container
+  test_container_id: "test-container"
+  test_container_url: "https://oslotestvideo.blob.core.windows.net/test-container?sv=2023-01-03&st=2025-09-27T23%3A14%3A07Z&se=2026-09-27T23%3A14%3A00Z&sr=c&sp=rcwl&sig=nm1sG6VRoou7u3moJTKXNGI8y0DbIMAjP0qDl6MFLdc%3D"
+
+# =============================================================================
+# DEDUPLICATION SETTINGS
+# =============================================================================
+deduplication:
+  safety_window_minutes: 0   # 0 = no safety window, process all files
+
+# =============================================================================
+# LOCAL PATHS
+# =============================================================================
+local_paths:
+  manifests_dir: "./local_manifests"
+  watermark_file: "./local_manifests/watermark.json"
+  work_dir: "./work"
+  temp_download_dir: "/data/oslo/tar_temp_downloads_inspection"
+  transfer_state_file: "/data/oslo/tar_temp_downloads/tar_transfer_state.json"
+
+# =============================================================================
+# SUBMISSION SETTINGS
+# =============================================================================
+submission:
+  auto_submit: true
+  retry_attempts: 3
+  retry_delay_seconds: 60
+
+# =============================================================================
+# REMOTE MANIFESTS
+# =============================================================================
+remote_manifests:
+  enabled: true
+  connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
+  container_name: "submission-summary"
+  prefix: "tar-bulk11"
+
+# =============================================================================
+# LOGGING
+# =============================================================================
+logging:
+  level: INFO
+  file: "./logs/tar_upload26.log"
+  max_mb: 10
+  backup_count: 5
+
+# =============================================================================
+# STATE STORAGE - Azure Blob storage for upload state
+# =============================================================================
+state_storage:
+  enabled: true
+  connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
+  container_name: "instavideo"
+  prefix: "upload_state_files/production/tar-bulk11"
+
+# =============================================================================
+# STATE TRACKING - Local state tracking
+# =============================================================================
+state_tracking:
+  enabled: true
+  local_dir: "/data/oslo/upload_state/tar-bulk11"
+  backup_enabled: true
+  max_daily_entries: 365
+  compression_enabled: true
+
+# =============================================================================
+# TAR UPLOAD SETTINGS
+# =============================================================================
+tar_upload:
+  require_metadata: false              # Don't require metadata for tar files
+  file_extension: ".tar"
+
+# =============================================================================
+# INSPECTION SETTINGS (Step 5 - TAR Inspection)
+# =============================================================================
+# Input source for inspection: 'sharepoint' or 'blob'
+# - sharepoint: Fetch TAR files from SharePoint
+# - blob: Fetch TAR files from Azure Blob Storage (uses azure_source above)
+input_source: "blob"  # Options: "sharepoint" | "blob"
+
+inspection:
+  # Execution mode: 'random', 'list', or 'csv'
+  # - random: Randomly sample TAR files from source (uses sampling_ratio)
+  # - list: Process specific TAR files (uses tar_file_list)
+  # - csv: Randomly sample TAR files from comparison CSV (uses csv_input_file & csv_sample_count)
+  execution_mode: "csv"  # Options: "random" | "list" | "csv"
+
+  # Target blob prefix for extracted/untarred files
+  # Extracted files will be uploaded to: instavideo/<untar_blob_prefix>/<tar_name>/<file_path>
+  untar_blob_prefix: "untar_folder_oslo2/testing_erp/downsclaeit"
+
+  # --- RANDOM MODE SETTINGS ---
+  sampling_ratio: 10  # Pick 1 random TAR file per every N files
+
+  # --- LIST MODE SETTINGS ---
+  tar_file_list:
+    - "7c8ec110-695c-4f91-8d24-3f6fab971233.tar"
+    - "d21cd805-4ae8-48cf-80d5-70749868ee2b.tar"
+    - "32a2aa25-8a2a-43f4-ab01-184f046f3281.tar"
+
+  # --- CSV MODE SETTINGS (for orchestrator integration) ---
+  # Path to comparison CSV file (auto-populated by orchestrator)
+  csv_input_file: ""
+  # Number of random TAR files to pick from the CSV for inspection
+  csv_sample_count: 2
+
+  # --- OTHER SETTINGS ---
+  sas_token_expiry_days: 365
+  temp_extract_dir: "/data/oslo/tar_extractions"
+  csv_report_dir: "/data/oslo/inspection_reports/tar"
+  inspection_state_file: "/data/oslo/tar_temp_downloads/tar_inspection_state.json"
+
+  # Video downscaling settings
+  enable_video_downscaling: true
+  downscale_target_height: 480
+  downscale_quality: "medium"
+
+  # --- RAY PARALLEL PROCESSING SETTINGS ---
+  # Enable Ray for parallel video processing (fisheye-to-ERP, downscaling)
+  # Significantly speeds up inspection when processing multiple videos
+  ray:
+    enabled: true                  # Set to false to use sequential processing
+    max_parallel: 4                # Maximum number of videos to process in parallel
+    use_gpu: false                 # Set to true if GPU (CUDA) is available for ffmpeg
+
+# =============================================================================
+# SHAREPOINT CONFIGURATION (only required when input_source: "sharepoint")
+# =============================================================================
+azure_ad:
+  tenant_id: "9b415834-803a-4da0-afdc-fe6b1d52d649"
+  client_id: "cf36a429-766a-47eb-9b49-66b04a227ead"
+  client_secret: "jnf8Q~3H41HHHfLvwBh0seXNvos80e5~GhMhLapI"
+
+sharepoint:
+  site_url: "https://digitaltechedge.sharepoint.com/sites/Oslo Humus Moderators"
+  site_id: "digitaltechedge.sharepoint.com,38fe5936-7c38-45ec-9bd5-b0051fed3610,65326b1d-1ff4-4a70-a464-f1d3a39186aa"
+  tar_source_folder_path: "/Uploads/NYC"
+  drive_id: "b!Nln-ODh87EWb1bAFH-02EB1rMmX0H3BKpGTx06ORhqpuRZrKdUe9RrHjIH-Pdeog"
+
+# =============================================================================
+# API CONFIGURATION
+# =============================================================================
+api:
+  timeout_seconds: 300
+  retry_attempts: 3
+  retry_delay_seconds: 5
