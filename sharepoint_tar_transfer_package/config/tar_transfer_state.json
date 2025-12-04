@@ -1,0 +1,86 @@
+{
+  "15d8cae7-48fd-4e3a-ad3e-a0ca1a2e4a95.tar": {
+    "transferred_at": "2025-11-05T20:32:10.322509",
+    "size": 4375756800,
+    "sharepoint_modified": "2025-11-05T18:22:19Z",
+    "blob_path": "oslo_stage_2_tar_files/15d8cae7-48fd-4e3a-ad3e-a0ca1a2e4a95.tar",
+    "transfer_method": "server-to-server"
+  },
+  "1fb749c0-4340-4b22-b882-0177463d5c4b.tar": {
+    "transferred_at": "2025-11-05T20:37:31.855237",
+    "size": 7280701440,
+    "sharepoint_modified": "2025-11-05T16:55:48Z",
+    "blob_path": "oslo_stage_2_tar_files/1fb749c0-4340-4b22-b882-0177463d5c4b.tar",
+    "transfer_method": "server-to-server"
+  },
+  "3d3d4d5e-2253-44a0-b520-c68bf1e9259d.tar": {
+    "transferred_at": "2025-11-05T20:41:32.174698",
+    "size": 6292838400,
+    "sharepoint_modified": "2025-11-05T00:29:32Z",
+    "blob_path": "oslo_stage_2_tar_files/3d3d4d5e-2253-44a0-b520-c68bf1e9259d.tar",
+    "transfer_method": "server-to-server"
+  },
+  "4f8f8e72-8152-49ea-9c2c-1f1d5771e334.tar": {
+    "transferred_at": "2025-11-05T20:41:43.964408",
+    "size": 260751360,
+    "sharepoint_modified": "2025-11-05T02:17:44Z",
+    "blob_path": "oslo_stage_2_tar_files/4f8f8e72-8152-49ea-9c2c-1f1d5771e334.tar",
+    "transfer_method": "server-to-server"
+  },
+  "694c6065-9fe6-4618-860c-30eb21e77b7a.tar": {
+    "transferred_at": "2025-11-05T20:42:31.108653",
+    "size": 904663040,
+    "sharepoint_modified": "2025-11-05T01:54:43Z",
+    "blob_path": "oslo_stage_2_tar_files/694c6065-9fe6-4618-860c-30eb21e77b7a.tar",
+    "transfer_method": "server-to-server"
+  },
+  "7c8ec110-695c-4f91-8d24-3f6fab971233.tar": {
+    "transferred_at": "2025-11-05T20:42:42.738850",
+    "size": 203622400,
+    "sharepoint_modified": "2025-11-05T02:16:53Z",
+    "blob_path": "oslo_stage_2_tar_files/7c8ec110-695c-4f91-8d24-3f6fab971233.tar",
+    "transfer_method": "server-to-server"
+  },
+  "99818d2c-09c0-40c4-825b-7b0ebe61a38b.tar": {
+    "transferred_at": "2025-11-05T20:48:19.346590",
+    "size": 8813496320,
+    "sharepoint_modified": "2025-11-05T02:14:17Z",
+    "blob_path": "oslo_stage_2_tar_files/99818d2c-09c0-40c4-825b-7b0ebe61a38b.tar",
+    "transfer_method": "server-to-server"
+  },
+  "e83cf144-5315-473c-9b96-cc3f1998aa9f.tar": {
+    "transferred_at": "2025-11-05T20:48:31.127709",
+    "size": 275609600,
+    "sharepoint_modified": "2025-11-05T02:17:55Z",
+    "blob_path": "oslo_stage_2_tar_files/e83cf144-5315-473c-9b96-cc3f1998aa9f.tar",
+    "transfer_method": "server-to-server"
+  },
+  "f8900399-2e31-4ebc-b469-7a30e0db0066.tar": {
+    "transferred_at": "2025-11-05T20:48:47.764562",
+    "size": 334008320,
+    "sharepoint_modified": "2025-11-05T02:19:22Z",
+    "blob_path": "oslo_stage_2_tar_files/f8900399-2e31-4ebc-b469-7a30e0db0066.tar",
+    "transfer_method": "server-to-server"
+  },
+  "3fa1622a-ccee-4332-bd94-516721c3b78a.tar": {
+    "transferred_at": "2025-11-10T13:09:11.170141",
+    "size": 5660006400,
+    "sharepoint_modified": "2025-11-05T22:14:09Z",
+    "blob_path": "oslo_stage_2_tar_files/3fa1622a-ccee-4332-bd94-516721c3b78a.tar",
+    "transfer_method": "server-to-server"
+  },
+  "95f43264-5c2a-420b-b3cc-085fb91379dd.tar": {
+    "transferred_at": "2025-11-10T13:13:56.585654",
+    "size": 8241500160,
+    "sharepoint_modified": "2025-11-05T23:49:17Z",
+    "blob_path": "oslo_stage_2_tar_files/95f43264-5c2a-420b-b3cc-085fb91379dd.tar",
+    "transfer_method": "server-to-server"
+  },
+  "acd4d2b4-6175-44ef-a010-9b4ac40f5f42.tar": {
+    "transferred_at": "2025-11-10T13:18:26.762182",
+    "size": 7317954560,
+    "sharepoint_modified": "2025-11-05T20:29:02Z",
+    "blob_path": "oslo_stage_2_tar_files/acd4d2b4-6175-44ef-a010-9b4ac40f5f42.tar",
+    "transfer_method": "server-to-server"
+  }
+}

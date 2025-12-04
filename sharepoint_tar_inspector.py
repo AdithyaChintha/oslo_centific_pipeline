@@ -1,25 +1,35 @@
 #!/usr/bin/env python3
 """
-SharePoint TAR Random Inspection and Azure Blob Upload Script
+TAR Random Inspection and Azure Blob Upload Script
 
-This script randomly samples TAR files from SharePoint (1 per 10 files), untars them,
-uploads contents to Azure Blob Storage, generates SAS tokens, and creates a detailed CSV report.
+This script randomly samples TAR files from SharePoint or Azure Blob Storage (1 per 10 files),
+untars them, uploads contents to Azure Blob Storage, generates SAS tokens, and creates a
+detailed CSV report.
+
+Supported Input Sources:
+- SharePoint: Fetch TAR files from SharePoint folder
+- Azure Blob: Fetch TAR files from Azure Blob Storage container
 
 Workflow:
-1. Lists all TAR files from SharePoint /Uploads folder
-2. Randomly selects 1 file per every 10 files
+1. Lists all TAR files from the configured source (SharePoint or Azure Blob)
+2. Randomly selects 1 file per every 10 files (or uses specific list)
 3. Downloads selected TAR files
 4. Untars/extracts files locally
-5. Uploads all extracted files to Azure Blob: instavideo/untar_folder_oslo2/
+5. Uploads all extracted files to Azure Blob destination
 6. Generates SAS tokens for each uploaded file (for team inspection)
 7. Creates CSV report with: tar_name, file_name, file_full_path, file_type, tar_size_gb,
    file_size_gb, sas_token, blob_url, blob_path, transfer_date
+
+Configuration:
+- Set `input_source: "sharepoint"` to fetch TAR files from SharePoint
+- Set `input_source: "blob"` to fetch TAR files from Azure Blob Storage
+- Configure `azure_source` section when using blob input source
 
 Usage:
     python sharepoint_tar_inspector.py [--config CONFIG_FILE] [--dry-run]
 
 Examples:
-    # Run with default config
+    # Run with default config (uses sharepoint by default)
     python sharepoint_tar_inspector.py
 
     # Run with custom config
@@ -64,6 +74,14 @@ from azure.core.exceptions import ResourceExistsError
 # Import video processing utilities
 from utils.video_processing import downscale_video_to_480p, is_video_already_480p_or_smaller
 
+# Ray import (optional - for parallel processing)
+RAY_AVAILABLE = False
+try:
+    import ray
+    RAY_AVAILABLE = True
+except ImportError:
+    pass
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -81,10 +99,35 @@ class TarInspectionConfig:
 
     def __init__(self, config_dict: Dict):
         """Initialize inspection config from dictionary."""
-        # SharePoint settings
-        self.sharepoint_tar_folder_path = config_dict['sharepoint']['tar_source_folder_path']
+        # Input source: 'sharepoint' or 'blob'
+        self.input_source = config_dict.get('input_source', 'sharepoint').lower()
+        if self.input_source not in ['sharepoint', 'blob']:
+            raise ValueError(f"Invalid input_source: {self.input_source}. Must be 'sharepoint' or 'blob'")
 
-        # Azure Blob settings
+        # SharePoint settings (only required if input_source is 'sharepoint')
+        if self.input_source == 'sharepoint':
+            if 'sharepoint' not in config_dict:
+                raise ValueError("input_source is 'sharepoint' but sharepoint config is missing")
+            self.sharepoint_tar_folder_path = config_dict['sharepoint']['tar_source_folder_path']
+        else:
+            self.sharepoint_tar_folder_path = config_dict.get('sharepoint', {}).get('tar_source_folder_path', '')
+
+        # Azure Blob source settings (for reading TAR files from blob - only required if input_source is 'blob')
+        if self.input_source == 'blob':
+            if 'azure_source' not in config_dict:
+                raise ValueError("input_source is 'blob' but azure_source config is missing")
+            azure_source = config_dict['azure_source']
+            self.source_connection_string = self._get_connection_string(azure_source)
+            self.source_container_name = azure_source['container_name']
+            self.source_prefix = azure_source.get('source_prefix', '')
+            self.project_id = azure_source.get('project_id', 'tar-inspection')
+        else:
+            self.source_connection_string = None
+            self.source_container_name = None
+            self.source_prefix = None
+            self.project_id = config_dict.get('azure_source', {}).get('project_id', 'tar-inspection')
+
+        # Azure Blob destination settings (for uploading extracted files)
         self.azure_connection_string = self._get_connection_string(config_dict['azure_blob'])
         self.azure_container_name = config_dict['azure_blob']['container_name']
         self.azure_account_name = self._extract_account_name(self.azure_connection_string)
@@ -96,16 +139,28 @@ class TarInspectionConfig:
         self.sampling_ratio = inspection_config.get('sampling_ratio', 10)  # 1 per 10 files
         self.sas_token_expiry_days = inspection_config.get('sas_token_expiry_days', 30)
         self.execution_mode = inspection_config.get('execution_mode', 'random').lower()
-        if self.execution_mode not in ['random', 'list']:
-            raise ValueError(f"Invalid execution_mode: {self.execution_mode}. Must be 'random' or 'list'")
+        if self.execution_mode not in ['random', 'list', 'csv']:
+            raise ValueError(f"Invalid execution_mode: {self.execution_mode}. Must be 'random', 'list', or 'csv'")
         self.tar_file_list = inspection_config.get('tar_file_list', [])
         if self.execution_mode == 'list' and not self.tar_file_list:
             raise ValueError("execution_mode is 'list' but tar_file_list is empty")
 
+        # CSV mode settings (for reading TAR files from comparison CSV)
+        self.csv_input_file = inspection_config.get('csv_input_file', '')
+        self.csv_sample_count = inspection_config.get('csv_sample_count', 4)  # Number of random TAR files to pick from CSV
+        if self.execution_mode == 'csv' and not self.csv_input_file:
+            raise ValueError("execution_mode is 'csv' but csv_input_file is not specified")
+
         # Video downscaling settings
         self.enable_video_downscaling = inspection_config.get('enable_video_downscaling', True)
         self.downscale_target_height = inspection_config.get('downscale_target_height', 480)
-        self.downscale_quality = inspection_config.get('downscale_quality', 'medium') 
+        self.downscale_quality = inspection_config.get('downscale_quality', 'medium')
+
+        # Ray parallel processing settings
+        ray_config = inspection_config.get('ray', {})
+        self.use_ray = ray_config.get('enabled', False)
+        self.ray_max_parallel = ray_config.get('max_parallel', 4)
+        self.ray_use_gpu = ray_config.get('use_gpu', False)
 
         # Local paths
         self.temp_download_dir = config_dict['local_paths']['temp_download_dir']
@@ -113,6 +168,10 @@ class TarInspectionConfig:
         self.csv_report_dir = inspection_config.get('csv_report_dir', '/data/oslo/inspection_reports')
         self.inspection_state_file = inspection_config.get('inspection_state_file',
                                                            '/data/oslo/tar_temp_downloads/tar_inspection_state.json')
+
+        # Report date prefix - extracted from source_prefix (e.g., "2025-12-01" -> "20251201")
+        # If not provided, uses today's date
+        self.report_date_prefix = inspection_config.get('report_date_prefix', None)
 
     def _get_connection_string(self, azure_config: Dict) -> str:
         """Build Azure connection string from config or environment."""
@@ -166,29 +225,46 @@ class TarInspectionManager:
             config_dict = yaml.safe_load(f)
         self.config = TarInspectionConfig(config_dict)
 
-        # Extract SharePoint connection details
-        azure_ad = config_dict['azure_ad']
-        sharepoint_config = config_dict['sharepoint']
+        # Initialize SharePoint only if input_source is 'sharepoint'
+        if self.config.input_source == 'sharepoint':
+            # Extract SharePoint connection details
+            azure_ad = config_dict['azure_ad']
+            sharepoint_config = config_dict['sharepoint']
 
-        # Create SharePoint authenticator
-        self.authenticator = SharePointAuthenticator(
-            tenant_id=azure_ad['tenant_id'],
-            client_id=azure_ad['client_id'],
-            client_secret=azure_ad['client_secret'],
-            timeout_seconds=config_dict.get('api', {}).get('timeout_seconds', 300)
-        )
+            # Create SharePoint authenticator
+            self.authenticator = SharePointAuthenticator(
+                tenant_id=azure_ad['tenant_id'],
+                client_id=azure_ad['client_id'],
+                client_secret=azure_ad['client_secret'],
+                timeout_seconds=config_dict.get('api', {}).get('timeout_seconds', 300)
+            )
 
-        # Create SharePoint file manager
-        self.file_manager = SharePointFileManager(
-            authenticator=self.authenticator,
-            site_id=sharepoint_config['site_id'],
-            drive_id=sharepoint_config['drive_id'],
-            timeout=config_dict.get('api', {}).get('timeout_seconds', 300),
-            max_retries=config_dict.get('api', {}).get('retry_attempts', 3),
-            retry_delay=config_dict.get('api', {}).get('retry_delay_seconds', 5)
-        )
+            # Create SharePoint file manager
+            self.file_manager = SharePointFileManager(
+                authenticator=self.authenticator,
+                site_id=sharepoint_config['site_id'],
+                drive_id=sharepoint_config['drive_id'],
+                timeout=config_dict.get('api', {}).get('timeout_seconds', 300),
+                max_retries=config_dict.get('api', {}).get('retry_attempts', 3),
+                retry_delay=config_dict.get('api', {}).get('retry_delay_seconds', 5)
+            )
+        else:
+            self.authenticator = None
+            self.file_manager = None
 
-        # Initialize Azure Blob client
+        # Initialize Azure Blob source client (for reading TAR files from blob)
+        if self.config.input_source == 'blob':
+            self.source_blob_service_client = BlobServiceClient.from_connection_string(
+                self.config.source_connection_string
+            )
+            self.source_container_client = self.source_blob_service_client.get_container_client(
+                self.config.source_container_name
+            )
+        else:
+            self.source_blob_service_client = None
+            self.source_container_client = None
+
+        # Initialize Azure Blob destination client (for uploading extracted files)
         self.blob_service_client = BlobServiceClient.from_connection_string(
             self.config.azure_connection_string
         )
@@ -203,8 +279,14 @@ class TarInspectionManager:
         os.makedirs(os.path.dirname(self.config.inspection_state_file), exist_ok=True)
 
         logger.info(f"TAR Inspection Manager initialized")
-        logger.info(f"SharePoint folder: {self.config.sharepoint_tar_folder_path}")
-        logger.info(f"Azure container: {self.config.azure_container_name}")
+        logger.info(f"Input source: {self.config.input_source.upper()}")
+        if self.config.input_source == 'sharepoint':
+            logger.info(f"SharePoint folder: {self.config.sharepoint_tar_folder_path}")
+        else:
+            logger.info(f"Azure Blob source container: {self.config.source_container_name}")
+            logger.info(f"Azure Blob source prefix: {self.config.source_prefix}")
+            logger.info(f"Project ID: {self.config.project_id}")
+        logger.info(f"Destination Azure container: {self.config.azure_container_name}")
         logger.info(f"Untar blob prefix: {self.config.untar_blob_prefix}")
         logger.info(f"Execution mode: {self.config.execution_mode}")
         if self.config.execution_mode == 'random':
@@ -246,6 +328,73 @@ class TarInspectionManager:
         tar_files = self.file_manager.list_files_in_folder(folder_id, file_extensions=['.tar', '.tar.gz', '.tgz'])
         logger.info(f"Found {len(tar_files)} TAR files in SharePoint")
         return tar_files
+
+    def _get_blob_tar_files(self) -> List[Dict]:
+        """Get list of TAR files from Azure Blob storage."""
+        logger.info(f"Fetching TAR files from Azure Blob: {self.config.source_container_name}/{self.config.source_prefix}")
+
+        tar_files = []
+        try:
+            # List blobs with the specified prefix
+            blobs = self.source_container_client.list_blobs(name_starts_with=self.config.source_prefix)
+
+            for blob in blobs:
+                blob_name = blob.name
+                # Filter for TAR files only
+                if blob_name.lower().endswith(('.tar', '.tar.gz', '.tgz')):
+                    # Extract just the filename from the full path
+                    filename = os.path.basename(blob_name)
+
+                    tar_files.append({
+                        'name': filename,
+                        'blob_name': blob_name,  # Full blob path for downloading
+                        'size': blob.size,
+                        'last_modified': blob.last_modified,
+                        'source': 'blob'
+                    })
+
+            logger.info(f"Found {len(tar_files)} TAR files in Azure Blob")
+            return tar_files
+
+        except Exception as e:
+            logger.error(f"Error listing TAR files from Azure Blob: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return []
+
+    def _download_from_blob(self, file_info: Dict) -> Optional[str]:
+        """
+        Download a TAR file from Azure Blob storage to local temp directory.
+
+        Args:
+            file_info: TAR file info dict with 'blob_name' and 'name' keys
+
+        Returns:
+            Local file path if successful, None otherwise
+        """
+        filename = file_info['name']
+        blob_name = file_info['blob_name']
+
+        local_path = os.path.join(self.config.temp_download_dir, filename)
+
+        logger.info(f"Downloading from Azure Blob: {blob_name}")
+
+        try:
+            blob_client = self.source_container_client.get_blob_client(blob_name)
+
+            with open(local_path, 'wb') as f:
+                stream = blob_client.download_blob()
+                f.write(stream.readall())
+
+            file_size_gb = os.path.getsize(local_path) / (1024 ** 3)
+            logger.info(f"Downloaded to: {local_path} ({file_size_gb:.2f} GB)")
+            return local_path
+
+        except Exception as e:
+            logger.error(f"Failed to download from Azure Blob: {blob_name} - {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return None
 
     def _select_random_samples(self, all_files: List[Dict], already_inspected: set) -> List[Dict]:
         """
@@ -322,6 +471,112 @@ class TarInspectionManager:
                 logger.warning(f"{filename}")
 
         return selected_files
+
+    def _select_from_csv(self, already_inspected: set) -> List[Dict]:
+        """
+        Select random TAR files from comparison CSV file.
+
+        Reads the comparison CSV (output from tar_state_file_comparison.py),
+        filters for successful uploads, and randomly samples N files.
+
+        Args:
+            already_inspected: Set of already inspected filenames
+
+        Returns:
+            List of selected files with blob info for downloading
+        """
+        csv_path = self.config.csv_input_file
+        sample_count = self.config.csv_sample_count
+
+        logger.info(f"Reading TAR files from comparison CSV: {csv_path}")
+        logger.info(f"Random sample count: {sample_count}")
+
+        if not os.path.exists(csv_path):
+            logger.error(f"CSV file not found: {csv_path}")
+            return []
+
+        eligible_files = []
+        skipped_not_found = 0
+        skipped_failed = 0
+        skipped_already_inspected = 0
+
+        try:
+            with open(csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+
+                for row in reader:
+                    tar_filename = row.get('tar_filename', '')
+                    mapping_status = row.get('mapping_status', '').upper()
+                    state_status = row.get('state_status', '').lower()
+                    tar_full_path = row.get('tar_full_path', '')
+
+                    # Skip if no filename
+                    if not tar_filename:
+                        continue
+
+                    # Skip if already inspected
+                    if tar_filename in already_inspected:
+                        skipped_already_inspected += 1
+                        continue
+
+                    # Skip if not found in state (NOT_FOUND or ORPHANED_IN_STATE)
+                    if mapping_status != 'FOUND':
+                        skipped_not_found += 1
+                        continue
+
+                    # Skip if upload was not successful
+                    if state_status not in ['success', 'successful']:
+                        skipped_failed += 1
+                        continue
+
+                    # This file is eligible for inspection
+                    # Build file info dict compatible with blob download
+                    file_info = {
+                        'name': tar_filename,
+                        'blob_name': tar_full_path,  # Full blob path for downloading
+                        'size': 0,  # Will be populated during download
+                        'source': 'csv',
+                        # Additional metadata from CSV
+                        'tar_uuid': row.get('tar_uuid', ''),
+                        'state_container_id': row.get('state_container_id', ''),
+                    }
+
+                    # Try to get size from CSV
+                    try:
+                        size_gb = float(row.get('tar_file_size_gb', 0))
+                        file_info['size'] = int(size_gb * (1024 ** 3))  # Convert GB to bytes
+                    except (ValueError, TypeError):
+                        pass
+
+                    eligible_files.append(file_info)
+
+            logger.info(f"\nCSV Mode Selection Summary:")
+            logger.info(f"  Total eligible files: {len(eligible_files)}")
+            logger.info(f"  Skipped (already inspected): {skipped_already_inspected}")
+            logger.info(f"  Skipped (not found/orphaned): {skipped_not_found}")
+            logger.info(f"  Skipped (upload failed): {skipped_failed}")
+
+            if not eligible_files:
+                logger.warning("No eligible files found in CSV for inspection")
+                return []
+
+            # Randomly sample from eligible files
+            actual_sample_count = min(sample_count, len(eligible_files))
+            selected_files = random.sample(eligible_files, actual_sample_count)
+
+            logger.info(f"  Randomly selected: {len(selected_files)} files")
+
+            for i, f in enumerate(selected_files, 1):
+                size_gb = f.get('size', 0) / (1024 ** 3)
+                logger.info(f"    {i}. {f['name']} ({size_gb:.2f} GB)")
+
+            return selected_files
+
+        except Exception as e:
+            logger.error(f"Error reading CSV file: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return []
 
     def _download_from_sharepoint(self, file_info: Dict) -> Optional[str]:
         """Download a TAR file from SharePoint to local temp directory."""
@@ -859,7 +1114,7 @@ class TarInspectionManager:
                 'tar_size_gb',
                 'individual_file_size_gb',
                 'sas_token',
-                'blob_url',
+                'Video_preview_url',
                 'blob_path',
                 'transfer_date'
             ]
@@ -875,12 +1130,460 @@ class TarInspectionManager:
         except Exception as e:
             logger.error(f"Failed to create CSV report: {e}")
 
+    # =========================================================================
+    # RAY PARALLEL VIDEO PROCESSING METHODS
+    # =========================================================================
+
+    def _ray_get_video_streams(self, video_path: str) -> List[Dict]:
+        """Get video stream information using ffprobe."""
+        cmd = [
+            'ffprobe', '-v', 'error',
+            '-select_streams', 'v',
+            '-show_entries', 'stream=index,width,height,codec_name',
+            '-of', 'json',
+            video_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            return []
+        data = json.loads(result.stdout)
+        return data.get('streams', [])
+
+    def _ray_is_dual_fisheye(self, video_path: str) -> tuple:
+        """
+        Check if video is dual-fisheye format.
+
+        Returns:
+            Tuple of (is_dual_fisheye, num_streams)
+        """
+        file_ext = os.path.splitext(video_path)[1].lower()
+
+        # Quick check for .insv extension
+        if file_ext == '.insv':
+            return True, 2
+
+        video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.m4v', '.insv']
+        if file_ext not in video_extensions:
+            return False, 0
+
+        try:
+            streams = self._ray_get_video_streams(video_path)
+            num_streams = len(streams)
+
+            # 2+ video streams = dual-fisheye
+            if num_streams >= 2:
+                return True, num_streams
+
+            # Check 2:1 aspect ratio (common for dual-fisheye)
+            if num_streams == 1:
+                width = streams[0].get('width', 0)
+                height = streams[0].get('height', 0)
+                if width > 0 and height > 0:
+                    aspect_ratio = width / height
+                    if 1.9 <= aspect_ratio <= 2.1:
+                        return True, num_streams
+
+            return False, num_streams
+        except Exception:
+            return False, 0
+
+    def _ray_is_video_480p_or_smaller(self, video_path: str) -> bool:
+        """Check if video is already 480p or smaller."""
+        try:
+            streams = self._ray_get_video_streams(video_path)
+            if not streams:
+                return False
+            height = streams[0].get('height', 0)
+            return height <= 480
+        except Exception:
+            return False
+
+    def _ray_convert_fisheye_to_erp(self, input_path: str, output_path: str,
+                                     lens_fov: int = 190, erp_w: int = 3840,
+                                     erp_h: int = 1920, timeout: int = 3600) -> Optional[str]:
+        """
+        Convert dual-fisheye video to equirectangular projection (ERP).
+
+        Returns:
+            Output path if successful, None if failed
+        """
+        try:
+            is_dual, num_streams = self._ray_is_dual_fisheye(input_path)
+            if not is_dual:
+                return None
+
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+            if num_streams >= 2:
+                # Dual-stream: Stack horizontally then convert
+                filter_complex = (
+                    f"[0:v:0][0:v:1]hstack[dual];"
+                    f"[dual]v360=input=dfisheye:output=equirect:"
+                    f"ih_fov={lens_fov}:iv_fov={lens_fov}:w={erp_w}:h={erp_h}[erp];"
+                    f"[erp]hflip,vflip"
+                )
+                ffmpeg_cmd = [
+                    'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                    '-i', input_path,
+                    '-filter_complex', filter_complex,
+                    '-c:v', 'libx264', '-crf', '23', '-preset', 'medium',
+                    '-c:a', 'copy', '-movflags', '+faststart',
+                    output_path
+                ]
+            else:
+                # Single stream 2:1 aspect - direct conversion
+                vf_filter = (
+                    f"v360=input=dfisheye:output=equirect:"
+                    f"ih_fov={lens_fov}:iv_fov={lens_fov}:w={erp_w}:h={erp_h},"
+                    f"hflip,vflip"
+                )
+                ffmpeg_cmd = [
+                    'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                    '-i', input_path,
+                    '-vf', vf_filter,
+                    '-c:v', 'libx264', '-crf', '23', '-preset', 'medium',
+                    '-c:a', 'copy', '-movflags', '+faststart',
+                    output_path
+                ]
+
+            result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=timeout)
+
+            if result.returncode == 0 and os.path.exists(output_path):
+                return output_path
+            return None
+        except Exception:
+            return None
+
+    def _ray_downscale_video(self, input_path: str, output_path: str,
+                              target_height: int = 480, quality: str = 'medium',
+                              timeout: int = 1800) -> Optional[str]:
+        """
+        Downscale video to target height.
+
+        Returns:
+            Output path if successful, None if failed
+        """
+        try:
+            if self._ray_is_video_480p_or_smaller(input_path):
+                return None
+
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+            quality_map = {
+                'fast': ('veryfast', '28'),
+                'medium': ('medium', '23'),
+                'slow': ('slow', '20')
+            }
+            preset, crf = quality_map.get(quality, ('medium', '23'))
+
+            vf_filter = f"scale=-2:{target_height}"
+            ffmpeg_cmd = [
+                'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                '-i', input_path,
+                '-vf', vf_filter,
+                '-c:v', 'libx264', '-preset', preset, '-crf', crf,
+                '-c:a', 'copy', '-movflags', '+faststart',
+                output_path
+            ]
+
+            result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=timeout)
+
+            if result.returncode == 0 and os.path.exists(output_path):
+                return output_path
+            return None
+        except Exception:
+            return None
+
+    def _ray_process_single_video(self, video_path: str, output_dir: str) -> Dict:
+        """
+        Process a single video: detect type, convert if fisheye, downscale.
+
+        Returns:
+            Dict with processing results
+        """
+        result = {
+            'input_path': video_path,
+            'output_path': video_path,
+            'is_dual_fisheye': False,
+            'erp_converted': False,
+            'downscaled': False,
+            'success': False,
+            'error': None
+        }
+
+        try:
+            video_name = os.path.basename(video_path)
+            video_basename = os.path.splitext(video_name)[0]
+            os.makedirs(output_dir, exist_ok=True)
+
+            current_path = video_path
+
+            # Step 1: Check if dual-fisheye and convert to ERP
+            is_dual, num_streams = self._ray_is_dual_fisheye(current_path)
+            result['is_dual_fisheye'] = is_dual
+
+            if is_dual:
+                erp_output = os.path.join(output_dir, f"{video_basename}_erp.mp4")
+                logger.info(f"  🔄 [Ray] Converting fisheye to ERP: {video_name}")
+
+                erp_result = self._ray_convert_fisheye_to_erp(current_path, erp_output)
+
+                if erp_result:
+                    result['erp_converted'] = True
+                    current_path = erp_result
+                    logger.info(f"  ✅ [Ray] ERP conversion done: {os.path.basename(erp_result)}")
+                else:
+                    result['error'] = 'ERP conversion failed'
+                    logger.warning(f"  ⚠️  [Ray] ERP conversion failed: {video_name}")
+
+            # Step 2: Downscale if needed
+            if self.config.enable_video_downscaling:
+                if not self._ray_is_video_480p_or_smaller(current_path):
+                    downscale_output = os.path.join(
+                        output_dir,
+                        f"{os.path.splitext(os.path.basename(current_path))[0]}_{self.config.downscale_target_height}p.mp4"
+                    )
+                    logger.info(f"  📉 [Ray] Downscaling: {os.path.basename(current_path)}")
+
+                    downscale_result = self._ray_downscale_video(
+                        current_path, downscale_output,
+                        target_height=self.config.downscale_target_height,
+                        quality=self.config.downscale_quality
+                    )
+
+                    if downscale_result:
+                        result['downscaled'] = True
+                        current_path = downscale_result
+                        logger.info(f"  ✅ [Ray] Downscale done: {os.path.basename(downscale_result)}")
+
+            result['output_path'] = current_path
+            result['success'] = True
+
+        except Exception as e:
+            result['error'] = str(e)
+            result['success'] = False
+            logger.error(f"  ❌ [Ray] Error processing {video_path}: {e}")
+
+        return result
+
+    def _process_videos_with_ray(self, video_files: List[Dict], output_dir: str) -> Dict[str, Dict]:
+        """
+        Process multiple videos in parallel using Ray.
+
+        Args:
+            video_files: List of video file info dicts with 'path', 'name', 'relative_path'
+            output_dir: Directory for processed output files
+
+        Returns:
+            Dict mapping original file path to processing result:
+            {
+                '/path/to/video.mp4': {
+                    'output_path': '/path/to/processed.mp4',
+                    'is_dual_fisheye': bool,
+                    'erp_converted': bool,
+                    'downscaled': bool,
+                    'success': bool
+                }
+            }
+        """
+        if not RAY_AVAILABLE:
+            logger.warning("Ray not available - falling back to sequential processing")
+            return {}
+
+        if not video_files:
+            return {}
+
+        # Initialize Ray if needed with proper error handling
+        try:
+            if not ray.is_initialized():
+                # Use local mode to avoid GCS issues, set reasonable resource limits
+                ray.init(
+                    ignore_reinit_error=True,
+                    num_cpus=max(1, self.config.ray_max_parallel),
+                    include_dashboard=False,  # Disable dashboard to reduce overhead
+                    _temp_dir="/tmp/ray_temp",  # Explicit temp dir
+                    logging_level="warning",  # Reduce log verbosity
+                )
+                logger.info("Ray initialized for parallel video processing")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Ray: {e}")
+            logger.warning("Falling back to sequential processing")
+            return {}
+
+        logger.info(f"🚀 Processing {len(video_files)} videos in parallel with Ray")
+        logger.info(f"   Max parallel: {self.config.ray_max_parallel}, GPU: {self.config.ray_use_gpu}")
+
+        # Define Ray remote function for processing a single video
+        @ray.remote(num_cpus=1)
+        def process_video_task(video_path: str, output_dir: str,
+                               enable_downscaling: bool, target_height: int,
+                               downscale_quality: str) -> Dict:
+            """Ray task to process a single video."""
+            result = {
+                'input_path': video_path,
+                'output_path': video_path,
+                'is_dual_fisheye': False,
+                'erp_converted': False,
+                'downscaled': False,
+                'success': False,
+                'error': None
+            }
+
+            try:
+                video_name = os.path.basename(video_path)
+                video_basename = os.path.splitext(video_name)[0]
+                os.makedirs(output_dir, exist_ok=True)
+
+                current_path = video_path
+
+                # Helper: Get video streams
+                def get_streams(path):
+                    cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v',
+                           '-show_entries', 'stream=index,width,height',
+                           '-of', 'json', path]
+                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                    if r.returncode != 0:
+                        return []
+                    return json.loads(r.stdout).get('streams', [])
+
+                # Helper: Check if dual-fisheye
+                def is_dual_fisheye(path):
+                    ext = os.path.splitext(path)[1].lower()
+                    if ext == '.insv':
+                        return True, 2
+                    streams = get_streams(path)
+                    if len(streams) >= 2:
+                        return True, len(streams)
+                    if len(streams) == 1:
+                        w, h = streams[0].get('width', 0), streams[0].get('height', 0)
+                        if w > 0 and h > 0 and 1.9 <= w/h <= 2.1:
+                            return True, 1
+                    return False, len(streams)
+
+                # Helper: Check if 480p or smaller
+                def is_small(path):
+                    streams = get_streams(path)
+                    return streams and streams[0].get('height', 9999) <= 480
+
+                # Step 1: Check for dual-fisheye
+                is_dual, num_streams = is_dual_fisheye(current_path)
+                result['is_dual_fisheye'] = is_dual
+
+                if is_dual:
+                    erp_output = os.path.join(output_dir, f"{video_basename}_erp.mp4")
+                    lens_fov = 190
+                    erp_w, erp_h = 3840, 1920
+
+                    if num_streams >= 2:
+                        fc = (f"[0:v:0][0:v:1]hstack[dual];"
+                              f"[dual]v360=input=dfisheye:output=equirect:"
+                              f"ih_fov={lens_fov}:iv_fov={lens_fov}:w={erp_w}:h={erp_h}[erp];"
+                              f"[erp]hflip,vflip")
+                        cmd = ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                               '-i', current_path, '-filter_complex', fc,
+                               '-c:v', 'libx264', '-crf', '23', '-preset', 'medium',
+                               '-c:a', 'copy', '-movflags', '+faststart', erp_output]
+                    else:
+                        vf = (f"v360=input=dfisheye:output=equirect:"
+                              f"ih_fov={lens_fov}:iv_fov={lens_fov}:w={erp_w}:h={erp_h},"
+                              f"hflip,vflip")
+                        cmd = ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                               '-i', current_path, '-vf', vf,
+                               '-c:v', 'libx264', '-crf', '23', '-preset', 'medium',
+                               '-c:a', 'copy', '-movflags', '+faststart', erp_output]
+
+                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+                    if r.returncode == 0 and os.path.exists(erp_output):
+                        result['erp_converted'] = True
+                        current_path = erp_output
+
+                # Step 2: Downscale if needed
+                if enable_downscaling and not is_small(current_path):
+                    ds_output = os.path.join(
+                        output_dir,
+                        f"{os.path.splitext(os.path.basename(current_path))[0]}_{target_height}p.mp4"
+                    )
+                    quality_map = {'fast': ('veryfast', '28'), 'medium': ('medium', '23'), 'slow': ('slow', '20')}
+                    preset, crf = quality_map.get(downscale_quality, ('medium', '23'))
+
+                    cmd = ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                           '-i', current_path, '-vf', f'scale=-2:{target_height}',
+                           '-c:v', 'libx264', '-preset', preset, '-crf', crf,
+                           '-c:a', 'copy', '-movflags', '+faststart', ds_output]
+
+                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+                    if r.returncode == 0 and os.path.exists(ds_output):
+                        result['downscaled'] = True
+                        current_path = ds_output
+
+                result['output_path'] = current_path
+                result['success'] = True
+
+            except Exception as e:
+                result['error'] = str(e)
+
+            return result
+
+        # Submit all tasks to Ray with proper cleanup
+        result_map = {}
+        try:
+            futures = []
+            for video_file in video_files:
+                future = process_video_task.remote(
+                    video_file['path'],
+                    output_dir,
+                    self.config.enable_video_downscaling,
+                    self.config.downscale_target_height,
+                    self.config.downscale_quality
+                )
+                futures.append(future)
+
+            # Gather results with timeout
+            try:
+                results = ray.get(futures, timeout=1800)  # 30 minute timeout for all videos
+            except ray.exceptions.GetTimeoutError:
+                logger.error("Ray processing timed out after 30 minutes")
+                # Cancel any pending tasks
+                for future in futures:
+                    try:
+                        ray.cancel(future, force=True)
+                    except Exception:
+                        pass
+                return {}
+
+            # Summary logging
+            successful = sum(1 for r in results if r['success'])
+            erp_converted = sum(1 for r in results if r['erp_converted'])
+            downscaled = sum(1 for r in results if r['downscaled'])
+
+            logger.info(f"📊 Ray processing complete:")
+            logger.info(f"   Total: {len(results)}, Successful: {successful}")
+            logger.info(f"   ERP converted: {erp_converted}, Downscaled: {downscaled}")
+
+            # Build result mapping
+            for result in results:
+                result_map[result['input_path']] = result
+
+        except Exception as e:
+            logger.error(f"Ray processing failed: {e}")
+            logger.warning("Ray processing error - results may be incomplete")
+        finally:
+            # Always shutdown Ray to prevent zombie processes
+            try:
+                if ray.is_initialized():
+                    ray.shutdown()
+                    logger.info("Ray shutdown complete")
+            except Exception as e:
+                logger.warning(f"Error during Ray shutdown: {e}")
+
+        return result_map
+
     def _process_tar_file(self, tar_file_info: Dict) -> List[Dict]:
         """
         Process a single TAR file: download, extract, upload, generate SAS, collect data.
 
         Args:
-            tar_file_info: TAR file info from SharePoint
+            tar_file_info: TAR file info from SharePoint or Azure Blob
 
         Returns:
             List of report data dictionaries for all extracted files
@@ -894,12 +1597,20 @@ class TarInspectionManager:
         extraction_path = None
 
         try:
-            # Step 1: Download TAR file from SharePoint
+            # Step 1: Download TAR file from source (SharePoint or Azure Blob)
             logger.info(f"\n{'='*80}")
             logger.info(f"Processing TAR file: {tar_filename} ({tar_size_gb:.2f} GB)")
+            logger.info(f"Source: {self.config.input_source.upper()}")
+            if self.config.use_ray and RAY_AVAILABLE:
+                logger.info(f"Ray parallel processing: ENABLED (max {self.config.ray_max_parallel} parallel)")
             logger.info(f"{'='*80}")
 
-            local_tar_path = self._download_from_sharepoint(tar_file_info)
+            # Download based on input source
+            if self.config.input_source == 'blob':
+                local_tar_path = self._download_from_blob(tar_file_info)
+            else:
+                local_tar_path = self._download_from_sharepoint(tar_file_info)
+
             if not local_tar_path:
                 logger.error(f"Failed to download TAR file: {tar_filename}")
                 return []
@@ -921,30 +1632,155 @@ class TarInspectionManager:
 
             # Step 4: Upload each file to blob and generate SAS tokens
             transfer_date = datetime.now().isoformat()
+            tar_name = tar_filename.rsplit('.tar', 1)[0]
 
-            for i, file_info in enumerate(extracted_files, 1):
+            # Separate video files from non-video files
+            video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.m4v', '.insv']
+            video_files = []
+            non_video_files = []
+
+            for file_info in extracted_files:
+                file_extension = os.path.splitext(file_info['name'])[1].lower()
+                if file_extension in video_extensions:
+                    video_files.append(file_info)
+                else:
+                    non_video_files.append(file_info)
+
+            logger.info(f"Found {len(video_files)} video files and {len(non_video_files)} non-video files")
+
+            # Process videos with Ray if enabled and available
+            ray_results = {}
+            if self.config.use_ray and RAY_AVAILABLE and video_files:
+                logger.info(f"🚀 Processing {len(video_files)} videos with Ray parallel processing...")
+
+                # Create a temp output directory for processed videos
+                ray_output_dir = os.path.join(extraction_path, '_ray_processed')
+                os.makedirs(ray_output_dir, exist_ok=True)
+
+                ray_results = self._process_videos_with_ray(video_files, ray_output_dir)
+                logger.info(f"Ray processing complete. {len(ray_results)} results.")
+
+            # Process all files (videos use Ray results if available, non-videos processed normally)
+            all_files = extracted_files
+            for i, file_info in enumerate(all_files, 1):
                 file_name = file_info['name']
                 file_size_bytes = file_info['size']
                 file_size_gb = file_size_bytes / (1024 ** 3)
-                file_extension = os.path.splitext(file_name)[1] or 'no_extension'
+                file_extension = os.path.splitext(file_name)[1].lower() or 'no_extension'
 
                 # Construct blob path: untar_folder_oslo2/tar_name/relative_path
-                tar_name = tar_filename.rsplit('.tar', 1)[0]
                 blob_path = os.path.join(
                     self.config.untar_blob_prefix,
                     tar_name,
                     file_info['relative_path']
                 ).replace('\\', '/')  # Ensure forward slashes
 
-                # Check if video is dual-fisheye and process accordingly
-                is_dual_fisheye = False
-                erp_video_path = None
-                erp_created = False
-                final_video_path = file_info['path']  # Path to upload (might be downscaled)
-                downscaled_original_path = None
-                downscaled_erp_path = None
+                # Check if this is a video that was processed by Ray
+                ray_result = ray_results.get(file_info['path'])
 
-                if file_extension.lower() in ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.m4v', '.insv']:
+                if ray_result and ray_result.get('success'):
+                    # Video was processed by Ray
+                    is_dual_fisheye = ray_result.get('is_dual_fisheye', False)
+                    erp_converted = ray_result.get('erp_converted', False)
+                    downscaled = ray_result.get('downscaled', False)
+                    output_path = ray_result.get('output_path', file_info['path'])
+
+                    if is_dual_fisheye:
+                        logger.info(f"  🎥 [{i}/{len(all_files)}] DUAL-FISHEYE (Ray processed): {file_name}")
+
+                        # Skip uploading original dual-fisheye, upload ERP version
+                        if erp_converted and os.path.exists(output_path):
+                            erp_file_name = os.path.basename(output_path)
+                            erp_file_size_bytes = os.path.getsize(output_path)
+                            erp_file_size_gb = erp_file_size_bytes / (1024 ** 3)
+
+                            # Construct ERP blob path
+                            erp_relative_path = os.path.join(
+                                os.path.dirname(file_info['relative_path']),
+                                erp_file_name
+                            ).replace('\\', '/')
+
+                            erp_blob_path = os.path.join(
+                                self.config.untar_blob_prefix,
+                                tar_name,
+                                erp_relative_path
+                            ).replace('\\', '/')
+
+                            logger.info(f"  📤 Uploading ERP video: {erp_file_name} ({erp_file_size_gb:.4f} GB)")
+
+                            upload_success = self._upload_file_to_blob(output_path, erp_blob_path)
+
+                            if upload_success:
+                                sas_token = self._generate_sas_token(erp_blob_path)
+                                blob_url = self._get_blob_url_with_sas(erp_blob_path, sas_token)
+
+                                report_data.append({
+                                    'tar_file_name': tar_filename,
+                                    'individual_file_name': erp_file_name,
+                                    'individual_file_full_path': erp_relative_path,
+                                    'individual_file_type': '.mp4',
+                                    'is_dual_fisheye': 'NO',
+                                    'is_erp_version': 'YES',
+                                    'tar_size_gb': f"{tar_size_gb:.4f}",
+                                    'individual_file_size_gb': f"{erp_file_size_gb:.6f}",
+                                    'sas_token': sas_token,
+                                    'Video_preview_url': blob_url,
+                                    'blob_path': erp_blob_path,
+                                    'transfer_date': transfer_date
+                                })
+                                logger.info(f"  ✅ ERP video uploaded: {erp_file_name}")
+                            else:
+                                logger.warning(f"  ⚠️  Failed to upload ERP video: {erp_file_name}")
+                        else:
+                            logger.warning(f"  ⚠️  ERP conversion failed for: {file_name}")
+                    else:
+                        # Normal video (possibly downscaled by Ray)
+                        final_path = output_path if os.path.exists(output_path) else file_info['path']
+                        final_file_name = os.path.basename(final_path)
+                        final_size_bytes = os.path.getsize(final_path)
+                        final_size_gb = final_size_bytes / (1024 ** 3)
+
+                        # Update blob path if file was downscaled
+                        if downscaled and final_path != file_info['path']:
+                            blob_path = os.path.join(
+                                self.config.untar_blob_prefix,
+                                tar_name,
+                                os.path.dirname(file_info['relative_path']),
+                                final_file_name
+                            ).replace('\\', '/')
+
+                        logger.info(f"  [{i}/{len(all_files)}] Uploading (Ray): {final_file_name} ({final_size_gb:.4f} GB)")
+
+                        upload_success = self._upload_file_to_blob(final_path, blob_path)
+
+                        if upload_success:
+                            sas_token = self._generate_sas_token(blob_path)
+                            blob_url = self._get_blob_url_with_sas(blob_path, sas_token)
+
+                            report_data.append({
+                                'tar_file_name': tar_filename,
+                                'individual_file_name': final_file_name,
+                                'individual_file_full_path': file_info['relative_path'],
+                                'individual_file_type': file_extension,
+                                'is_dual_fisheye': 'NO',
+                                'is_erp_version': 'NO',
+                                'tar_size_gb': f"{tar_size_gb:.4f}",
+                                'individual_file_size_gb': f"{final_size_gb:.6f}",
+                                'sas_token': sas_token,
+                                'Video_preview_url': blob_url,
+                                'blob_path': blob_path,
+                                'transfer_date': transfer_date
+                            })
+                        else:
+                            logger.warning(f"Failed to upload file: {final_file_name}")
+
+                elif file_extension in video_extensions:
+                    # Video file - process without Ray (fallback or Ray disabled)
+                    is_dual_fisheye = False
+                    erp_video_path = None
+                    erp_created = False
+                    final_video_path = file_info['path']
+
                     # STEP 1: Check if dual-fisheye
                     is_dual_fisheye = self._is_dual_fisheye_video(file_info['path'])
 
@@ -964,113 +1800,129 @@ class TarInspectionManager:
 
                         # STEP 3: Downscale ONLY the ERP video (not the original fisheye)
                         if self.config.enable_video_downscaling:
-                            # Downscale ERP video if created
                             if erp_created and erp_video_path:
                                 downscaled_erp_path = self._downscale_video_if_needed(erp_video_path)
                                 if downscaled_erp_path:
-                                    # Replace ERP path with downscaled version
                                     erp_video_path = downscaled_erp_path
                     else:
-                        # STEP 2: Normal video - just downscale to 480p
+                        # Normal video - just downscale to 480p
                         if self.config.enable_video_downscaling:
                             downscaled_path = self._downscale_video_if_needed(file_info['path'])
                             if downscaled_path:
                                 final_video_path = downscaled_path
 
-                # Skip uploading original dual-fisheye videos (we'll upload ERP version instead)
-                if is_dual_fisheye:
-                    logger.info(f"  ℹ️  Skipping upload of original dual-fisheye video (will upload ERP version instead)")
-                else:
-                    # For non-fisheye videos, upload the final_video_path (which is downscaled if enabled)
-                    logger.info(f"  [{i}/{len(extracted_files)}] Uploading: {file_info['relative_path']} ({file_size_gb:.4f} GB)")
+                    # Skip uploading original dual-fisheye videos
+                    if is_dual_fisheye:
+                        logger.info(f"  ℹ️  Skipping upload of original dual-fisheye video")
+                    else:
+                        logger.info(f"  [{i}/{len(all_files)}] Uploading: {file_info['relative_path']} ({file_size_gb:.4f} GB)")
 
-                    upload_success = self._upload_file_to_blob(final_video_path, blob_path)
+                        upload_success = self._upload_file_to_blob(final_video_path, blob_path)
+
+                        if not upload_success:
+                            logger.warning(f"Failed to upload file: {file_name}")
+                            continue
+
+                        uploaded_file_size_bytes = os.path.getsize(final_video_path)
+                        uploaded_file_size_gb = uploaded_file_size_bytes / (1024 ** 3)
+                        uploaded_file_name = os.path.basename(final_video_path)
+
+                        sas_token = self._generate_sas_token(blob_path)
+                        blob_url = self._get_blob_url_with_sas(blob_path, sas_token)
+
+                        report_data.append({
+                            'tar_file_name': tar_filename,
+                            'individual_file_name': uploaded_file_name,
+                            'individual_file_full_path': file_info['relative_path'],
+                            'individual_file_type': file_extension,
+                            'is_dual_fisheye': 'NO',
+                            'is_erp_version': 'NO',
+                            'tar_size_gb': f"{tar_size_gb:.4f}",
+                            'individual_file_size_gb': f"{uploaded_file_size_gb:.6f}",
+                            'sas_token': sas_token,
+                            'Video_preview_url': blob_url,
+                            'blob_path': blob_path,
+                            'transfer_date': transfer_date
+                        })
+
+                    # If ERP video was created, upload it too
+                    if erp_created and erp_video_path and os.path.exists(erp_video_path):
+                        erp_file_size_bytes = os.path.getsize(erp_video_path)
+                        erp_file_size_gb = erp_file_size_bytes / (1024 ** 3)
+                        erp_file_name = os.path.basename(erp_video_path)
+
+                        erp_relative_path = os.path.join(
+                            os.path.dirname(file_info['relative_path']),
+                            erp_file_name
+                        ).replace('\\', '/')
+
+                        erp_blob_path = os.path.join(
+                            self.config.untar_blob_prefix,
+                            tar_name,
+                            erp_relative_path
+                        ).replace('\\', '/')
+
+                        logger.info(f"  📤 Uploading ERP video: {erp_file_name} ({erp_file_size_gb:.4f} GB)")
+
+                        erp_upload_success = self._upload_file_to_blob(erp_video_path, erp_blob_path)
+
+                        if erp_upload_success:
+                            erp_sas_token = self._generate_sas_token(erp_blob_path)
+                            erp_blob_url = self._get_blob_url_with_sas(erp_blob_path, erp_sas_token)
+
+                            report_data.append({
+                                'tar_file_name': tar_filename,
+                                'individual_file_name': erp_file_name,
+                                'individual_file_full_path': erp_relative_path,
+                                'individual_file_type': '.mp4',
+                                'is_dual_fisheye': 'NO',
+                                'is_erp_version': 'YES',
+                                'tar_size_gb': f"{tar_size_gb:.4f}",
+                                'individual_file_size_gb': f"{erp_file_size_gb:.6f}",
+                                'sas_token': erp_sas_token,
+                                'Video_preview_url': erp_blob_url,
+                                'blob_path': erp_blob_path,
+                                'transfer_date': transfer_date
+                            })
+
+                            logger.info(f"  ✅ ERP video uploaded successfully: {erp_file_name}")
+                        else:
+                            logger.warning(f"  ⚠️  Failed to upload ERP video: {erp_file_name}")
+
+                        # Clean up local ERP file after upload
+                        try:
+                            os.remove(erp_video_path)
+                            logger.debug(f"  🗑️  Removed local ERP file: {erp_video_path}")
+                        except Exception as e:
+                            logger.debug(f"Could not remove ERP file {erp_video_path}: {e}")
+
+                else:
+                    # Non-video file - upload directly
+                    logger.info(f"  [{i}/{len(all_files)}] Uploading: {file_info['relative_path']} ({file_size_gb:.4f} GB)")
+
+                    upload_success = self._upload_file_to_blob(file_info['path'], blob_path)
 
                     if not upload_success:
                         logger.warning(f"Failed to upload file: {file_name}")
                         continue
 
-                    # Get actual uploaded file size (downscaled version)
-                    uploaded_file_size_bytes = os.path.getsize(final_video_path)
-                    uploaded_file_size_gb = uploaded_file_size_bytes / (1024 ** 3)
-                    uploaded_file_name = os.path.basename(final_video_path)
-
-                    # Generate SAS token
                     sas_token = self._generate_sas_token(blob_path)
-
-                    # Generate blob URL with SAS
                     blob_url = self._get_blob_url_with_sas(blob_path, sas_token)
 
-                    # Add to report data with downscaled file info
                     report_data.append({
                         'tar_file_name': tar_filename,
-                        'individual_file_name': uploaded_file_name,
+                        'individual_file_name': file_name,
                         'individual_file_full_path': file_info['relative_path'],
                         'individual_file_type': file_extension,
                         'is_dual_fisheye': 'NO',
                         'is_erp_version': 'NO',
                         'tar_size_gb': f"{tar_size_gb:.4f}",
-                        'individual_file_size_gb': f"{uploaded_file_size_gb:.6f}",
+                        'individual_file_size_gb': f"{file_size_gb:.6f}",
                         'sas_token': sas_token,
-                        'blob_url': blob_url,
+                        'Video_preview_url': blob_url,
                         'blob_path': blob_path,
                         'transfer_date': transfer_date
                     })
-
-                # If ERP video was created, upload it too
-                if erp_created and erp_video_path and os.path.exists(erp_video_path):
-                    erp_file_size_bytes = os.path.getsize(erp_video_path)
-                    erp_file_size_gb = erp_file_size_bytes / (1024 ** 3)
-                    erp_file_name = os.path.basename(erp_video_path)
-
-                    # Construct ERP blob path (same folder as original)
-                    erp_relative_path = os.path.join(
-                        os.path.dirname(file_info['relative_path']),
-                        erp_file_name
-                    ).replace('\\', '/')
-
-                    erp_blob_path = os.path.join(
-                        self.config.untar_blob_prefix,
-                        tar_name,
-                        erp_relative_path
-                    ).replace('\\', '/')
-
-                    logger.info(f"  📤 Uploading ERP video: {erp_file_name} ({erp_file_size_gb:.4f} GB)")
-
-                    # Upload ERP video
-                    erp_upload_success = self._upload_file_to_blob(erp_video_path, erp_blob_path)
-
-                    if erp_upload_success:
-                        # Generate SAS token for ERP
-                        erp_sas_token = self._generate_sas_token(erp_blob_path)
-                        erp_blob_url = self._get_blob_url_with_sas(erp_blob_path, erp_sas_token)
-
-                        # Add ERP file to report data
-                        report_data.append({
-                            'tar_file_name': tar_filename,
-                            'individual_file_name': erp_file_name,
-                            'individual_file_full_path': erp_relative_path,
-                            'individual_file_type': '.mp4',
-                            'is_dual_fisheye': 'NO',  # ERP is not dual-fisheye anymore
-                            'is_erp_version': 'YES',
-                            'tar_size_gb': f"{tar_size_gb:.4f}",
-                            'individual_file_size_gb': f"{erp_file_size_gb:.6f}",
-                            'sas_token': erp_sas_token,
-                            'blob_url': erp_blob_url,
-                            'blob_path': erp_blob_path,
-                            'transfer_date': transfer_date
-                        })
-
-                        logger.info(f"  ✅ ERP video uploaded successfully: {erp_file_name}")
-                    else:
-                        logger.warning(f"  ⚠️  Failed to upload ERP video: {erp_file_name}")
-
-                    # Clean up local ERP file after upload
-                    try:
-                        os.remove(erp_video_path)
-                        logger.debug(f"  🗑️  Removed local ERP file: {erp_video_path}")
-                    except Exception as e:
-                        logger.debug(f"Could not remove ERP file {erp_video_path}: {e}")
 
             logger.info(f"✅ Successfully processed {len(report_data)} files from TAR: {tar_filename}")
 
@@ -1113,6 +1965,8 @@ class TarInspectionManager:
         """
         logger.info("=" * 100)
         logger.info("Starting TAR Random Inspection Workflow")
+        logger.info(f"Input Source: {self.config.input_source.upper()}")
+        logger.info(f"Execution Mode: {self.config.execution_mode.upper()}")
         logger.info("=" * 100)
 
         try:
@@ -1120,29 +1974,40 @@ class TarInspectionManager:
             inspection_state = self._load_inspection_state()
             already_inspected = set(inspection_state.keys())
 
-            # Get all TAR files from SharePoint
-            all_tar_files = self._get_sharepoint_tar_files()
-
-            if not all_tar_files:
-                logger.warning("No TAR files found in SharePoint folder")
-                return True
-
-            # Select files based on execution mode
-            if self.config.execution_mode == 'random':
-                logger.info(f"Using RANDOM MODE (1 per {self.config.sampling_ratio} files)")
-                selected_files = self._select_random_samples(all_tar_files, already_inspected)
-            elif self.config.execution_mode == 'list':
-                logger.info(f"Using LIST MODE ({len(self.config.tar_file_list)} files specified)")
-                selected_files = self._select_from_list(all_tar_files, already_inspected)
+            # Handle CSV mode separately (doesn't need to fetch all files first)
+            if self.config.execution_mode == 'csv':
+                logger.info(f"Using CSV MODE (random {self.config.csv_sample_count} files from comparison CSV)")
+                logger.info(f"CSV Input: {self.config.csv_input_file}")
+                selected_files = self._select_from_csv(already_inspected)
             else:
-                logger.error(f"Invalid execution mode: {self.config.execution_mode}")
-                return False
+                # Get all TAR files based on input source for random/list modes
+                if self.config.input_source == 'blob':
+                    all_tar_files = self._get_blob_tar_files()
+                    source_name = f"Azure Blob ({self.config.source_container_name}/{self.config.source_prefix})"
+                else:
+                    all_tar_files = self._get_sharepoint_tar_files()
+                    source_name = f"SharePoint ({self.config.sharepoint_tar_folder_path})"
+
+                if not all_tar_files:
+                    logger.warning(f"No TAR files found in {source_name}")
+                    return True
+
+                # Select files based on execution mode
+                if self.config.execution_mode == 'random':
+                    logger.info(f"Using RANDOM MODE (1 per {self.config.sampling_ratio} files)")
+                    selected_files = self._select_random_samples(all_tar_files, already_inspected)
+                elif self.config.execution_mode == 'list':
+                    logger.info(f"Using LIST MODE ({len(self.config.tar_file_list)} files specified)")
+                    selected_files = self._select_from_list(all_tar_files, already_inspected)
+                else:
+                    logger.error(f"Invalid execution mode: {self.config.execution_mode}")
+                    return False
 
             if not selected_files:
                 logger.info("No files to inspect")
                 return True
 
-            logger.info(f"\nSelected {len(selected_files)} TAR files for random inspection:")
+            logger.info(f"\nSelected {len(selected_files)} TAR files for inspection:")
             for i, file_info in enumerate(selected_files, 1):
                 size_gb = file_info.get('size', 0) / (1024 ** 3)
                 logger.info(f"  {i}. {file_info['name']} ({size_gb:.2f} GB)")
@@ -1186,7 +2051,13 @@ class TarInspectionManager:
 
             # Create CSV report if we have data
             if all_report_data:
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                # Use report_date_prefix from source_prefix if available, otherwise use today's date
+                if self.config.report_date_prefix:
+                    date_part = self.config.report_date_prefix
+                    time_part = datetime.now().strftime('%H%M%S')
+                    timestamp = f"{date_part}_{time_part}"
+                else:
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 report_filename = f"tar_inspection_report_{timestamp}.csv"
                 report_path = os.path.join(self.config.csv_report_dir, report_filename)
 
@@ -1229,9 +2100,31 @@ class TarInspectionManager:
             return False
 
 
+def _cleanup_ray():
+    """Cleanup function to ensure Ray is shutdown properly."""
+    if RAY_AVAILABLE:
+        try:
+            import ray
+            if ray.is_initialized():
+                ray.shutdown()
+                logger.info("Ray cleanup: shutdown complete")
+        except Exception as e:
+            logger.warning(f"Ray cleanup error: {e}")
+
+
 def main():
     """Main function to run the TAR inspection workflow."""
     import argparse
+    import signal
+
+    # Register cleanup handler for graceful shutdown
+    def signal_handler(signum, frame):
+        logger.warning(f"\nReceived signal {signum}, cleaning up...")
+        _cleanup_ray()
+        sys.exit(1)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
     parser = argparse.ArgumentParser(
         description='Random TAR inspection: download, extract, upload to blob, generate SAS tokens, create CSV report'
@@ -1260,6 +2153,10 @@ def main():
         import traceback
         logger.error(traceback.format_exc())
         sys.exit(1)
+
+    finally:
+        # Always cleanup Ray to prevent zombie processes
+        _cleanup_ray()
 
 
 if __name__ == "__main__":

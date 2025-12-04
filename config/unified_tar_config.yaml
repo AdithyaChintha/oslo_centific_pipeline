@@ -1,0 +1,73 @@
+# Unified TAR Processing Configuration
+# This single config file supports both Stage 1 (transfer) and Stage 2 (inspection)
+
+# Azure AD App Registration Credentials
+azure_ad:
+  tenant_id: "9b415834-803a-4da0-afdc-fe6b1d52d649"
+  client_id: "cf36a429-766a-47eb-9b49-66b04a227ead"
+  client_secret: "jnf8Q~3H41HHHfLvwBh0seXNvos80e5~GhMhLapI"
+
+# SharePoint Site Configuration
+sharepoint:
+  site_url: "https://digitaltechedge.sharepoint.com/sites/Oslo Humus Moderators"
+  site_id: "digitaltechedge.sharepoint.com,38fe5936-7c38-45ec-9bd5-b0051fed3610,65326b1d-1ff4-4a70-a464-f1d3a39186aa"
+
+  # Source folder containing TAR files (used by both stages)
+  tar_source_folder_path: "/Uploads"
+
+  drive_id: "b!Nln-ODh87EWb1bAFH-02EB1rMmX0H3BKpGTx06ORhqpuRZrKdUe9RrHjIH-Pdeog"
+
+# Azure Blob Storage Configuration
+azure_blob:
+  connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
+
+  # Container name (same for both stages)
+  container_name: "instavideo"
+
+# STAGE 1: Transfer Configuration (SharePoint → Azure Blob intact TAR files)
+transfer:
+  # Target blob prefix for intact TAR files
+  # Example: instavideo/oslo_stage_2_tar_files/dataset_001.tar
+  target_prefix: "oslo_stage_2_tar_files/"
+
+  # Maximum files to transfer per run (to avoid overwhelming system)
+  max_files_per_run: 50
+
+  # Clean up local temporary files after successful upload
+  cleanup_after_upload: true
+
+# STAGE 2: Inspection Configuration (Random sampling, extraction, upload, reporting)
+inspection:
+  # Target blob prefix for extracted/untarred files
+  # Example: instavideo/untar_folder_oslo2/<tar_name>/<file_path>
+  untar_blob_prefix: "hummas_untar_fiels_/"
+
+  # Sampling ratio: Pick 1 random TAR file per every N files
+  # Example: 10 means pick 1 file from every 10 TAR files
+  sampling_ratio: 10
+
+  # SAS token expiry in days (for team inspection)
+  sas_token_expiry_days: 30
+
+# Local Paths Configuration
+local_paths:
+  # Temporary directory for downloading TAR files from SharePoint
+  temp_download_dir: "/data/oslo/tar_temp_downloads"
+
+  # Temporary directory for extracting TAR files (Stage 2 only)
+  temp_extract_dir: "/data/oslo/tar_extractions"
+
+  # Directory where CSV inspection reports will be saved (Stage 2 only)
+  csv_report_dir: "/data/oslo/unified_reports"
+
+  # State file to track transferred TAR files (Stage 1)
+  transfer_state_file: "/data/oslo/tar_temp_downloads/tar_transfer_state.json"
+
+  # State file to track inspected TAR files (Stage 2)
+  inspection_state_file: "/data/oslo/tar_temp_downloads/tar_inspection_state.json"
+
+# API Configuration (applies to both stages)
+api:
+  timeout_seconds: 300
+  retry_attempts: 3
+  retry_delay_seconds: 5

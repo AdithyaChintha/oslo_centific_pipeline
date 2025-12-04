@@ -20,7 +20,7 @@ project_id: "oslo_project_2"
 azure_source:
   connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
   container_name: "instavideo"
-  source_prefix: "hydra_plus_tar_files/"
+  source_prefix: "one-data-platform/hummus_prod/2025-11-30/tar/"
   project_id: "oslo_project_2"
   container_sas_env: ""
 
@@ -66,7 +66,7 @@ local_paths:
   watermark_file: "./local_manifests/watermark.json"
   work_dir: "./work"
   temp_download_dir: "/data/oslo/tar_temp_downloads_inspection"
-  transfer_state_file: "/data/oslo/tar_temp_downloads/tar_transfer_state.json"
+  transfer_state_file: "/data/oslo/tar_temp_downloads/tar_transfer_state_production.json"
 
 # =============================================================================
 # SUBMISSION SETTINGS
@@ -83,7 +83,7 @@ remote_manifests:
   enabled: true
   connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
   container_name: "submission-summary"
-  prefix: "tar-bulk11"
+  prefix: "tar-productionnov30"
 
 # =============================================================================
 # LOGGING
@@ -101,14 +101,14 @@ state_storage:
   enabled: true
   connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
   container_name: "instavideo"
-  prefix: "upload_state_files/production/tar-bulk11"
+  prefix: "upload_state_files/production_dec1/tar_statefile_nov30"
 
 # =============================================================================
 # STATE TRACKING - Local state tracking
 # =============================================================================
 state_tracking:
   enabled: true
-  local_dir: "/data/oslo/upload_state/tar-bulk11"
+  local_dir: "/data/oslo/upload_state/tar_inspectiondec1"
   backup_enabled: true
   max_daily_entries: 365
   compression_enabled: true
@@ -118,6 +118,9 @@ state_tracking:
 # =============================================================================
 tar_upload:
   require_metadata: false              # Don't require metadata for tar files
+  require_metadata_json: true          # Require corresponding JSON file for each tar file
+                                       # e.g., test-1gb.tar requires test-1gb.json
+                                       # Tar files without matching JSON will be skipped
   file_extension: ".tar"
 
 # =============================================================================
@@ -133,11 +136,11 @@ inspection:
   # - random: Randomly sample TAR files from source (uses sampling_ratio)
   # - list: Process specific TAR files (uses tar_file_list)
   # - csv: Randomly sample TAR files from comparison CSV (uses csv_input_file & csv_sample_count)
-  execution_mode: "csv"  # Options: "random" | "list" | "csv"
+  execution_mode: "random"  # Options: "random" | "list" | "csv"
 
   # Target blob prefix for extracted/untarred files
   # Extracted files will be uploaded to: instavideo/<untar_blob_prefix>/<tar_name>/<file_path>
-  untar_blob_prefix: "untar_folder_oslo2/testing_erp/downsclaeit"
+  untar_blob_prefix: "untar_folder_oslo2/produciton_dec/dec_inspection"
 
   # --- RANDOM MODE SETTINGS ---
   sampling_ratio: 10  # Pick 1 random TAR file per every N files
@@ -158,7 +161,7 @@ inspection:
   sas_token_expiry_days: 365
   temp_extract_dir: "/data/oslo/tar_extractions"
   csv_report_dir: "/data/oslo/inspection_reports/tar"
-  inspection_state_file: "/data/oslo/tar_temp_downloads/tar_inspection_state.json"
+  inspection_state_file: "/data/oslo/tar_temp_downloads/tar_inspection_production.json"
 
   # Video downscaling settings
   enable_video_downscaling: true
@@ -167,10 +170,11 @@ inspection:
 
   # --- RAY PARALLEL PROCESSING SETTINGS ---
   # Enable Ray for parallel video processing (fisheye-to-ERP, downscaling)
-  # Significantly speeds up inspection when processing multiple videos
+  # WARNING: Ray can cause VM hangs/zombie processes if GCS fails to initialize
+  # Recommend keeping disabled unless you need parallel processing speed
   ray:
-    enabled: true                  # Set to false to use sequential processing
-    max_parallel: 4                # Maximum number of videos to process in parallel
+    enabled: false                 # Disabled by default for stability (set to true if needed)
+    max_parallel: 2                # Number of parallel video processing tasks
     use_gpu: false                 # Set to true if GPU (CUDA) is available for ffmpeg
 
 # =============================================================================
@@ -188,9 +192,72 @@ sharepoint:
   drive_id: "b!Nln-ODh87EWb1bAFH-02EB1rMmX0H3BKpGTx06ORhqpuRZrKdUe9RrHjIH-Pdeog"
 
 # =============================================================================
+# CSV REPORT STORAGE - Azure Blob storage for uploading generated CSV reports
+# =============================================================================
+# This section is used by tar_orchestrator.py to upload:
+# - Comparison CSV (Step 4): tar_state_comparison report
+# - Inspection Report CSV (Step 5): tar_inspection_report
+# These CSVs are uploaded to the parent directory of source_prefix (without /tar)
+csv_report_storage:
+  enabled: true
+  connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
+  container_name: "instavideo"
+  # Upload to parent of source_prefix: one-data-platform/hummus_prod/2025-11-28/
+  prefix: "one-data-platform/hummus_prod/2025-11-30/"
+
+# =============================================================================
+# SHAREPOINT REPORT UPLOAD - Upload generated CSV reports to SharePoint
+# =============================================================================
+# When enabled, CSV reports (inspection, comparison) will also be uploaded to SharePoint
+# Separate paths for different report types
+sharepoint_report_upload:
+  enabled: true
+  # SharePoint folder path for INSPECTION reports (--skip-upload mode)
+  inspection_report_path: "/Uploads/Transfer Reports/Inspection_reports"
+  # SharePoint folder path for COMPARISON/STATE reports (--skip-inspection mode)
+  comparison_report_path: "/Uploads/Transfer Reports/State comparison Reports"
+
+# =============================================================================
 # API CONFIGURATION
 # =============================================================================
 api:
   timeout_seconds: 300
   retry_attempts: 3
   retry_delay_seconds: 5
+
+# =============================================================================
+# POLLING CONFIGURATION - Monitor for new JSON metadata files
+# =============================================================================
+# When enabled, the pipeline will poll for new JSON metadata files after
+# initial processing. This allows TAR files without JSON to be uploaded
+# later when their JSON files become available.
+#
+# Example scenario:
+#   - Pipeline starts at 6:30 AM, finds 100 TAR files but only 80 have JSON
+#   - 80 TAR files are uploaded immediately
+#   - Pipeline polls every 5 minutes for the remaining 20 JSON files
+#   - At 7:15 AM, 15 new JSON files are detected and their TAR files uploaded
+#   - After max cycles (or all processed), final reports are generated
+#
+polling:
+  enabled: true                     # Enable/disable polling mechanism
+
+  # Polling interval: time between each polling cycle
+  interval_minutes: 5               # Check for new JSONs every 5 minutes
+
+  # Maximum polling cycles: how many times to poll before generating final reports
+  # Total polling duration = interval_minutes * max_cycles
+  # Example: 5 min * 12 cycles = 60 minutes (1 hour) of polling
+  max_cycles: 12
+
+  # Early exit: stop polling early if all pending files are processed
+  exit_when_all_processed: true
+
+  # State file for resume capability
+  # If pipeline is interrupted, it can resume from this state file
+  state_file: "/data/oslo/polling_state/tar_polling_state.json"
+
+  # Retry settings for blob connectivity issues during polling
+  retry_on_error: true
+  max_retries_per_cycle: 3
+  retry_delay_seconds: 10

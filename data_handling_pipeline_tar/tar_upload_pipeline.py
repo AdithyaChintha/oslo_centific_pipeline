@@ -181,6 +181,16 @@ class AzureSourceClient:
             raise RuntimeError(f"Failed to list blobs in source container '{self.container_name}': {e}")
         return blobs
 
+    def json_metadata_exists(self, json_blob_name: str) -> bool:
+        """Check if a JSON metadata file exists in the container"""
+        try:
+            self._container_client.get_blob_client(json_blob_name).get_blob_properties()
+            return True
+        except ResourceNotFoundError:
+            return False
+        except AzureError:
+            return False
+
 # -------------------------
 # PartnerUploader
 # -------------------------
@@ -413,8 +423,9 @@ class DataPushOrchestrator:
 
         # Tar-specific configuration
         self.require_metadata = bool(cfg.get("tar_upload", "require_metadata", default=False))
-        logger.info("Tar upload pipeline initialized (project_id=%s, require_metadata=%s)",
-                   self.project_id, self.require_metadata)
+        self.require_metadata_json = bool(cfg.get("tar_upload", "require_metadata_json", default=True))
+        logger.info("Tar upload pipeline initialized (project_id=%s, require_metadata=%s, require_metadata_json=%s)",
+                   self.project_id, self.require_metadata, self.require_metadata_json)
 
     def _validate_state_configuration(self) -> None:
         """Validate state storage configuration"""
@@ -495,6 +506,40 @@ class DataPushOrchestrator:
         cutoff = now_utc() - timedelta(minutes=self.safety_window_minutes)
         return lm <= cutoff
 
+    # -------------------------
+    # JSON Metadata Validation
+    # -------------------------
+    def get_json_path_for_tar(self, tar_blob_name: str) -> str:
+        """Get the expected JSON file path for a tar file.
+
+        Example:
+            one-data-platform/.../test-1gb.tar -> one-data-platform/.../test-1gb.json
+        """
+        if tar_blob_name.lower().endswith('.tar'):
+            return tar_blob_name[:-4] + '.json'
+        return tar_blob_name + '.json'
+
+    def has_metadata_json(self, tar_blob_name: str) -> bool:
+        """Check if a corresponding metadata JSON file exists for the given tar file.
+
+        Args:
+            tar_blob_name: Full blob path to the tar file (e.g., prefix/test-1gb.tar)
+
+        Returns:
+            bool: True if corresponding JSON file exists (e.g., prefix/test-1gb.json)
+        """
+        json_path = self.get_json_path_for_tar(tar_blob_name)
+        try:
+            exists = self.source_client.json_metadata_exists(json_path)
+            if exists:
+                logger.debug("Found metadata JSON: %s", json_path)
+            else:
+                logger.debug("Missing metadata JSON: %s", json_path)
+            return exists
+        except Exception as e:
+            logger.warning("Error checking metadata JSON for %s: %s", tar_blob_name, e)
+            return False
+
     def blobs_to_send(self) -> List[Tuple[str, dict, str]]:
         """Get list of tar files to upload"""
         all_blobs = self.source_client.list_blobs_with_props()
@@ -519,10 +564,21 @@ class DataPushOrchestrator:
             else:
                 logger.info("SKIP (safety window) %s", b["name"])
 
-        # For tar files, accept all (no metadata required)
-        metadata_validated_blobs = safe_blobs
-        for b in metadata_validated_blobs:
-            logger.info("ACCEPTED tar file: %s", b["name"])
+        # Validate metadata JSON for each tar file
+        if self.require_metadata_json:
+            metadata_validated_blobs = []
+            for b in safe_blobs:
+                if self.has_metadata_json(b["name"]):
+                    metadata_validated_blobs.append(b)
+                    logger.info("METADATA JSON FOUND for %s", b["name"])
+                else:
+                    logger.warning("SKIP (no metadata JSON) %s - expected: %s",
+                                 b["name"], self.get_json_path_for_tar(b["name"]))
+        else:
+            # No JSON validation required - accept all tar files
+            metadata_validated_blobs = safe_blobs
+            for b in metadata_validated_blobs:
+                logger.info("ACCEPTED tar file (no JSON validation): %s", b["name"])
 
         # Convert to format expected by state store
         candidates = []

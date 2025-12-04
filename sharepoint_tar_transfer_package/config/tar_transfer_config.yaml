@@ -11,7 +11,7 @@ sharepoint:
   site_id: "digitaltechedge.sharepoint.com,38fe5936-7c38-45ec-9bd5-b0051fed3610,65326b1d-1ff4-4a70-a464-f1d3a39186aa"  # ✅ COMPLEX SITE ID FROM IT
 
   # ✅ TAR source folder for SharePoint to Azure Blob transfer
-  tar_source_folder_path: "/Uploads/NYC"  # ⚠️ UPDATE: Specify the SharePoint folder containing TAR files
+  tar_source_folder_path: "/Uploads/NJ(Pilot)"  # ⚠️ UPDATE: Specify the SharePoint folder containing TAR files
 
   # ✅ Drive ID for direct access (more reliable than generic site drive)
   drive_id: "b!Nln-ODh87EWb1bAFH-02EB1rMmX0H3BKpGTx06ORhqpuRZrKdUe9RrHjIH-Pdeog"
@@ -20,10 +20,6 @@ sharepoint:
 azure_blob:
   # ✅ Using environment variable for security (recommended)
   connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
-
-  # Alternative: Use account name and key directly
-  # account_name: "your_storage_account_name"
-  # account_key: "${AZURE_STORAGE_ACCOUNT_KEY}"
 
   # ✅ Container and target path for TAR files
   container_name: "instavideo"  # ⚠️ UPDATE: Your Azure Blob container name

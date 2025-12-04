@@ -34,11 +34,11 @@ from azure.storage.filedatalake import DataLakeFileClient
 from azure.core.exceptions import ResourceNotFoundError, AzureError
 from dotenv import load_dotenv
 from urllib.parse import urlparse, urlunparse, quote
-from utils import (
+from data_handling_to_client.utils import (
     now_utc, now_iso, atomic_write_json, ensure_dir,
     normalize_content_md5, parse_iso_to_utc, read_json_if_exists
 )
-from state_manager import (
+from data_handling_to_client.state_manager import (
     StateStorageManager, EnhancedStateStore, ProcessingSession,
     VideoFingerprintManager, VideoProcessingResult
 )

@@ -80,6 +80,14 @@ def compare_files(tar_files, state_files, project_id):
         if tar_uuid:
             state_lookup[tar_uuid] = state_file
 
+    # Helper to parse has_metadata_json from CSV (handles string 'True'/'False')
+    def parse_has_json(value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.lower() == 'true'
+        return False
+
     # Perform comparison
     comparison_results = []
 
@@ -95,6 +103,9 @@ def compare_files(tar_files, state_files, project_id):
             continue
 
         state_file = state_lookup.get(tar_uuid)
+
+        # Get has_metadata_json from tar file listing
+        has_metadata_json = parse_has_json(tar_file.get('has_metadata_json', False))
 
         if state_file:
             # Found a match
@@ -127,9 +138,12 @@ def compare_files(tar_files, state_files, project_id):
                 discrepancy = "None"
 
         else:
-            # No match found
+            # No match found - determine reason
             status = "NOT_FOUND"
-            discrepancy = "File exists in blob but not in upload_state"
+            if not has_metadata_json:
+                discrepancy = "SKIPPED: No metadata JSON file"
+            else:
+                discrepancy = "File exists in blob but not in upload_state"
             state_file = {}  # Empty dict for consistent structure
 
         comparison_results.append({
@@ -140,6 +154,8 @@ def compare_files(tar_files, state_files, project_id):
             'tar_last_modified': tar_file.get('last_modified', ''),
             'tar_full_path': tar_file.get('full_blob_path', ''),
             'tar_blob_url': tar_file.get('blob_url', ''),
+            'has_metadata_json': has_metadata_json,
+            'expected_json_path': tar_file.get('expected_json_path', ''),
             'state_blob_name': state_file.get('blob_name', ''),
             'state_file_size_gb': state_file.get('file_size_gb', ''),
             'state_status': state_file.get('status', ''),
@@ -169,6 +185,8 @@ def compare_files(tar_files, state_files, project_id):
                 'tar_last_modified': '',
                 'tar_full_path': '',
                 'tar_blob_url': '',
+                'has_metadata_json': '',  # Unknown - file not in tar list
+                'expected_json_path': '',
                 'state_blob_name': state_file.get('blob_name', ''),
                 'state_file_size_gb': state_file.get('file_size_gb', ''),
                 'state_status': state_file.get('status', ''),
@@ -201,22 +219,36 @@ def compare_files(tar_files, state_files, project_id):
 
     return comparison_results
 
-def save_comparison_results(comparison_results, output_dir, project_id):
-    """Save comparison results to CSV and JSON files"""
+def save_comparison_results(comparison_results, output_dir, project_id, report_date_prefix=None):
+    """Save comparison results to CSV and JSON files
+
+    Args:
+        comparison_results: List of comparison result dictionaries
+        output_dir: Directory to save results
+        project_id: Project identifier
+        report_date_prefix: Optional date prefix (YYYYMMDD) from source_prefix
+                           If provided, uses this date instead of today's date
+    """
 
     if not comparison_results:
         print("No comparison results to save!")
         return None, None
 
     # Generate timestamp for filenames
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Use report_date_prefix if provided, otherwise use today's date
+    if report_date_prefix:
+        date_part = report_date_prefix
+        time_part = datetime.now().strftime("%H%M%S")
+        timestamp = f"{date_part}_{time_part}"
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # CSV filename
-    csv_filename = f"{timestamp}_{project_id}_tar_state_comparison.csv"
+    csv_filename = f"{timestamp}_tar_client_report.csv"
     csv_path = os.path.join(output_dir, csv_filename)
 
     # JSON filename
-    json_filename = f"{timestamp}_{project_id}_tar_state_comparison.json"
+    json_filename = f"{timestamp}_tar_client_report.json"
     json_path = os.path.join(output_dir, json_filename)
 
     # Define CSV columns
@@ -228,6 +260,8 @@ def save_comparison_results(comparison_results, output_dir, project_id):
         'tar_last_modified',
         'tar_full_path',
         'tar_blob_url',
+        'has_metadata_json',
+        'expected_json_path',
         'state_blob_name',
         'state_file_size_gb',
         'state_status',
@@ -255,10 +289,14 @@ def save_comparison_results(comparison_results, output_dir, project_id):
         'summary': {
             'found': sum(1 for r in comparison_results if r['mapping_status'] == 'FOUND'),
             'not_found': sum(1 for r in comparison_results if r['mapping_status'] == 'NOT_FOUND'),
+            'not_found_missing_json': sum(1 for r in comparison_results if r['mapping_status'] == 'NOT_FOUND' and r.get('has_metadata_json') == False),
+            'not_found_other_reason': sum(1 for r in comparison_results if r['mapping_status'] == 'NOT_FOUND' and r.get('has_metadata_json') == True),
             'orphaned_in_state': sum(1 for r in comparison_results if r['mapping_status'] == 'ORPHANED_IN_STATE'),
             'with_discrepancies': sum(1 for r in comparison_results if r['discrepancy'] and r['discrepancy'] != 'None'),
             'successful_uploads': sum(1 for r in comparison_results if r['state_status'] and r['state_status'].lower() in ['success', 'successful']),
-            'failed_uploads': sum(1 for r in comparison_results if r['state_status'] and r['state_status'].lower() in ['failed', 'error'])
+            'failed_uploads': sum(1 for r in comparison_results if r['state_status'] and r['state_status'].lower() in ['failed', 'error']),
+            'tar_files_with_json': sum(1 for r in comparison_results if r.get('has_metadata_json') == True),
+            'tar_files_without_json': sum(1 for r in comparison_results if r.get('has_metadata_json') == False)
         },
         'comparisons': comparison_results
     }
@@ -278,8 +316,14 @@ def print_summary(comparison_results, project_id):
     total = len(comparison_results)
     found = sum(1 for r in comparison_results if r['mapping_status'] == 'FOUND')
     not_found = sum(1 for r in comparison_results if r['mapping_status'] == 'NOT_FOUND')
+    not_found_no_json = sum(1 for r in comparison_results if r['mapping_status'] == 'NOT_FOUND' and r.get('has_metadata_json') == False)
+    not_found_other = sum(1 for r in comparison_results if r['mapping_status'] == 'NOT_FOUND' and r.get('has_metadata_json') == True)
     orphaned = sum(1 for r in comparison_results if r['mapping_status'] == 'ORPHANED_IN_STATE')
     with_discrepancies = sum(1 for r in comparison_results if r['discrepancy'] and r['discrepancy'] != 'None')
+
+    # JSON metadata counts
+    with_json = sum(1 for r in comparison_results if r.get('has_metadata_json') == True)
+    without_json = sum(1 for r in comparison_results if r.get('has_metadata_json') == False)
 
     # Upload status counts
     successful = sum(1 for r in comparison_results if r['state_status'] and r['state_status'].lower() in ['success', 'successful'])
@@ -288,10 +332,16 @@ def print_summary(comparison_results, project_id):
     print(f"\n=== COMPARISON SUMMARY ===")
     print(f"Project ID: {project_id}")
     print(f"Total tar files compared: {total}")
-    print(f"Files found (matched): {found}")
-    print(f"Files not found in upload_state: {not_found}")
-    print(f"Files orphaned in upload_state: {orphaned}")
-    print(f"Files with discrepancies: {with_discrepancies}")
+    print(f"\nMetadata JSON Status:")
+    print(f"  Tar files with JSON metadata: {with_json}")
+    print(f"  Tar files without JSON metadata: {without_json}")
+    print(f"\nMapping Status:")
+    print(f"  Files found (matched): {found}")
+    print(f"  Files not found in upload_state: {not_found}")
+    print(f"    - Skipped (no JSON metadata): {not_found_no_json}")
+    print(f"    - Other reasons: {not_found_other}")
+    print(f"  Files orphaned in upload_state: {orphaned}")
+    print(f"  Files with discrepancies: {with_discrepancies}")
     print(f"\nUpload Status:")
     print(f"  Successful uploads: {successful}")
     print(f"  Failed uploads: {failed}")
@@ -348,6 +398,12 @@ Examples:
         help='Project ID for the comparison (default: tar-upload)'
     )
 
+    parser.add_argument(
+        '--report-date',
+        default=None,
+        help='Date prefix for report naming (YYYYMMDD format). If not provided, uses today\'s date.'
+    )
+
     args = parser.parse_args()
 
     # Get absolute paths
@@ -394,8 +450,11 @@ Examples:
     print("Performing file comparison...")
     comparison_results = compare_files(tar_files, state_files, project_id)
 
-    # Save results
-    csv_path, json_path = save_comparison_results(comparison_results, output_dir, project_id)
+    # Save results (pass report_date for naming)
+    csv_path, json_path = save_comparison_results(
+        comparison_results, output_dir, project_id,
+        report_date_prefix=args.report_date
+    )
 
     # Print summary
     print_summary(comparison_results, project_id)

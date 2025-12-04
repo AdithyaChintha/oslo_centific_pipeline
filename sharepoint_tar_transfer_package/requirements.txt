@@ -1,0 +1,22 @@
+# SharePoint TAR to Azure Blob Transfer - Dependencies
+# Python 3.8+ required
+
+# Azure Blob Storage SDK
+azure-storage-blob>=12.19.0
+
+# YAML configuration parsing
+PyYAML>=6.0
+
+# HTTP requests for SharePoint API and streaming transfers
+requests>=2.25.0
+
+# Standard library modules (included with Python, listed for reference):
+# - os
+# - sys
+# - json
+# - time
+# - logging
+# - pathlib
+# - datetime
+# - typing
+# - dataclasses

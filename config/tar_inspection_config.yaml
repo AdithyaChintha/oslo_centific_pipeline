@@ -1,6 +1,27 @@
 # TAR Inspection Configuration File
 # This config is used for random TAR sampling, extraction, Azure Blob upload, and CSV reporting
 
+# =============================================================================
+# INPUT SOURCE CONFIGURATION
+# =============================================================================
+# Select the input source for TAR files: 'sharepoint' or 'blob'
+# - sharepoint: Fetch TAR files from SharePoint (requires azure_ad and sharepoint config)
+# - blob: Fetch TAR files from Azure Blob Storage (requires azure_source config)
+input_source: "sharepoint"  # Options: "sharepoint" | "blob"
+
+# =============================================================================
+# AZURE BLOB SOURCE (only required when input_source: "blob")
+# =============================================================================
+# Configuration for reading TAR files from Azure Blob Storage
+azure_source:
+  connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
+  container_name: "instavideo"
+  source_prefix: "hydra_plus_tar_files/"
+  project_id: "oslo_project_2"
+
+# =============================================================================
+# SHAREPOINT CONFIGURATION (only required when input_source: "sharepoint")
+# =============================================================================
 # Azure AD App Registration Credentials (reused from tar_transfer_config.yaml)
 azure_ad:
   tenant_id: "9b415834-803a-4da0-afdc-fe6b1d52d649"
@@ -13,7 +34,7 @@ sharepoint:
   site_id: "digitaltechedge.sharepoint.com,38fe5936-7c38-45ec-9bd5-b0051fed3610,65326b1d-1ff4-4a70-a464-f1d3a39186aa"
 
   # TAR source folder (same as transfer config)
-  tar_source_folder_path: "/Uploads/NYC"
+  tar_source_folder_path: "/Uploads/NJ(Pilot)"
 
   drive_id: "b!Nln-ODh87EWb1bAFH-02EB1rMmX0H3BKpGTx06ORhqpuRZrKdUe9RrHjIH-Pdeog"
 
@@ -26,27 +47,71 @@ azure_blob:
 
 # Inspection-Specific Settings
 inspection:
-  # Execution mode: 'random' or 'list'
-  # - random: Randomly sample TAR files (uses sampling_ratio)
+  # =============================================================================
+  # EXECUTION MODE
+  # =============================================================================
+  # Execution mode: 'random', 'list', or 'csv'
+  # - random: Randomly sample TAR files from source (uses sampling_ratio)
   # - list: Process specific TAR files (uses tar_file_list)
-  execution_mode: "list"  # Options: "random" | "list"
+  # - csv: Randomly sample TAR files from comparison CSV (uses csv_input_file & csv_sample_count)
+  execution_mode: "list"  # Options: "random" | "list" | "csv"
 
   # Target blob prefix for extracted/untarred files
   # Extracted files will be uploaded to: instavideo/untar_folder_oslo2/<tar_name>/<file_path>
   untar_blob_prefix: "untar_folder_oslo2/testing_erp/downsclaeit"
 
+  # =============================================================================
+  # RANDOM MODE SETTINGS
+  # =============================================================================
   # Sampling ratio: Pick 1 random TAR file per every N files
   # Example: 10 means pick 1 file from every 10 TAR files
-  sampling_ratio: 10
+  sampling_ratio: 5
 
-  # --- LIST MODE SETTINGS ---
+  # =============================================================================
+  # LIST MODE SETTINGS
+  # =============================================================================
   # List of specific TAR filenames to process (only used when execution_mode: "list")
-  # Filenames should match exactly as they appear in SharePoint 
+  # Filenames should match exactly as they appear in source
   tar_file_list:
-    - "7c8ec110-695c-4f91-8d24-3f6fab971233.tar"
-    - "d21cd805-4ae8-48cf-80d5-70749868ee2b.tar"
-    - "32a2aa25-8a2a-43f4-ab01-184f046f3281.tar"  
-   
+    - "cdd36c49-29e0-43fb-a7d9-9647c86e4d77.tar"
+
+
+  # =============================================================================
+  # CSV MODE SETTINGS (for orchestrator integration)
+  # =============================================================================
+  # Path to comparison CSV file (output from tar_state_file_comparison.py)
+  # Only TAR files with mapping_status='FOUND' and state_status='success' will be considered
+  csv_input_file: ""
+
+  # Number of random TAR files to pick from the CSV for inspection
+  csv_sample_count: 4
+
+  # =============================================================================
+  # RAY PARALLEL PROCESSING SETTINGS
+  # =============================================================================
+  # Ray is used for parallel video processing (ERP conversion + downscaling)
+  # WARNING: Ray can cause VM hangs/zombie processes if GCS fails to initialize
+  # Recommend keeping disabled for stability
+  ray:
+    enabled: false  # Disabled by default for stability
+    max_parallel: 2  # Number of parallel video processing tasks
+    use_gpu: false
+
+  # =============================================================================
+  # VIDEO PROCESSING SETTINGS
+  # =============================================================================
+  # Enable video downscaling (reduces file size for preview)
+  enable_video_downscaling: true
+
+  # Target height for downscaled videos (480 = 480p)
+  downscale_target_height: 480
+
+  # Downscale quality: 'fast', 'medium', or 'slow' (affects encoding speed vs quality)
+  downscale_quality: "medium"
+
+  # =============================================================================
+  # OTHER SETTINGS
+  # =============================================================================
   # SAS token expiry in days (default: 30 days for team inspection)
   sas_token_expiry_days: 365
 

@@ -19,8 +19,8 @@ from dataclasses import dataclass, asdict
 from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
 from azure.core.exceptions import ResourceNotFoundError
 
-# Import utilities from shared utils module
-from utils import (
+# Import utilities from local utils module
+from data_handling_to_client.utils import (
     now_utc, now_iso, atomic_write_json, ensure_dir,
     normalize_content_md5, parse_iso_to_utc, read_json_if_exists
 )
