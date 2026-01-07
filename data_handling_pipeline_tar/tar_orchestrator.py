@@ -782,32 +782,35 @@ class TarOrchestrator:
             try:
                 success, output = self.run_command(cmd, "Running TAR inspection", stream_output=True)
 
-                if success:
-                    # Find the inspection report that matches this run's date prefix
-                    # or fall back to the most recently modified file
-                    inspection_reports = []
-                    if self.report_date_prefix:
-                        # Look for files matching this run's date prefix
-                        pattern = f"tar_inspection_report_{self.report_date_prefix}_*.csv"
-                        inspection_reports = list(self.inspection_dir.glob(pattern))
-                        if inspection_reports:
-                            # Sort by modification time to get the latest one with this prefix
-                            inspection_reports = sorted(inspection_reports, key=lambda p: p.stat().st_mtime)
-
-                    if not inspection_reports:
-                        # Fallback: get all reports and sort by modification time (most recent last)
-                        inspection_reports = sorted(
-                            self.inspection_dir.glob("tar_inspection_report_*.csv"),
-                            key=lambda p: p.stat().st_mtime
-                        )
-
+                # Always check for CSV report - it may be generated even if some TARs failed
+                # Find the inspection report that matches this run's date prefix
+                # or fall back to the most recently modified file
+                inspection_reports = []
+                if self.report_date_prefix:
+                    # Look for files matching this run's date prefix
+                    pattern = f"tar_inspection_report_{self.report_date_prefix}_*.csv"
+                    inspection_reports = list(self.inspection_dir.glob(pattern))
                     if inspection_reports:
-                        self.generated_files['inspection_report'] = str(inspection_reports[-1])
-                        print(f"   Inspection report: {inspection_reports[-1]}")
+                        # Sort by modification time to get the latest one with this prefix
+                        inspection_reports = sorted(inspection_reports, key=lambda p: p.stat().st_mtime)
+
+                if not inspection_reports:
+                    # Fallback: get all reports and sort by modification time (most recent last)
+                    inspection_reports = sorted(
+                        self.inspection_dir.glob("tar_inspection_report_*.csv"),
+                        key=lambda p: p.stat().st_mtime
+                    )
+
+                if inspection_reports:
+                    self.generated_files['inspection_report'] = str(inspection_reports[-1])
+                    print(f"   Inspection report: {inspection_reports[-1]}")
+
+                if success:
                     return True
                 else:
-                    print("   Warning: TAR inspection failed")
-                    return False
+                    print("   Warning: TAR inspection completed with some errors (CSV still generated)")
+                    # Return True if CSV was generated, so uploads proceed
+                    return bool(inspection_reports)
             finally:
                 # Always cleanup temp config file
                 try:

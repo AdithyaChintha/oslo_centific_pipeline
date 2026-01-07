@@ -156,11 +156,15 @@ class TarInspectionConfig:
         self.downscale_target_height = inspection_config.get('downscale_target_height', 480)
         self.downscale_quality = inspection_config.get('downscale_quality', 'medium')
 
+        # GPU acceleration for video processing (applies regardless of Ray)
+        # Check inspection-level use_gpu first, fall back to ray.use_gpu for backwards compatibility
+        self.use_gpu = inspection_config.get('use_gpu', False)
+
         # Ray parallel processing settings
         ray_config = inspection_config.get('ray', {})
         self.use_ray = ray_config.get('enabled', False)
         self.ray_max_parallel = ray_config.get('max_parallel', 4)
-        self.ray_use_gpu = ray_config.get('use_gpu', False)
+        self.ray_use_gpu = ray_config.get('use_gpu', self.use_gpu)  # Fall back to inspection-level use_gpu
 
         # Local paths
         self.temp_download_dir = config_dict['local_paths']['temp_download_dir']
@@ -172,6 +176,25 @@ class TarInspectionConfig:
         # Report date prefix - extracted from source_prefix (e.g., "2025-12-01" -> "20251201")
         # If not provided, uses today's date
         self.report_date_prefix = inspection_config.get('report_date_prefix', None)
+
+        # azcopy settings for faster downloads
+        azcopy_config = inspection_config.get('azcopy', {})
+        self.use_azcopy = azcopy_config.get('enabled', True)  # Default to azcopy for speed
+        self.azcopy_path = azcopy_config.get('path', '/usr/local/bin/azcopy')
+        self.azcopy_concurrency = azcopy_config.get('concurrency', 32)  # Parallel connections per file
+        self.azcopy_block_size_mb = azcopy_config.get('block_size_mb', 8)  # Block size in MB
+
+        # Parallel TAR download settings
+        parallel_config = inspection_config.get('parallel_downloads', {})
+        self.parallel_tar_downloads = parallel_config.get('enabled', False)
+        self.max_parallel_tar_downloads = parallel_config.get('max_parallel', 2)
+
+        # Cleanup settings - delete temp files after upload
+        cleanup_config = inspection_config.get('cleanup', {})
+        self.cleanup_enabled = cleanup_config.get('enabled', False)
+        self.delete_tar_after_upload = cleanup_config.get('delete_tar_after_upload', False)
+        self.delete_extraction_after_upload = cleanup_config.get('delete_extraction_after_upload', False)
+        self.cleanup_on_failure = cleanup_config.get('cleanup_on_failure', False)
 
     def _get_connection_string(self, azure_config: Dict) -> str:
         """Build Azure connection string from config or environment."""
@@ -362,9 +385,52 @@ class TarInspectionManager:
             logger.debug(traceback.format_exc())
             return []
 
-    def _download_from_blob(self, file_info: Dict) -> Optional[str]:
+    def _generate_blob_sas_url(self, blob_name: str, expiry_hours: int = 24) -> Optional[str]:
         """
-        Download a TAR file from Azure Blob storage to local temp directory.
+        Generate a SAS URL for a specific blob.
+
+        Args:
+            blob_name: Full blob path
+            expiry_hours: SAS token expiry in hours
+
+        Returns:
+            SAS URL string or None if failed
+        """
+        try:
+            # Extract account name and key from connection string
+            account_name = None
+            account_key = None
+            for part in self.config.source_connection_string.split(';'):
+                if part.startswith('AccountName='):
+                    account_name = part.split('=', 1)[1]
+                elif part.startswith('AccountKey='):
+                    account_key = part.split('=', 1)[1]
+
+            if not account_name or not account_key:
+                logger.error("Could not extract account credentials from connection string")
+                return None
+
+            sas_token = generate_blob_sas(
+                account_name=account_name,
+                container_name=self.config.source_container_name,
+                blob_name=blob_name,
+                account_key=account_key,
+                permission=BlobSasPermissions(read=True),
+                expiry=datetime.now() + timedelta(hours=expiry_hours)
+            )
+
+            sas_url = f"https://{account_name}.blob.core.windows.net/{self.config.source_container_name}/{blob_name}?{sas_token}"
+            return sas_url
+
+        except Exception as e:
+            logger.error(f"Failed to generate SAS URL for {blob_name}: {e}")
+            return None
+
+    def _download_from_blob_azcopy(self, file_info: Dict) -> Optional[str]:
+        """
+        Download a TAR file from Azure Blob using azcopy (faster).
+
+        Uses parallel connections and optimized chunking for 2-4x faster downloads.
 
         Args:
             file_info: TAR file info dict with 'blob_name' and 'name' keys
@@ -374,20 +440,107 @@ class TarInspectionManager:
         """
         filename = file_info['name']
         blob_name = file_info['blob_name']
-
         local_path = os.path.join(self.config.temp_download_dir, filename)
 
-        logger.info(f"Downloading from Azure Blob: {blob_name}")
+        # Generate SAS URL for the blob
+        sas_url = self._generate_blob_sas_url(blob_name)
+        if not sas_url:
+            logger.warning("Failed to generate SAS URL, falling back to SDK download")
+            return self._download_from_blob_sdk(file_info)
+
+        logger.info(f"Downloading with azcopy: {blob_name}")
+        start_time = time.time()
+
+        try:
+            # Build azcopy command with optimization flags
+            cmd = [
+                self.config.azcopy_path,
+                'copy',
+                sas_url,
+                local_path,
+                '--overwrite=true',
+                f'--block-size-mb={self.config.azcopy_block_size_mb}',
+                '--check-length=false',  # Skip length check for speed
+            ]
+
+            # Set environment variable for concurrency
+            env = os.environ.copy()
+            env['AZCOPY_CONCURRENCY_VALUE'] = str(self.config.azcopy_concurrency)
+
+            # Run azcopy
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=3600,  # 1 hour timeout for large files
+                env=env
+            )
+
+            if result.returncode != 0:
+                logger.error(f"azcopy failed: {result.stderr}")
+                logger.warning("Falling back to SDK download")
+                return self._download_from_blob_sdk(file_info)
+
+            # Verify file exists and log stats
+            if os.path.exists(local_path):
+                file_size_gb = os.path.getsize(local_path) / (1024 ** 3)
+                elapsed = time.time() - start_time
+                speed_mbps = (file_size_gb * 1024) / elapsed if elapsed > 0 else 0
+
+                logger.info(f"✅ Downloaded: {local_path}")
+                logger.info(f"   Size: {file_size_gb:.2f} GB | Time: {elapsed:.1f}s | Speed: {speed_mbps:.1f} MB/s")
+                return local_path
+            else:
+                logger.error(f"azcopy completed but file not found: {local_path}")
+                return self._download_from_blob_sdk(file_info)
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"azcopy download timed out for {blob_name}")
+            return None
+        except FileNotFoundError:
+            logger.warning(f"azcopy not found at {self.config.azcopy_path}, falling back to SDK")
+            return self._download_from_blob_sdk(file_info)
+        except Exception as e:
+            logger.error(f"azcopy download failed: {e}")
+            logger.warning("Falling back to SDK download")
+            return self._download_from_blob_sdk(file_info)
+
+    def _download_from_blob_sdk(self, file_info: Dict) -> Optional[str]:
+        """
+        Download a TAR file from Azure Blob using SDK (fallback method).
+
+        Uses chunked streaming for better memory efficiency.
+
+        Args:
+            file_info: TAR file info dict with 'blob_name' and 'name' keys
+
+        Returns:
+            Local file path if successful, None otherwise
+        """
+        filename = file_info['name']
+        blob_name = file_info['blob_name']
+        local_path = os.path.join(self.config.temp_download_dir, filename)
+
+        logger.info(f"Downloading with SDK (chunked): {blob_name}")
+        start_time = time.time()
 
         try:
             blob_client = self.source_container_client.get_blob_client(blob_name)
 
+            # Use chunked download for better memory efficiency
+            # max_concurrency enables parallel chunk downloads
             with open(local_path, 'wb') as f:
-                stream = blob_client.download_blob()
-                f.write(stream.readall())
+                stream = blob_client.download_blob(max_concurrency=4)
+                # Read in 8MB chunks instead of loading entire file
+                for chunk in stream.chunks():
+                    f.write(chunk)
 
             file_size_gb = os.path.getsize(local_path) / (1024 ** 3)
-            logger.info(f"Downloaded to: {local_path} ({file_size_gb:.2f} GB)")
+            elapsed = time.time() - start_time
+            speed_mbps = (file_size_gb * 1024) / elapsed if elapsed > 0 else 0
+
+            logger.info(f"✅ Downloaded: {local_path}")
+            logger.info(f"   Size: {file_size_gb:.2f} GB | Time: {elapsed:.1f}s | Speed: {speed_mbps:.1f} MB/s")
             return local_path
 
         except Exception as e:
@@ -395,6 +548,23 @@ class TarInspectionManager:
             import traceback
             logger.debug(traceback.format_exc())
             return None
+
+    def _download_from_blob(self, file_info: Dict) -> Optional[str]:
+        """
+        Download a TAR file from Azure Blob storage to local temp directory.
+
+        Uses azcopy for faster downloads if available, falls back to SDK.
+
+        Args:
+            file_info: TAR file info dict with 'blob_name' and 'name' keys
+
+        Returns:
+            Local file path if successful, None otherwise
+        """
+        if self.config.use_azcopy:
+            return self._download_from_blob_azcopy(file_info)
+        else:
+            return self._download_from_blob_sdk(file_info)
 
     def _select_random_samples(self, all_files: List[Dict], already_inspected: set) -> List[Dict]:
         """
@@ -662,19 +832,40 @@ class TarInspectionManager:
         logger.info(f"Found {len(extracted_files)} files in extracted directory")
         return extracted_files
 
-    def _unwarp_dual_fisheye_to_erp(self, input_video_path: str, output_video_path: str) -> bool:
+    def _unwarp_dual_fisheye_to_erp(self, input_video_path: str, output_video_path: str,
+                                     use_gpu: bool = None, downscale_height: int = None) -> bool:
         """
         Convert dual-fisheye video to ERP (Equirectangular) view using ffmpeg.
+
+        Optionally downscales in the same pass to avoid multiple encode/decode cycles.
+
+        GPU Acceleration: When use_gpu=True, uses CUDA hardware decode (-hwaccel cuda)
+        for faster processing. Encoding uses CPU (libx264) for reliability.
+        Falls back to CPU-only if GPU processing fails.
+
+        Single-Pass Optimization: When downscale_height is specified, the downscaling
+        is integrated into the same FFmpeg filter chain, avoiding a separate encode/decode
+        cycle. This significantly improves performance and reduces quality loss.
 
         Args:
             input_video_path: Path to dual-fisheye video
             output_video_path: Path for output ERP video
+            use_gpu: Enable GPU acceleration (CUDA decode). If None, uses config setting.
+            downscale_height: Target height for downscaling (e.g., 480). If None, no downscaling.
 
         Returns:
             True if conversion successful, False otherwise
         """
         try:
+            # Use config setting if not explicitly specified
+            # Check inspection-level use_gpu first, then ray_use_gpu for backwards compatibility
+            if use_gpu is None:
+                use_gpu = getattr(self.config, 'use_gpu', False) or getattr(self.config, 'ray_use_gpu', False)
+
             logger.info(f"Converting dual-fisheye to ERP: {os.path.basename(input_video_path)}")
+            logger.info(f"  🎯 GPU acceleration: {'enabled' if use_gpu else 'disabled'}")
+            if downscale_height:
+                logger.info(f"  📉 Single-pass downscaling to {downscale_height}p enabled")
 
             # First, check if video has multiple streams (dual-lens)
             probe_cmd = [
@@ -704,59 +895,120 @@ class TarInspectionManager:
             # Lens FOV for Insta360 (typical 190-200 degrees)
             LENS_FOV_DEG = 190.0
             # Target ERP resolution (2:1 aspect ratio)
-            ERP_W, ERP_H = 5760, 2880
-
-            logger.info(f"Target ERP resolution: {ERP_W}x{ERP_H}")
+            # If downscaling, use smaller ERP to reduce processing (scale proportionally)
+            if downscale_height:
+                # For 480p output, use 960x480 ERP (maintains 2:1 ratio)
+                ERP_H = downscale_height
+                ERP_W = downscale_height * 2
+                logger.info(f"Target ERP resolution (downscaled): {ERP_W}x{ERP_H}")
+            else:
+                ERP_W, ERP_H = 5760, 2880
+                logger.info(f"Target ERP resolution: {ERP_W}x{ERP_H}")
             logger.info(f"Lens FOV: {LENS_FOV_DEG} degrees")
 
             # Build ffmpeg command based on number of video streams
             if num_video_streams >= 2:
                 # Dual-lens: hstack two streams and convert to ERP, then rotate 180 degrees
                 logger.info("🎬 Detected 2 video streams - converting dual-lens to ERP with 180° rotation")
-                filter_complex = (
-                    f"[0:v:0][0:v:1]hstack=inputs=2[dual];"
-                    f"[dual]v360=input=dfisheye:output=equirect:"
-                    f"ih_fov={LENS_FOV_DEG}:iv_fov={LENS_FOV_DEG}:w={ERP_W}:h={ERP_H}[erp];"
-                    f"[erp]hflip,vflip"
-                )
+
+                # Build filter chain - add scale if downscaling
+                if downscale_height:
+                    # Combined unwarp + downscale in single pass
+                    filter_complex = (
+                        f"[0:v:0][0:v:1]hstack=inputs=2[dual];"
+                        f"[dual]v360=input=dfisheye:output=equirect:"
+                        f"ih_fov={LENS_FOV_DEG}:iv_fov={LENS_FOV_DEG}:w={ERP_W}:h={ERP_H}[erp];"
+                        f"[erp]hflip,vflip"
+                    )
+                    logger.info(f"  🚀 Single-pass: unwarp → rotate → {downscale_height}p output")
+                else:
+                    filter_complex = (
+                        f"[0:v:0][0:v:1]hstack=inputs=2[dual];"
+                        f"[dual]v360=input=dfisheye:output=equirect:"
+                        f"ih_fov={LENS_FOV_DEG}:iv_fov={LENS_FOV_DEG}:w={ERP_W}:h={ERP_H}[erp];"
+                        f"[erp]hflip,vflip"
+                    )
                 logger.debug(f"Filter complex: {filter_complex}")
                 logger.info("  ↻ Applying 180° rotation (hflip + vflip) to correct orientation")
 
-                # FFmpeg command for dual-stream (requires -filter_complex)
-                ffmpeg_cmd = [
-                    'ffmpeg',
-                    '-y',  # Overwrite output
-                    '-i', input_video_path,
-                    '-filter_complex', filter_complex,
-                    '-c:v', 'libx264',
-                    '-crf', '23',
-                    '-preset', 'medium',
-                    '-c:a', 'copy',  # Copy audio stream
-                    '-movflags', '+faststart',
-                    output_video_path
-                ]
+                # FFmpeg command with GPU acceleration (CUDA hardware decode)
+                if use_gpu:
+                    ffmpeg_cmd = [
+                        'ffmpeg',
+                        '-y',  # Overwrite output
+                        '-hwaccel', 'cuda',  # GPU-accelerated decode
+                        '-i', input_video_path,
+                        '-filter_complex', filter_complex,
+                        '-c:v', 'libx264',  # CPU encoding for reliability
+                        '-crf', '23',
+                        '-preset', 'medium',
+                        '-pix_fmt', 'yuv420p',
+                        '-c:a', 'copy',  # Copy audio stream
+                        '-movflags', '+faststart',
+                        output_video_path
+                    ]
+                else:
+                    ffmpeg_cmd = [
+                        'ffmpeg',
+                        '-y',  # Overwrite output
+                        '-i', input_video_path,
+                        '-filter_complex', filter_complex,
+                        '-c:v', 'libx264',
+                        '-crf', '23',
+                        '-preset', 'medium',
+                        '-pix_fmt', 'yuv420p',
+                        '-c:a', 'copy',  # Copy audio stream
+                        '-movflags', '+faststart',
+                        output_video_path
+                    ]
             else:
                 # Single lens fisheye: convert directly to ERP
                 logger.info("🎬 Detected 1 video stream - converting fisheye to ERP")
-                vf_filter = (
-                    f"v360=input=fisheye:output=equirect:"
-                    f"ih_fov={LENS_FOV_DEG}:iv_fov={LENS_FOV_DEG}:w={ERP_W}:h={ERP_H}"
-                )
+
+                # Build filter - add scale if downscaling
+                if downscale_height:
+                    vf_filter = (
+                        f"v360=input=fisheye:output=equirect:"
+                        f"ih_fov={LENS_FOV_DEG}:iv_fov={LENS_FOV_DEG}:w={ERP_W}:h={ERP_H}"
+                    )
+                    logger.info(f"  🚀 Single-pass: unwarp → {downscale_height}p output")
+                else:
+                    vf_filter = (
+                        f"v360=input=fisheye:output=equirect:"
+                        f"ih_fov={LENS_FOV_DEG}:iv_fov={LENS_FOV_DEG}:w={ERP_W}:h={ERP_H}"
+                    )
                 logger.debug(f"Video filter: {vf_filter}")
 
-                # FFmpeg command for single-stream (can use -vf)
-                ffmpeg_cmd = [
-                    'ffmpeg',
-                    '-y',  # Overwrite output
-                    '-i', input_video_path,
-                    '-vf', vf_filter,
-                    '-c:v', 'libx264',
-                    '-crf', '23',
-                    '-preset', 'medium',
-                    '-c:a', 'copy',  # Copy audio stream
-                    '-movflags', '+faststart',
-                    output_video_path
-                ]
+                # FFmpeg command with GPU acceleration (CUDA hardware decode)
+                if use_gpu:
+                    ffmpeg_cmd = [
+                        'ffmpeg',
+                        '-y',  # Overwrite output
+                        '-hwaccel', 'cuda',  # GPU-accelerated decode
+                        '-i', input_video_path,
+                        '-vf', vf_filter,
+                        '-c:v', 'libx264',  # CPU encoding for reliability
+                        '-crf', '23',
+                        '-preset', 'medium',
+                        '-pix_fmt', 'yuv420p',
+                        '-c:a', 'copy',  # Copy audio stream
+                        '-movflags', '+faststart',
+                        output_video_path
+                    ]
+                else:
+                    ffmpeg_cmd = [
+                        'ffmpeg',
+                        '-y',  # Overwrite output
+                        '-i', input_video_path,
+                        '-vf', vf_filter,
+                        '-c:v', 'libx264',
+                        '-crf', '23',
+                        '-preset', 'medium',
+                        '-pix_fmt', 'yuv420p',
+                        '-c:a', 'copy',  # Copy audio stream
+                        '-movflags', '+faststart',
+                        output_video_path
+                    ]
 
             logger.info(f"Running ffmpeg command: {' '.join(ffmpeg_cmd)}")
 
@@ -769,12 +1021,19 @@ class TarInspectionManager:
             )
 
             if result.returncode != 0:
+                # If GPU failed, try CPU fallback
+                if use_gpu:
+                    logger.warning(f"⚠️ GPU processing failed, falling back to CPU-only...")
+                    return self._unwarp_dual_fisheye_to_erp(input_video_path, output_video_path,
+                                                            use_gpu=False, downscale_height=downscale_height)
                 logger.error(f"FFmpeg conversion failed: {result.stderr}")
                 return False
 
             if os.path.exists(output_video_path):
                 output_size = os.path.getsize(output_video_path)
-                logger.info(f"✅ ERP conversion successful: {os.path.basename(output_video_path)} ({output_size / (1024**2):.2f} MB)")
+                gpu_status = "GPU-accelerated" if use_gpu else "CPU-only"
+                downscale_status = f" + {downscale_height}p" if downscale_height else ""
+                logger.info(f"✅ ERP conversion successful ({gpu_status}{downscale_status}): {os.path.basename(output_video_path)} ({output_size / (1024**2):.2f} MB)")
                 return True
             else:
                 logger.error(f"Output file not created: {output_video_path}")
@@ -1111,6 +1370,8 @@ class TarInspectionManager:
                 'individual_file_type',
                 'is_dual_fisheye',
                 'is_erp_version',
+                'is_corrupted',
+                'corruption_error',
                 'tar_size_gb',
                 'individual_file_size_gb',
                 'sas_token',
@@ -1129,6 +1390,92 @@ class TarInspectionManager:
 
         except Exception as e:
             logger.error(f"Failed to create CSV report: {e}")
+
+    # =========================================================================
+    # MP4 CORRUPTION CHECK
+    # =========================================================================
+
+    def _check_mp4_corruption(self, file_path: str) -> tuple:
+        """
+        Check if an MP4 file is corrupted using ffprobe.
+
+        Args:
+            file_path: Path to the MP4 file
+
+        Returns:
+            Tuple of (is_corrupted: bool, error_message: Optional[str])
+            - (False, None) if file is valid
+            - (True, "error description") if file is corrupted
+        """
+        try:
+            cmd = [
+                'ffprobe',
+                '-v', 'error',           # Only show errors
+                '-select_streams', 'v:0', # Check first video stream
+                '-show_entries', 'stream=codec_name,duration,nb_frames',
+                '-show_entries', 'format=duration',
+                '-of', 'json',
+                file_path
+            ]
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60  # 60 second timeout
+            )
+
+            # Check for errors in stderr
+            if result.stderr and result.stderr.strip():
+                # ffprobe outputs errors to stderr
+                error_msg = result.stderr.strip()
+                # Filter out non-critical warnings
+                if any(keyword in error_msg.lower() for keyword in [
+                    'invalid', 'corrupt', 'error', 'failed', 'moov atom not found',
+                    'could not find codec', 'no such file'
+                ]):
+                    logger.warning(f"Corruption detected in {file_path}: {error_msg[:100]}")
+                    return True, error_msg[:200]
+
+            # Check if we got valid output
+            if result.returncode != 0:
+                return True, f"ffprobe returned exit code {result.returncode}"
+
+            # Parse JSON output
+            try:
+                probe_data = json.loads(result.stdout)
+            except json.JSONDecodeError:
+                return True, "Invalid ffprobe output (not valid JSON)"
+
+            # Validate streams exist
+            streams = probe_data.get('streams', [])
+            if not streams:
+                return True, "No video streams found"
+
+            # Validate duration exists and is > 0
+            format_info = probe_data.get('format', {})
+            duration = format_info.get('duration')
+            if duration:
+                try:
+                    if float(duration) <= 0:
+                        return True, "Zero or negative duration"
+                except (ValueError, TypeError):
+                    return True, f"Invalid duration value: {duration}"
+
+            # File is valid
+            return False, None
+
+        except subprocess.TimeoutExpired:
+            logger.warning(f"ffprobe timed out for {file_path}")
+            return True, "ffprobe timed out (>60s)"
+
+        except FileNotFoundError:
+            logger.error("ffprobe not found - ensure ffmpeg is installed")
+            return True, "ffprobe not found"
+
+        except Exception as e:
+            logger.error(f"Error checking corruption for {file_path}: {e}")
+            return True, str(e)[:200]
 
     # =========================================================================
     # RAY PARALLEL VIDEO PROCESSING METHODS
@@ -1199,14 +1546,44 @@ class TarInspectionManager:
             return False
 
     def _ray_convert_fisheye_to_erp(self, input_path: str, output_path: str,
-                                     lens_fov: int = 190, erp_w: int = 3840,
-                                     erp_h: int = 1920, timeout: int = 3600) -> Optional[str]:
+                                     lens_fov: int = 190, timeout: int = 3600,
+                                     use_gpu: bool = None, downscale_height: int = None) -> Optional[str]:
         """
         Convert dual-fisheye video to equirectangular projection (ERP).
+
+        Optionally downscales in the same pass to avoid multiple encode/decode cycles.
+
+        GPU Acceleration: When use_gpu=True, uses CUDA hardware decode (-hwaccel cuda)
+        for faster processing. Encoding uses CPU (libx264) for reliability.
+        Falls back to CPU-only if GPU processing fails.
+
+        Single-Pass Optimization: When downscale_height is specified, the ERP output
+        resolution is set to match the target height, avoiding a separate downscale step.
+
+        Args:
+            input_path: Path to input video
+            output_path: Path for output ERP video
+            lens_fov: Lens field of view in degrees
+            timeout: FFmpeg timeout in seconds
+            use_gpu: Enable GPU acceleration (CUDA decode). If None, uses config setting.
+            downscale_height: Target height for downscaling (e.g., 480). If None, uses 3840x1920.
 
         Returns:
             Output path if successful, None if failed
         """
+        # Use config setting if not explicitly specified
+        # Check inspection-level use_gpu first, then ray_use_gpu for backwards compatibility
+        if use_gpu is None:
+            use_gpu = getattr(self.config, 'use_gpu', False) or getattr(self.config, 'ray_use_gpu', False)
+
+        # Calculate ERP dimensions - if downscaling, output directly at target resolution
+        if downscale_height:
+            erp_h = downscale_height
+            erp_w = downscale_height * 2  # Maintain 2:1 ERP aspect ratio
+            logger.info(f"  🚀 [Ray] Single-pass unwarp+downscale to {erp_w}x{erp_h}")
+        else:
+            erp_w, erp_h = 3840, 1920
+
         try:
             is_dual, num_streams = self._ray_is_dual_fisheye(input_path)
             if not is_dual:
@@ -1222,14 +1599,28 @@ class TarInspectionManager:
                     f"ih_fov={lens_fov}:iv_fov={lens_fov}:w={erp_w}:h={erp_h}[erp];"
                     f"[erp]hflip,vflip"
                 )
-                ffmpeg_cmd = [
-                    'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
-                    '-i', input_path,
-                    '-filter_complex', filter_complex,
-                    '-c:v', 'libx264', '-crf', '23', '-preset', 'medium',
-                    '-c:a', 'copy', '-movflags', '+faststart',
-                    output_path
-                ]
+                # GPU-accelerated command (CUDA hardware decode)
+                if use_gpu:
+                    ffmpeg_cmd = [
+                        'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                        '-hwaccel', 'cuda',  # GPU-accelerated decode
+                        '-i', input_path,
+                        '-filter_complex', filter_complex,
+                        '-c:v', 'libx264', '-crf', '23', '-preset', 'medium',
+                        '-pix_fmt', 'yuv420p',
+                        '-c:a', 'copy', '-movflags', '+faststart',
+                        output_path
+                    ]
+                else:
+                    ffmpeg_cmd = [
+                        'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                        '-i', input_path,
+                        '-filter_complex', filter_complex,
+                        '-c:v', 'libx264', '-crf', '23', '-preset', 'medium',
+                        '-pix_fmt', 'yuv420p',
+                        '-c:a', 'copy', '-movflags', '+faststart',
+                        output_path
+                    ]
             else:
                 # Single stream 2:1 aspect - direct conversion
                 vf_filter = (
@@ -1237,21 +1628,47 @@ class TarInspectionManager:
                     f"ih_fov={lens_fov}:iv_fov={lens_fov}:w={erp_w}:h={erp_h},"
                     f"hflip,vflip"
                 )
-                ffmpeg_cmd = [
-                    'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
-                    '-i', input_path,
-                    '-vf', vf_filter,
-                    '-c:v', 'libx264', '-crf', '23', '-preset', 'medium',
-                    '-c:a', 'copy', '-movflags', '+faststart',
-                    output_path
-                ]
+                # GPU-accelerated command (CUDA hardware decode)
+                if use_gpu:
+                    ffmpeg_cmd = [
+                        'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                        '-hwaccel', 'cuda',  # GPU-accelerated decode
+                        '-i', input_path,
+                        '-vf', vf_filter,
+                        '-c:v', 'libx264', '-crf', '23', '-preset', 'medium',
+                        '-pix_fmt', 'yuv420p',
+                        '-c:a', 'copy', '-movflags', '+faststart',
+                        output_path
+                    ]
+                else:
+                    ffmpeg_cmd = [
+                        'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                        '-i', input_path,
+                        '-vf', vf_filter,
+                        '-c:v', 'libx264', '-crf', '23', '-preset', 'medium',
+                        '-pix_fmt', 'yuv420p',
+                        '-c:a', 'copy', '-movflags', '+faststart',
+                        output_path
+                    ]
 
             result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=timeout)
 
             if result.returncode == 0 and os.path.exists(output_path):
                 return output_path
+
+            # If GPU failed, try CPU fallback
+            if use_gpu:
+                logger.warning(f"⚠️ GPU processing failed for {os.path.basename(input_path)}, falling back to CPU...")
+                return self._ray_convert_fisheye_to_erp(input_path, output_path, lens_fov, timeout,
+                                                        use_gpu=False, downscale_height=downscale_height)
+
             return None
-        except Exception:
+        except Exception as e:
+            # If GPU failed with exception, try CPU fallback
+            if use_gpu:
+                logger.warning(f"⚠️ GPU processing exception for {os.path.basename(input_path)}: {e}, falling back to CPU...")
+                return self._ray_convert_fisheye_to_erp(input_path, output_path, lens_fov, timeout,
+                                                        use_gpu=False, downscale_height=downscale_height)
             return None
 
     def _ray_downscale_video(self, input_path: str, output_path: str,
@@ -1323,21 +1740,34 @@ class TarInspectionManager:
             result['is_dual_fisheye'] = is_dual
 
             if is_dual:
-                erp_output = os.path.join(output_dir, f"{video_basename}_erp.mp4")
-                logger.info(f"  🔄 [Ray] Converting fisheye to ERP: {video_name}")
+                # Determine if we should do single-pass unwarp+downscale
+                target_height = self.config.downscale_target_height if self.config.enable_video_downscaling else None
 
-                erp_result = self._ray_convert_fisheye_to_erp(current_path, erp_output)
+                if target_height:
+                    # Single-pass: unwarp + downscale together
+                    erp_output = os.path.join(output_dir, f"{video_basename}_erp_{target_height}p.mp4")
+                    logger.info(f"  🚀 [Ray] Single-pass unwarp+downscale to {target_height}p: {video_name}")
+                else:
+                    erp_output = os.path.join(output_dir, f"{video_basename}_erp.mp4")
+                    logger.info(f"  🔄 [Ray] Converting fisheye to ERP: {video_name}")
+
+                erp_result = self._ray_convert_fisheye_to_erp(
+                    current_path, erp_output,
+                    downscale_height=target_height
+                )
 
                 if erp_result:
                     result['erp_converted'] = True
+                    if target_height:
+                        result['downscaled'] = True  # Downscaling was done in same pass
                     current_path = erp_result
                     logger.info(f"  ✅ [Ray] ERP conversion done: {os.path.basename(erp_result)}")
                 else:
                     result['error'] = 'ERP conversion failed'
                     logger.warning(f"  ⚠️  [Ray] ERP conversion failed: {video_name}")
 
-            # Step 2: Downscale if needed
-            if self.config.enable_video_downscaling:
+            # Step 2: Downscale if needed (only if not already done in Step 1)
+            if self.config.enable_video_downscaling and not result.get('downscaled'):
                 if not self._ray_is_video_480p_or_smaller(current_path):
                     downscale_output = os.path.join(
                         output_dir,
@@ -1417,8 +1847,8 @@ class TarInspectionManager:
         @ray.remote(num_cpus=1)
         def process_video_task(video_path: str, output_dir: str,
                                enable_downscaling: bool, target_height: int,
-                               downscale_quality: str) -> Dict:
-            """Ray task to process a single video."""
+                               downscale_quality: str, use_gpu: bool = False) -> Dict:
+            """Ray task to process a single video with single-pass unwarp+downscale optimization."""
             result = {
                 'input_path': video_path,
                 'output_path': video_path,
@@ -1463,42 +1893,55 @@ class TarInspectionManager:
                 # Helper: Check if 480p or smaller
                 def is_small(path):
                     streams = get_streams(path)
-                    return streams and streams[0].get('height', 9999) <= 480
+                    return streams and streams[0].get('height', 9999) <= target_height
 
                 # Step 1: Check for dual-fisheye
                 is_dual, num_streams = is_dual_fisheye(current_path)
                 result['is_dual_fisheye'] = is_dual
 
                 if is_dual:
-                    erp_output = os.path.join(output_dir, f"{video_basename}_erp.mp4")
                     lens_fov = 190
-                    erp_w, erp_h = 3840, 1920
+
+                    # Single-pass optimization: output directly at target resolution if downscaling enabled
+                    if enable_downscaling:
+                        erp_w, erp_h = target_height * 2, target_height  # e.g., 960x480 for 480p
+                        erp_output = os.path.join(output_dir, f"{video_basename}_erp_{target_height}p.mp4")
+                    else:
+                        erp_w, erp_h = 3840, 1920
+                        erp_output = os.path.join(output_dir, f"{video_basename}_erp.mp4")
+
+                    # Build FFmpeg command with optional GPU acceleration
+                    base_cmd = ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error']
+                    if use_gpu:
+                        base_cmd.extend(['-hwaccel', 'cuda'])
 
                     if num_streams >= 2:
                         fc = (f"[0:v:0][0:v:1]hstack[dual];"
                               f"[dual]v360=input=dfisheye:output=equirect:"
                               f"ih_fov={lens_fov}:iv_fov={lens_fov}:w={erp_w}:h={erp_h}[erp];"
                               f"[erp]hflip,vflip")
-                        cmd = ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
-                               '-i', current_path, '-filter_complex', fc,
+                        cmd = base_cmd + ['-i', current_path, '-filter_complex', fc,
                                '-c:v', 'libx264', '-crf', '23', '-preset', 'medium',
+                               '-pix_fmt', 'yuv420p',
                                '-c:a', 'copy', '-movflags', '+faststart', erp_output]
                     else:
                         vf = (f"v360=input=dfisheye:output=equirect:"
                               f"ih_fov={lens_fov}:iv_fov={lens_fov}:w={erp_w}:h={erp_h},"
                               f"hflip,vflip")
-                        cmd = ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
-                               '-i', current_path, '-vf', vf,
+                        cmd = base_cmd + ['-i', current_path, '-vf', vf,
                                '-c:v', 'libx264', '-crf', '23', '-preset', 'medium',
+                               '-pix_fmt', 'yuv420p',
                                '-c:a', 'copy', '-movflags', '+faststart', erp_output]
 
                     r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
                     if r.returncode == 0 and os.path.exists(erp_output):
                         result['erp_converted'] = True
+                        if enable_downscaling:
+                            result['downscaled'] = True  # Downscaling was done in single pass
                         current_path = erp_output
 
-                # Step 2: Downscale if needed
-                if enable_downscaling and not is_small(current_path):
+                # Step 2: Downscale if needed (only for non-fisheye videos or if unwarp didn't include downscale)
+                if enable_downscaling and not result.get('downscaled') and not is_small(current_path):
                     ds_output = os.path.join(
                         output_dir,
                         f"{os.path.splitext(os.path.basename(current_path))[0]}_{target_height}p.mp4"
@@ -1506,9 +1949,13 @@ class TarInspectionManager:
                     quality_map = {'fast': ('veryfast', '28'), 'medium': ('medium', '23'), 'slow': ('slow', '20')}
                     preset, crf = quality_map.get(downscale_quality, ('medium', '23'))
 
-                    cmd = ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
-                           '-i', current_path, '-vf', f'scale=-2:{target_height}',
+                    base_cmd = ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error']
+                    if use_gpu:
+                        base_cmd.extend(['-hwaccel', 'cuda'])
+
+                    cmd = base_cmd + ['-i', current_path, '-vf', f'scale=-2:{target_height}',
                            '-c:v', 'libx264', '-preset', preset, '-crf', crf,
+                           '-pix_fmt', 'yuv420p',
                            '-c:a', 'copy', '-movflags', '+faststart', ds_output]
 
                     r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
@@ -1528,13 +1975,15 @@ class TarInspectionManager:
         result_map = {}
         try:
             futures = []
+            use_gpu = self.config.use_gpu or self.config.ray_use_gpu
             for video_file in video_files:
                 future = process_video_task.remote(
                     video_file['path'],
                     output_dir,
                     self.config.enable_video_downscaling,
                     self.config.downscale_target_height,
-                    self.config.downscale_quality
+                    self.config.downscale_quality,
+                    use_gpu
                 )
                 futures.append(future)
 
@@ -1595,6 +2044,7 @@ class TarInspectionManager:
         report_data = []
         local_tar_path = None
         extraction_path = None
+        upload_successful = False  # Track if uploads completed successfully
 
         try:
             # Step 1: Download TAR file from source (SharePoint or Azure Blob)
@@ -1675,6 +2125,15 @@ class TarInspectionManager:
                     file_info['relative_path']
                 ).replace('\\', '/')  # Ensure forward slashes
 
+                # Check for MP4 corruption BEFORE any processing (unwarp, downscale)
+                is_corrupted = False
+                corruption_error = ''
+                if file_extension in video_extensions:
+                    is_corrupted, corruption_error_msg = self._check_mp4_corruption(file_info['path'])
+                    corruption_error = corruption_error_msg if corruption_error_msg else ''
+                    if is_corrupted:
+                        logger.warning(f"  ⚠️  CORRUPTED VIDEO: {file_name} - {corruption_error}")
+
                 # Check if this is a video that was processed by Ray
                 ray_result = ray_results.get(file_info['path'])
 
@@ -1721,6 +2180,8 @@ class TarInspectionManager:
                                     'individual_file_type': '.mp4',
                                     'is_dual_fisheye': 'NO',
                                     'is_erp_version': 'YES',
+                                    'is_corrupted': 'YES' if is_corrupted else 'NO',
+                                    'corruption_error': corruption_error,
                                     'tar_size_gb': f"{tar_size_gb:.4f}",
                                     'individual_file_size_gb': f"{erp_file_size_gb:.6f}",
                                     'sas_token': sas_token,
@@ -1764,6 +2225,8 @@ class TarInspectionManager:
                                 'individual_file_type': file_extension,
                                 'is_dual_fisheye': 'NO',
                                 'is_erp_version': 'NO',
+                                'is_corrupted': 'YES' if is_corrupted else 'NO',
+                                'corruption_error': corruption_error,
                                 'tar_size_gb': f"{tar_size_gb:.4f}",
                                 'individual_file_size_gb': f"{final_size_gb:.6f}",
                                 'sas_token': sas_token,
@@ -1787,23 +2250,28 @@ class TarInspectionManager:
                     if is_dual_fisheye:
                         logger.info(f"  🎥 DUAL-FISHEYE detected: {file_name}")
 
-                        # STEP 2: Convert to ERP (high-resolution)
-                        file_name_without_ext = os.path.splitext(file_name)[0]
-                        erp_file_name = f"{file_name_without_ext}_erpview.mp4"
-                        erp_video_path = os.path.join(os.path.dirname(file_info['path']), erp_file_name)
+                        # Determine if we should do single-pass unwarp+downscale
+                        target_height = self.config.downscale_target_height if self.config.enable_video_downscaling else None
 
-                        logger.info(f"  🔄 Converting to ERP: {erp_file_name}")
-                        erp_created = self._unwarp_dual_fisheye_to_erp(file_info['path'], erp_video_path)
+                        # STEP 2: Convert to ERP (optionally with downscaling in single pass)
+                        file_name_without_ext = os.path.splitext(file_name)[0]
+                        if target_height:
+                            erp_file_name = f"{file_name_without_ext}_erp_{target_height}p.mp4"
+                            logger.info(f"  🚀 Single-pass unwarp+downscale to {target_height}p: {erp_file_name}")
+                        else:
+                            erp_file_name = f"{file_name_without_ext}_erpview.mp4"
+                            logger.info(f"  🔄 Converting to ERP: {erp_file_name}")
+
+                        erp_video_path = os.path.join(os.path.dirname(file_info['path']), erp_file_name)
+                        erp_created = self._unwarp_dual_fisheye_to_erp(
+                            file_info['path'], erp_video_path,
+                            downscale_height=target_height
+                        )
 
                         if not erp_created:
                             logger.warning(f"  ⚠️  Failed to create ERP video for: {file_name}")
 
-                        # STEP 3: Downscale ONLY the ERP video (not the original fisheye)
-                        if self.config.enable_video_downscaling:
-                            if erp_created and erp_video_path:
-                                downscaled_erp_path = self._downscale_video_if_needed(erp_video_path)
-                                if downscaled_erp_path:
-                                    erp_video_path = downscaled_erp_path
+                        # NOTE: Downscaling was already done in single-pass if target_height was set
                     else:
                         # Normal video - just downscale to 480p
                         if self.config.enable_video_downscaling:
@@ -1837,6 +2305,8 @@ class TarInspectionManager:
                             'individual_file_type': file_extension,
                             'is_dual_fisheye': 'NO',
                             'is_erp_version': 'NO',
+                            'is_corrupted': 'YES' if is_corrupted else 'NO',
+                            'corruption_error': corruption_error,
                             'tar_size_gb': f"{tar_size_gb:.4f}",
                             'individual_file_size_gb': f"{uploaded_file_size_gb:.6f}",
                             'sas_token': sas_token,
@@ -1877,6 +2347,8 @@ class TarInspectionManager:
                                 'individual_file_type': '.mp4',
                                 'is_dual_fisheye': 'NO',
                                 'is_erp_version': 'YES',
+                                'is_corrupted': 'YES' if is_corrupted else 'NO',
+                                'corruption_error': corruption_error,
                                 'tar_size_gb': f"{tar_size_gb:.4f}",
                                 'individual_file_size_gb': f"{erp_file_size_gb:.6f}",
                                 'sas_token': erp_sas_token,
@@ -1916,6 +2388,8 @@ class TarInspectionManager:
                         'individual_file_type': file_extension,
                         'is_dual_fisheye': 'NO',
                         'is_erp_version': 'NO',
+                        'is_corrupted': 'NO',
+                        'corruption_error': '',
                         'tar_size_gb': f"{tar_size_gb:.4f}",
                         'individual_file_size_gb': f"{file_size_gb:.6f}",
                         'sas_token': sas_token,
@@ -1925,31 +2399,43 @@ class TarInspectionManager:
                     })
 
             logger.info(f"✅ Successfully processed {len(report_data)} files from TAR: {tar_filename}")
+            upload_successful = True  # Mark as successful for cleanup decision
 
         except Exception as e:
             logger.error(f"Error processing TAR file {tar_filename}: {e}")
             import traceback
             logger.debug(traceback.format_exc())
+            upload_successful = False
 
         finally:
-            # Step 5: Cleanup (ALWAYS runs, even if errors occur)
-            logger.info("Cleaning up temporary files...")
+            # Step 5: Cleanup based on config settings
+            should_cleanup = self.config.cleanup_enabled and (upload_successful or self.config.cleanup_on_failure)
 
-            # Remove extracted directory
-            if extraction_path and os.path.exists(extraction_path):
-                try:
-                    shutil.rmtree(extraction_path)
-                    logger.info(f"✓ Removed extraction directory: {extraction_path}")
-                except Exception as e:
-                    logger.warning(f"Failed to remove extraction directory {extraction_path}: {e}")
+            if should_cleanup:
+                logger.info("🧹 Cleaning up temporary files (cleanup enabled)...")
 
-            # Remove downloaded TAR file
-            if local_tar_path and os.path.exists(local_tar_path):
-                try:
-                    os.remove(local_tar_path)
-                    logger.info(f"✓ Removed downloaded TAR: {local_tar_path}")
-                except Exception as e:
-                    logger.warning(f"Failed to remove TAR file {local_tar_path}: {e}")
+                # Remove extracted directory
+                if self.config.delete_extraction_after_upload:
+                    if extraction_path and os.path.exists(extraction_path):
+                        try:
+                            shutil.rmtree(extraction_path)
+                            logger.info(f"✓ Removed extraction directory: {extraction_path}")
+                        except Exception as e:
+                            logger.warning(f"Failed to remove extraction directory {extraction_path}: {e}")
+
+                # Remove downloaded TAR file
+                if self.config.delete_tar_after_upload:
+                    if local_tar_path and os.path.exists(local_tar_path):
+                        try:
+                            os.remove(local_tar_path)
+                            logger.info(f"✓ Removed downloaded TAR: {local_tar_path}")
+                        except Exception as e:
+                            logger.warning(f"Failed to remove TAR file {local_tar_path}: {e}")
+            else:
+                if not self.config.cleanup_enabled:
+                    logger.info("ℹ️  Cleanup disabled - keeping temporary files")
+                elif not upload_successful:
+                    logger.info("ℹ️  Upload failed and cleanup_on_failure=false - keeping files for debugging")
 
         return report_data
 

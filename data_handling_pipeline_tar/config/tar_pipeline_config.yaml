@@ -1,13 +1,6 @@
 # =============================================================================
 # UNIFIED TAR PIPELINE CONFIGURATION
 # =============================================================================
-# This config is used by:
-# - tar_orchestrator.py (Steps 1-5)
-# - tar_file_lister.py
-# - tar_upload_pipeline.py
-# - report_tar_state.py
-# - tar_state_file_comparison.py
-# - sharepoint_tar_inspector.py
 
 # =============================================================================
 # PROJECT SETTINGS
@@ -20,8 +13,8 @@ project_id: "oslo_project_2"
 azure_source:
   connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
   container_name: "instavideo"
-  source_prefix: "one-data-platform/hummus_prod/2025-11-30/tar/"
-  project_id: "oslo_project_2"
+  source_prefix: "one-data-platform/hummus_prod/2026-01-05/tar/" # changes everyday
+  project_id: "project_2"
   container_sas_env: ""
 
 # =============================================================================
@@ -66,7 +59,7 @@ local_paths:
   watermark_file: "./local_manifests/watermark.json"
   work_dir: "./work"
   temp_download_dir: "/data/oslo/tar_temp_downloads_inspection"
-  transfer_state_file: "/data/oslo/tar_temp_downloads/tar_transfer_state_production.json"
+  transfer_state_file: "/data/oslo/tar_temp_downloads/tar_transfer_state_production_jan_05.json" # changes everyday
 
 # =============================================================================
 # SUBMISSION SETTINGS
@@ -83,14 +76,14 @@ remote_manifests:
   enabled: true
   connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
   container_name: "submission-summary"
-  prefix: "tar-productionnov30"
+  prefix: "tar-productionjan05" # changes everyday
 
 # =============================================================================
 # LOGGING
 # =============================================================================
 logging:
   level: INFO
-  file: "./logs/tar_upload26.log"
+  file: "./logs/tar_upload_jan05.log"
   max_mb: 10
   backup_count: 5
 
@@ -101,14 +94,14 @@ state_storage:
   enabled: true
   connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
   container_name: "instavideo"
-  prefix: "upload_state_files/production_dec1/tar_statefile_nov30"
+  prefix: "upload_state_files/production_hydra_plus/tar_statefile_jan05" # changes everyday
 
 # =============================================================================
 # STATE TRACKING - Local state tracking
 # =============================================================================
 state_tracking:
   enabled: true
-  local_dir: "/data/oslo/upload_state/tar_inspectiondec1"
+  local_dir: "/data/oslo/upload_state/tar_inspectionjan05" # changes everyday
   backup_enabled: true
   max_daily_entries: 365
   compression_enabled: true
@@ -140,10 +133,10 @@ inspection:
 
   # Target blob prefix for extracted/untarred files
   # Extracted files will be uploaded to: instavideo/<untar_blob_prefix>/<tar_name>/<file_path>
-  untar_blob_prefix: "untar_folder_oslo2/produciton_dec/dec_inspection"
+  untar_blob_prefix: "untar_folder_oslo2/production_jan/jan05_inspection" # Chnage this everyday
 
   # --- RANDOM MODE SETTINGS ---
-  sampling_ratio: 10  # Pick 1 random TAR file per every N files
+  sampling_ratio: 1  # Pick 1 random TAR file per every N files
 
   # --- LIST MODE SETTINGS ---
   tar_file_list:
@@ -155,18 +148,42 @@ inspection:
   # Path to comparison CSV file (auto-populated by orchestrator)
   csv_input_file: ""
   # Number of random TAR files to pick from the CSV for inspection
-  csv_sample_count: 2
+  csv_sample_count: 20
 
   # --- OTHER SETTINGS ---
   sas_token_expiry_days: 365
   temp_extract_dir: "/data/oslo/tar_extractions"
   csv_report_dir: "/data/oslo/inspection_reports/tar"
-  inspection_state_file: "/data/oslo/tar_temp_downloads/tar_inspection_production.json"
+  inspection_state_file: "/data/oslo/tar_temp_downloads/tar_inspection_production_jan05.json" # changes everyday
 
   # Video downscaling settings
   enable_video_downscaling: true
   downscale_target_height: 480
   downscale_quality: "medium"
+
+  # GPU acceleration for video processing (fisheye-to-ERP unwarping)
+  # This setting applies regardless of whether Ray is enabled or disabled
+  use_gpu: true                    # Enable CUDA hardware decode for video unwarping
+                                   # When true: uses FFmpeg -hwaccel cuda for GPU-accelerated decode
+                                   # Encoding uses CPU (libx264) for reliability
+                                   # Falls back to CPU-only if GPU fails
+
+  # --- CLEANUP SETTINGS ---
+  # Delete temporary files after successful upload to save disk space
+  cleanup:
+    enabled: true                  # Enable automatic cleanup after upload
+    delete_tar_after_upload: true  # Delete downloaded TAR file after all its contents are uploaded
+    delete_extraction_after_upload: true  # Delete extracted files after upload
+    cleanup_on_failure: false      # Also cleanup if upload fails (default: keep for debugging)
+
+  # --- AZCOPY DOWNLOAD SETTINGS ---
+  # Use azcopy for faster TAR file downloads (2-4x faster than SDK)
+  # azcopy uses parallel connections and optimized chunking
+  azcopy:
+    enabled: true                  # Use azcopy for downloads (recommended)
+    path: "/usr/local/bin/azcopy"  # Path to azcopy binary
+    concurrency: 32                # Number of parallel connections (higher = faster)
+    block_size_mb: 8               # Block size for transfers in MB
 
   # --- RAY PARALLEL PROCESSING SETTINGS ---
   # Enable Ray for parallel video processing (fisheye-to-ERP, downscaling)
@@ -175,7 +192,10 @@ inspection:
   ray:
     enabled: false                 # Disabled by default for stability (set to true if needed)
     max_parallel: 2                # Number of parallel video processing tasks
-    use_gpu: false                 # Set to true if GPU (CUDA) is available for ffmpeg
+    use_gpu: true                  # Enable CUDA hardware decode for video unwarping
+                                   # When true: uses FFmpeg -hwaccel cuda for GPU-accelerated decode
+                                   # Encoding uses CPU (libx264) for reliability
+                                   # Falls back to CPU-only if GPU fails
 
 # =============================================================================
 # SHAREPOINT CONFIGURATION (only required when input_source: "sharepoint")
@@ -203,7 +223,7 @@ csv_report_storage:
   connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
   container_name: "instavideo"
   # Upload to parent of source_prefix: one-data-platform/hummus_prod/2025-11-28/
-  prefix: "one-data-platform/hummus_prod/2025-11-30/"
+  prefix: "one-data-platform/hummus_prod/2026-01-05/" # changes everyday
 
 # =============================================================================
 # SHAREPOINT REPORT UPLOAD - Upload generated CSV reports to SharePoint

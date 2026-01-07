@@ -687,7 +687,8 @@ class DataPushOrchestrator:
 
         for blob_name, fingerprint, last_modified in to_send:
             logger.info("Processing tar file: %s", blob_name)
-            upload_blob_name = blob_name  # No renaming for tar files
+            # Replace hummus_prod with hydra_plus_prod in blob path for client container
+            upload_blob_name = blob_name.replace("hummus_prod", "hydra_plus_prod")
             metadata_blob_name = upload_blob_name + ".metadata.json"
             tmp_blob_path = str(Path(self.work_dir) / f"{uuid.uuid4().hex}_{Path(blob_name).name}")
             tmp_meta_path = str(Path(self.work_dir) / f"{uuid.uuid4().hex}_{Path(metadata_blob_name).name}")
