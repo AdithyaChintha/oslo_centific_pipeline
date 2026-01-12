@@ -13,7 +13,7 @@ project_id: "oslo_project_2"
 azure_source:
   connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
   container_name: "instavideo"
-  source_prefix: "one-data-platform/hummus_prod/2026-01-05/tar/" # changes everyday
+  source_prefix: "one-data-platform/hummus_prod/2026-01-07/tar/" # changes everyday
   project_id: "project_2"
   container_sas_env: ""
 
@@ -58,8 +58,8 @@ local_paths:
   manifests_dir: "./local_manifests"
   watermark_file: "./local_manifests/watermark.json"
   work_dir: "./work"
-  temp_download_dir: "/data/oslo/tar_temp_downloads_inspection"
-  transfer_state_file: "/data/oslo/tar_temp_downloads/tar_transfer_state_production_jan_05.json" # changes everyday
+  temp_download_dir: "/data/oslo/temp_newupdate_inspection"
+  transfer_state_file: "/data/oslo/tar_temp_downloads/tar_transfer_state_new_jan07.json" # changes everyday
 
 # =============================================================================
 # SUBMISSION SETTINGS
@@ -76,14 +76,14 @@ remote_manifests:
   enabled: true
   connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
   container_name: "submission-summary"
-  prefix: "tar-productionjan05" # changes everyday
+  prefix: "tar-productionjan07" # changes everyday
 
 # =============================================================================
 # LOGGING
 # =============================================================================
 logging:
   level: INFO
-  file: "./logs/tar_upload_jan05.log"
+  file: "./logs/tar_upload_jan07.log"
   max_mb: 10
   backup_count: 5
 
@@ -94,14 +94,14 @@ state_storage:
   enabled: true
   connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
   container_name: "instavideo"
-  prefix: "upload_state_files/production_hydra_plus/tar_statefile_jan05" # changes everyday
+  prefix: "upload_state_files/production_hydra_plus/tar_statefile_jan07" # changes everyday
 
 # =============================================================================
 # STATE TRACKING - Local state tracking
 # =============================================================================
 state_tracking:
   enabled: true
-  local_dir: "/data/oslo/upload_state/tar_inspectionjan05" # changes everyday
+  local_dir: "/data/oslo/upload_state/tar_inspectionjan07" # changes everyday
   backup_enabled: true
   max_daily_entries: 365
   compression_enabled: true
@@ -133,10 +133,10 @@ inspection:
 
   # Target blob prefix for extracted/untarred files
   # Extracted files will be uploaded to: instavideo/<untar_blob_prefix>/<tar_name>/<file_path>
-  untar_blob_prefix: "untar_folder_oslo2/production_jan/jan05_inspection" # Chnage this everyday
+  untar_blob_prefix: "untar_folder_oslo2/production_jan/jan07_new_inspection" # Chnage this everyday
 
   # --- RANDOM MODE SETTINGS ---
-  sampling_ratio: 1  # Pick 1 random TAR file per every N files
+  sampling_ratio: 9999  # Pick 1 random TAR file (high number = only 1 file)
 
   # --- LIST MODE SETTINGS ---
   tar_file_list:
@@ -152,9 +152,9 @@ inspection:
 
   # --- OTHER SETTINGS ---
   sas_token_expiry_days: 365
-  temp_extract_dir: "/data/oslo/tar_extractions"
-  csv_report_dir: "/data/oslo/inspection_reports/tar"
-  inspection_state_file: "/data/oslo/tar_temp_downloads/tar_inspection_production_jan05.json" # changes everyday
+  temp_extract_dir: "/data/oslo/tem_newinspect"
+  csv_report_dir: "/data/oslo/new_inspection"
+  inspection_state_file: "/data/oslo/tar_temp_downloads/tar_inspection_new_jan07.json" # changes everyday
 
   # Video downscaling settings
   enable_video_downscaling: true
@@ -223,7 +223,7 @@ csv_report_storage:
   connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"
   container_name: "instavideo"
   # Upload to parent of source_prefix: one-data-platform/hummus_prod/2025-11-28/
-  prefix: "one-data-platform/hummus_prod/2026-01-05/" # changes everyday
+  prefix: "one-data-platform/hummus_prod/2026-01-07/" # changes everyday
 
 # =============================================================================
 # SHAREPOINT REPORT UPLOAD - Upload generated CSV reports to SharePoint

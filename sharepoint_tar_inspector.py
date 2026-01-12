@@ -832,6 +832,72 @@ class TarInspectionManager:
         logger.info(f"Found {len(extracted_files)} files in extracted directory")
         return extracted_files
 
+    def _build_scenario_mapping(self, extraction_path: str) -> tuple:
+        """
+        Parse all capture.json files and build scenario mapping for duplicate detection.
+
+        Each capture.json contains:
+        - scenarioId: The scenario identifier (e.g., "E00", "E01", "A01")
+        - artifacts: Array of files belonging to this capture (mp4, wav files)
+
+        Args:
+            extraction_path: Path to the extracted TAR contents
+
+        Returns:
+            tuple: (file_to_scenario, duplicate_scenarios)
+            - file_to_scenario: Dict mapping filename to scenarioId
+            - duplicate_scenarios: Set of scenarioIds that appear more than once
+        """
+        file_to_scenario = {}
+        scenario_counts = {}
+
+        # Find all capture.json files
+        capture_json_count = 0
+        for root, dirs, files in os.walk(extraction_path):
+            for filename in files:
+                if filename == 'capture.json':
+                    capture_path = os.path.join(root, filename)
+                    try:
+                        with open(capture_path, 'r', encoding='utf-8') as f:
+                            capture_data = json.load(f)
+
+                        scenario_id = capture_data.get('scenarioId', '')
+
+                        if scenario_id:
+                            # Count this scenario occurrence
+                            scenario_counts[scenario_id] = scenario_counts.get(scenario_id, 0) + 1
+                            capture_json_count += 1
+
+                            # Map artifact files to this scenario
+                            artifacts = capture_data.get('artifacts', [])
+                            for artifact in artifacts:
+                                artifact_file = artifact.get('file', '')
+                                if artifact_file:
+                                    # Extract just the filename from the path
+                                    # e.g., "phases/P02_scenarioRunner/raw/P02_scenarioRunner_c013.mp4" -> "P02_scenarioRunner_c013.mp4"
+                                    artifact_filename = os.path.basename(artifact_file)
+                                    file_to_scenario[artifact_filename] = scenario_id
+
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Failed to parse JSON {capture_path}: {e}")
+                    except Exception as e:
+                        logger.warning(f"Failed to read {capture_path}: {e}")
+
+        # Find duplicate scenarios (scenarioId appears more than once)
+        duplicate_scenarios = {sid for sid, count in scenario_counts.items() if count > 1}
+
+        # Log summary
+        logger.info(f"📋 Scenario Mapping Summary:")
+        logger.info(f"   - Parsed {capture_json_count} capture.json files")
+        logger.info(f"   - Found {len(scenario_counts)} unique scenarios")
+        logger.info(f"   - Mapped {len(file_to_scenario)} artifact files")
+        if duplicate_scenarios:
+            logger.warning(f"   - ⚠️  Found {len(duplicate_scenarios)} DUPLICATE scenarios: {duplicate_scenarios}")
+        else:
+            logger.info(f"   - ✅ No duplicate scenarios found")
+
+        return file_to_scenario, duplicate_scenarios
+
     def _unwarp_dual_fisheye_to_erp(self, input_video_path: str, output_video_path: str,
                                      use_gpu: bool = None, downscale_height: int = None) -> bool:
         """
@@ -1366,6 +1432,8 @@ class TarInspectionManager:
             fieldnames = [
                 'tar_file_name',
                 'individual_file_name',
+                'scenarioID',
+                'isDupScn',
                 'individual_file_full_path',
                 'individual_file_type',
                 'is_dual_fisheye',
@@ -2078,6 +2146,9 @@ class TarInspectionManager:
                 logger.warning(f"No files found in extracted TAR: {tar_filename}")
                 return []
 
+            # Step 3.5: Build scenario mapping for duplicate detection
+            file_to_scenario, duplicate_scenarios = self._build_scenario_mapping(extraction_path)
+
             logger.info(f"Processing {len(extracted_files)} extracted files for upload...")
 
             # Step 4: Upload each file to blob and generate SAS tokens
@@ -2117,6 +2188,10 @@ class TarInspectionManager:
                 file_size_bytes = file_info['size']
                 file_size_gb = file_size_bytes / (1024 ** 3)
                 file_extension = os.path.splitext(file_name)[1].lower() or 'no_extension'
+
+                # Get scenario info for this file (for duplicate detection)
+                scenario_id = file_to_scenario.get(file_name, '')
+                is_dup_scn = 'Y' if scenario_id in duplicate_scenarios else ('N' if scenario_id else '')
 
                 # Construct blob path: untar_folder_oslo2/tar_name/relative_path
                 blob_path = os.path.join(
@@ -2176,6 +2251,8 @@ class TarInspectionManager:
                                 report_data.append({
                                     'tar_file_name': tar_filename,
                                     'individual_file_name': erp_file_name,
+                                    'scenarioID': scenario_id,
+                                    'isDupScn': is_dup_scn,
                                     'individual_file_full_path': erp_relative_path,
                                     'individual_file_type': '.mp4',
                                     'is_dual_fisheye': 'NO',
@@ -2221,6 +2298,8 @@ class TarInspectionManager:
                             report_data.append({
                                 'tar_file_name': tar_filename,
                                 'individual_file_name': final_file_name,
+                                'scenarioID': scenario_id,
+                                'isDupScn': is_dup_scn,
                                 'individual_file_full_path': file_info['relative_path'],
                                 'individual_file_type': file_extension,
                                 'is_dual_fisheye': 'NO',
@@ -2301,6 +2380,8 @@ class TarInspectionManager:
                         report_data.append({
                             'tar_file_name': tar_filename,
                             'individual_file_name': uploaded_file_name,
+                            'scenarioID': scenario_id,
+                            'isDupScn': is_dup_scn,
                             'individual_file_full_path': file_info['relative_path'],
                             'individual_file_type': file_extension,
                             'is_dual_fisheye': 'NO',
@@ -2343,6 +2424,8 @@ class TarInspectionManager:
                             report_data.append({
                                 'tar_file_name': tar_filename,
                                 'individual_file_name': erp_file_name,
+                                'scenarioID': scenario_id,
+                                'isDupScn': is_dup_scn,
                                 'individual_file_full_path': erp_relative_path,
                                 'individual_file_type': '.mp4',
                                 'is_dual_fisheye': 'NO',
@@ -2384,6 +2467,8 @@ class TarInspectionManager:
                     report_data.append({
                         'tar_file_name': tar_filename,
                         'individual_file_name': file_name,
+                        'scenarioID': scenario_id,
+                        'isDupScn': is_dup_scn,
                         'individual_file_full_path': file_info['relative_path'],
                         'individual_file_type': file_extension,
                         'is_dual_fisheye': 'NO',
