@@ -1,7 +1,7 @@
 openai:
   # Provide either api_key here OR set env var name to look up
   # api_key: "sk-..."
-  api_key: ${OPENAI_API_KEY}
+  api_key: "open_api_key"
   containers_api: "https://api.openai.com/v1/training_data/containers"
   submissions_api: "https://api.openai.com/v1/training_data/submissions"
   purpose: "ingestion"
@@ -10,7 +10,9 @@ azure_source:
   connection_string: "DefaultEndpointsProtocol=https;AccountName=oslotestvideo;AccountKey=zOevIegkZjld6ciTY+alA+YkzZ2gdAWVP7rkuhty5NAZ67AtiBB3fRTaa+eE3UbqhgwHZvWkOM0L+ASt4zCx6g==;EndpointSuffix=core.windows.net"   # env var name containing source connection string
   container_name: "instavideo"                  # source container name
   source_prefix: "one-data-platform/"
-  home_id: "63"                 # optional prefix to limit processed blobs
+  transfer_by: "excel"  #excel or home_id
+  home_id: "63"
+  excel_path: "/home/vision_ai_adm/code/oslo/hummus_updated_branch/data_handling_to_client/Ready for transfer folders.xlsx"                 # optional prefix to limit processed blobs
   # Optional source container SAS (for azcopy mode). Provide env var name or literal (not recommended)
   container_sas_env: ""        # optional: env var name that holds source container SAS URL
   # container_sas: "https://...<sas>"          # optional: avoid storing SAS in file for security
@@ -57,7 +59,7 @@ state_storage:
   prefix: "upload_state_files"                           # Optional: organize under prefix
 
 state_tracking:
-  enabled: true
+  enabled: false
   local_dir: "./upload_state"
   backup_enabled: true
   max_daily_entries: 365  # Keep 1 year of daily data
@@ -65,9 +67,10 @@ state_tracking:
 
 
 renaming:
-  enabled: true
+  enabled: false
   mapping_file: "/home/nvcoe_admin/adithya/adithya2/insta360-video-activity-segmentation/data_handling_to_client/new_blob_names.ods"
   sheet_name:  "Sheet1"
   old_column: "old blob name"
   new_column: "new blob name"
   match_mode: "auto"
+  skip_not_found: true

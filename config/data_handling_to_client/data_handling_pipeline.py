@@ -34,11 +34,11 @@ from azure.storage.filedatalake import DataLakeFileClient
 from azure.core.exceptions import ResourceNotFoundError, AzureError
 from dotenv import load_dotenv
 from urllib.parse import urlparse, urlunparse, quote
-from data_handling_to_client.utils import (
+from utils import (
     now_utc, now_iso, atomic_write_json, ensure_dir,
     normalize_content_md5, parse_iso_to_utc, read_json_if_exists
 )
-from data_handling_to_client.state_manager import (
+from state_manager import (
     StateStorageManager, EnhancedStateStore, ProcessingSession,
     VideoFingerprintManager, VideoProcessingResult
 )
@@ -146,6 +146,31 @@ def load_renaming_map_from_ods(mapping_file: str, sheet_name, old_col: str, new_
             mp[k] = v
     return mp
 
+def load_media_blob_names_from_excel(excel_path: str) -> set:
+    """
+    Load allowed media blob names from an Excel file.
+    Assumes a column named 'blob_name' exists.
+    """
+    from pathlib import Path
+    import pandas as pd
+
+    p = Path(excel_path)
+    if not p.exists():
+        raise FileNotFoundError(f"Excel file not found: {excel_path}")
+    if p.stat().st_size == 0:
+        raise ValueError(f"Excel file is empty: {excel_path}")
+
+    df = pd.read_excel(excel_path, engine="openpyxl")
+    cols = [str(c).strip() for c in df.columns]
+    if 'blob_name' not in cols:
+        raise ValueError(f"Excel must have a column named 'blob_name'. Found: {cols}")
+
+    blob_names = set()
+    for _, row in df.iterrows():
+        blob_name = str(row['blob_name']).strip()
+        if blob_name:
+            blob_names.add(blob_name)
+    return blob_names
 
 # -------------------------
 # Config loader
@@ -487,7 +512,7 @@ class DataPushOrchestrator:
         self.cfg = cfg
 
         # OpenAI API key
-        self.openai_key = os.getenv('OPENAI_API_KEY')
+        self.openai_key = "open_ai"
         if not self.openai_key:
             raise SystemExit("OpenAI API key not found in config or environment")
 
@@ -501,7 +526,11 @@ class DataPushOrchestrator:
         # source SAS
         self.source_sas = cfg.get("azure_source", "container_sas") or os.getenv(cfg.get("azure_source", "container_sas_env", default=""))
         self.source_prefix = cfg.get("azure_source", "source_prefix", default=None)
-        self.home_id = cfg.get("azure_source", "home_id")
+        self.transfer_by = cfg.get("azure_source", "transfer_by", default="excel")
+        if  self.transfer_by=="home_id":
+            self.home_id = cfg.get("azure_source", "home_id")
+        elif self.transfer_by=="excel":
+            self.excel_path = cfg.get("azure_source", "excel_path")
         
 
 
@@ -552,8 +581,11 @@ class DataPushOrchestrator:
             self.state_storage = None
         # helpers (watermark store uses remote_manifests)
         # self.watermark_store = WatermarkStore(self.watermark_file, remote_manifests=self.remote_manifests)
-        self.state_store = EnhancedStateStore(self.home_id, self.state_dir, state_storage=self.state_storage)
-        self._validate_state_configuration()
+        if self.transfer_by=="home_id":
+            self.state_store = EnhancedStateStore(self.home_id, self.state_dir, state_storage=self.state_storage)
+            self._validate_state_configuration()
+        else:
+             self.state_store = None
         # Testing configuration
         test_config = cfg.get("testing", default={})
         self.testing_enabled = bool(test_config.get("enabled", False))
@@ -825,16 +857,34 @@ class DataPushOrchestrator:
             has_home = any(p.startswith(self.home_id) for p in parent_folders)
             is_media = filename.lower().endswith((".insv", ".wav"))
             return has_home and is_media
-        
-        target_blobs = [b for b in all_blobs if is_target(b["name"])]
+        if self.transfer_by=="home_id":
+            target_blobs = [b for b in all_blobs if is_target(b["name"])]
+        elif self.transfer_by=="excel":
+            # Load allowed media blob names from Excel
+            allowed_blobs = load_media_blob_names_from_excel(self.excel_path)
+            
+            target_blobs = [b for b in all_blobs if any(folder in b["name"] for folder in allowed_blobs)]
 
+            target_blob_names = set(b["name"] for b in target_blobs)
+            
+            missing_blobs = allowed_blobs - target_blob_names
+            if missing_blobs:
+                logger.warning("The following media blobs listed in Excel were not found in source container:")
+                for mb in missing_blobs:
+                    logger.warning("  %s", mb)
+            
         # Apply safety window (keep existing logic)
         safe_blobs = []
-        for b in target_blobs:
-            if self.is_blob_older_than_safety_window(b.get("last_modified")):
-                safe_blobs.append(b)
+        for b in target_blob_names:
+            blob = next((blob for blob in all_blobs if blob["name"] == b), None)
+            if not blob:
+                logger.warning("Blob %s not found in all_blobs", b)
+                continue
+            if self.is_blob_older_than_safety_window(blob.get("last_modified")):
+                safe_blobs.append(blob)
             else:
-                logger.info("SKIP (safety window) %s", b["name"])
+                logger.info("SKIP (safety window) %s", blob["name"])
+        
         
         metadata_validated_blobs = []
         for b in safe_blobs:
@@ -843,14 +893,27 @@ class DataPushOrchestrator:
                 logger.info("METADATA FOUND for %s", b["name"])
             else:
                 logger.warning("SKIP (no metadata) %s", b["name"])
+
+            
         # Convert to format expected by state store
         candidates = []
         for b in metadata_validated_blobs:
             fingerprint = VideoFingerprintManager.create_fingerprint(b)
             candidates.append((b["name"], fingerprint, b.get("last_modified")))
-
+        
         # Use state store to filter out already processed videos
-        videos_to_process = self.state_store.get_videos_to_process(candidates)
+        if not self.state_store:
+            videos_to_process = candidates
+        else:
+            videos_to_process = self.state_store.get_videos_to_process(candidates)
+        # print("all_blobs:", [b["name"] for b in all_blobs])
+        # print("Allowed blobs from Excel:", allowed_blobs)
+        # print("filtered target_blobs:", [b["name"] for b in target_blobs])
+        # print("target_blob_names:", target_blob_names)
+        # print("safe_blobs:", safe_blobs)
+        # print("metadata_validated_blobs:", metadata_validated_blobs)
+        # print("candidates:", candidates)
+        # print("videos_to_process:", videos_to_process)
 
         logger.info("Selected %d videos for processing (out of %d total)",
                 len(videos_to_process), len(target_blobs))
@@ -1026,6 +1089,9 @@ class DataPushOrchestrator:
     def run_once(self) -> None:
         logger.info("Starting data push run (with remote watermark).")
         to_send = self.blobs_to_send()
+
+        total_blobs = len(to_send)
+        print(f"Total blobs selected for sending: {total_blobs}")
         if not to_send:
             print("No blobs eligible for sending. Exiting.")
             logger.info("No blobs eligible for sending. Exiting.")
@@ -1046,7 +1112,8 @@ class DataPushOrchestrator:
         logger.info("Partner container created. Masked SAS: %s", mask_sas(partner_container_sas))
 
         # Initialize processing session
-        session = ProcessingSession(self.home_id, container_id)
+        if self.transfer_by=="home_id":
+            session = ProcessingSession(self.home_id, container_id)
         # optional quick test
         try:
             ok, msg = self.uploader.test_upload_small_file(partner_container_sas)
@@ -1068,7 +1135,8 @@ class DataPushOrchestrator:
         # Pre-generate container SAS if possible
         if not self.source_sas:
             self.ensure_container_sas()
-
+        num_original_uploaded=0
+        metadata_uploaded=0
         for blob_name, fingerprint, last_modified in to_send:
             logger.info("Processing: %s", blob_name)
             # metadata_blob_name = blob_name + ".metadata.json"
@@ -1164,6 +1232,7 @@ class DataPushOrchestrator:
                             self.copy_blob_via_azcopy(source_for_azcopy, partner_container_sas,
                                                     src_blob_name=blob_name,
                                                     dest_blob_name=upload_blob_name)
+                            num_original_uploaded += 1
 
 
                             # 2) ALWAYS generate fresh metadata locally and upload via partner SAS
@@ -1172,6 +1241,7 @@ class DataPushOrchestrator:
                             self.uploader.upload_file_to_partner_using_sas(
                                 partner_container_sas, metadata_blob_name, tmp_meta_path
                             )
+                            metadata_uploaded += 1
 
                             # Record upload completion timing
                             video_result.upload_end_time = now_iso()
@@ -1184,7 +1254,8 @@ class DataPushOrchestrator:
                                 logger.warning("Could not calculate upload duration for %s: %s", blob_name, e)
                             
                             video_result.upload_status = "success"
-                            video_result.metadata_uploaded = True   
+                            video_result.metadata_uploaded = True  
+                             
                         except subprocess.CalledProcessError as e:
                             logger.error("azcopy command failed for %s: %s", blob_name, e)
                             video_result.error_details = f"azcopy failed: {str(e)}"
@@ -1235,8 +1306,8 @@ class DataPushOrchestrator:
                             os.remove(p)
                     except Exception:
                         pass
-
-            session.add_video_result(video_result.to_dict())                
+            if self.transfer_by=="home_id":
+                session.add_video_result(video_result.to_dict())                
             submission_manifest["files"].append({
                 "blob_name": blob_name,
                 "upload_blob_name": upload_blob_name,
@@ -1249,8 +1320,9 @@ class DataPushOrchestrator:
             #     processed.append((last_mod_iso, blob_name))
 
         # persist submission manifest remotely or locally
-        session.mark_completed()
-        self.state_store.record_processing_session(session.get_session_info())
+        if self.transfer_by=="home_id":
+            session.mark_completed()
+            self.state_store.record_processing_session(session.get_session_info())
 
         manifest_blob_name = f"{now_utc().strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex}.json"
         manifest_uploaded = False
@@ -1335,17 +1407,22 @@ class DataPushOrchestrator:
         # wm_ts, wm_blob = self.watermark_store.get_watermark()
         # print(f"Advanced watermark: {wm_ts} , last_blob: {wm_blob}")
         # print("=" * 72 + "\n")
-        successful_videos = [v for v in session.videos if v.get("upload_status") == "success"]
-        failed_videos = [v for v in session.videos if v.get("upload_status") != "success"]
+        if self.transfer_by=="home_id":
+            successful_videos = [v for v in session.videos if v.get("upload_status") == "success"]
+            failed_videos = [v for v in session.videos if v.get("upload_status") != "success"]
 
-        print(f"\nProcessing Session Complete:")
-        print(f"Session ID: {session.session_id}")
-        print(f"Container ID: {container_id}")
-        print(f"Total videos: {len(session.videos)}")
-        print(f"Successful: {len(successful_videos)}")
-        print(f"Failed: {len(failed_videos)}")
+            print(f"\nProcessing Session Complete:")
+            print(f"Session ID: {session.session_id}")
+            print(f"Container ID: {container_id}")
+            print(f"Total videos: {len(session.videos)}")
+            print(f"Successful: {len(successful_videos)}")
+            print(f"Failed: {len(failed_videos)}")
 
-        logger.info("Run finished with enhanced state tracking.")
+            logger.info("Run finished with enhanced state tracking.")
+        logger.info("Run summary:")   
+        logger.info("Total videos selected for processing: %d", total_blobs)
+        logger.info("Total videos processed: %d", num_original_uploaded)
+        logger.info("Total metadata files uploaded: %d", metadata_uploaded)
         logger.info("Run finished.")
 
 # -------------------------
@@ -1363,3 +1440,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
